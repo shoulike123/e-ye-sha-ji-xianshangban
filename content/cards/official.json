@@ -1,0 +1,51 @@
+{
+  "decks": {
+    "search": [
+      { "id": "sk_key_1", "name": "钥匙", "type": "search", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "sk_key_2", "name": "钥匙", "type": "search", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "sk_key_3", "name": "钥匙", "type": "search", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "sk_key_4", "name": "钥匙", "type": "search", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "sk_key_5", "name": "钥匙", "type": "search", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "sk_axe", "name": "手斧", "type": "search", "text": "+1 防御值，或额外行动：移除你所在地点的一个封堵。", "effects": [{ "op": "gainItem", "itemId": "axe", "amount": 1 }] },
+      { "id": "sk_lime", "name": "石灰粉", "type": "search", "text": "+2 防御值。", "effects": [{ "op": "gainItem", "itemId": "lime", "amount": 1 }] },
+      { "id": "sk_whiskey", "name": "威士忌酒瓶", "type": "search", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
+      { "id": "sk_herb", "name": "草药", "type": "search", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "sk_toolbox_1", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
+      { "id": "sk_toolbox_2", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] }
+    ],
+    "discovery": [
+      { "id": "dc_key_1", "name": "钥匙", "type": "discovery", "text": "立刻将本卡放入钥匙立牌。也可以不要，改留另一张。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "dc_key_2", "name": "钥匙", "type": "discovery", "text": "立刻将本卡放入钥匙立牌。也可以不要，改留另一张。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
+      { "id": "dc_whiskey_1", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
+      { "id": "dc_whiskey_2", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
+      { "id": "dc_whiskey_3", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
+      { "id": "dc_herb_1", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_herb_2", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_herb_3", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_ammo_1", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },
+      { "id": "dc_ammo_2", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },
+      { "id": "dc_ammo_3", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },
+      { "id": "dc_lime", "name": "石灰粉", "type": "discovery", "text": "+2 防御值。", "effects": [{ "op": "gainItem", "itemId": "lime", "amount": 1 }] },
+      { "id": "dc_longsword", "name": "长剑", "type": "discovery", "text": "+3 防御值。使用时杀手抽 1 张。可反复使用。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "longsword", "amount": 1 }] },
+      { "id": "dc_amulet", "name": "古代护符", "type": "discovery", "text": "向杀手出示，防止一次非遭遇伤害。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "amulet", "amount": 1 }] },
+      { "id": "dc_shortsword", "name": "短剑", "type": "discovery", "text": "+1 防御值。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "shortsword", "amount": 1 }] },
+      { "id": "dc_revolver_1", "name": "左轮手枪", "type": "discovery", "text": "可以用它射出子弹。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "revolver", "amount": 1 }] },
+      { "id": "dc_revolver_2", "name": "左轮手枪", "type": "discovery", "text": "可以用它射出子弹。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "revolver", "amount": 1 }] },
+      { "id": "dc_axe_1", "name": "手斧", "type": "discovery", "text": "+1 防御值，或额外行动：移除你所在地点的一个封堵。", "effects": [{ "op": "gainItem", "itemId": "axe", "amount": 1 }] },
+      { "id": "dc_axe_2", "name": "手斧", "type": "discovery", "text": "+1 防御值，或额外行动：移除你所在地点的一个封堵。", "effects": [{ "op": "gainItem", "itemId": "axe", "amount": 1 }] },
+      { "id": "dc_axe_3", "name": "手斧", "type": "discovery", "text": "+1 防御值，或额外行动：移除你所在地点的一个封堵。", "effects": [{ "op": "gainItem", "itemId": "axe", "amount": 1 }] },
+      { "id": "dc_firecracker", "name": "爆竹", "type": "discovery", "text": "额外行动：在所有地点发出响声（用爆竹标记代替真实位置）。", "effects": [{ "op": "gainItem", "itemId": "firecracker", "amount": 1 }] },
+      { "id": "dc_toolbox_1", "name": "工具箱", "type": "discovery", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
+      { "id": "dc_toolbox_2", "name": "工具箱", "type": "discovery", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
+      { "id": "dc_map", "name": "秘密地图", "type": "discovery", "text": "集齐 5 把钥匙后，可选择从隐藏出口逃离。", "effects": [{ "op": "gainItem", "itemId": "map", "amount": 1 }] },
+      { "id": "dc_sedative_1", "name": "镇静剂", "type": "discovery", "text": "额外行动：移除你所有的恐惧。", "effects": [{ "op": "gainItem", "itemId": "sedative", "amount": 1 }] },
+      { "id": "dc_sedative_2", "name": "镇静剂", "type": "discovery", "text": "额外行动：移除你所有的恐惧。", "effects": [{ "op": "gainItem", "itemId": "sedative", "amount": 1 }] },
+      { "id": "dc_sedative_3", "name": "镇静剂", "type": "discovery", "text": "额外行动：移除你所有的恐惧。", "effects": [{ "op": "gainItem", "itemId": "sedative", "amount": 1 }] },
+      { "id": "dc_flashlight", "name": "手电筒", "type": "discovery", "text": "特殊行动：通过一个秘密通道。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "flashlight", "amount": 1 }] },
+      { "id": "dc_adren_1", "name": "肾上腺素", "type": "discovery", "text": "额外行动：移动 1 步。", "effects": [{ "op": "gainItem", "itemId": "adrenaline", "amount": 1 }] },
+      { "id": "dc_adren_2", "name": "肾上腺素", "type": "discovery", "text": "额外行动：移动 1 步。", "effects": [{ "op": "gainItem", "itemId": "adrenaline", "amount": 1 }] },
+      { "id": "dc_adren_3", "name": "肾上腺素", "type": "discovery", "text": "额外行动：移动 1 步。", "effects": [{ "op": "gainItem", "itemId": "adrenaline", "amount": 1 }] },
+      { "id": "dc_trap", "name": "陷阱零件", "type": "discovery", "text": "特殊行动：在你的地点放置陷阱（下次攻击 +2 防御）。", "effects": [{ "op": "gainItem", "itemId": "trap", "amount": 1 }] }
+    ]
+  }
+}

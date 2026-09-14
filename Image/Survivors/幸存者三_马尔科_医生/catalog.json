@@ -1,0 +1,24 @@
+{
+  "id": "survivor3",
+  "name": "马尔科·卡尔文",
+  "nameEn": "Marco Calvin",
+  "role": "医生",
+  "folder": "幸存者三_马尔科_医生",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "well_prepared",
+      "name": "万全准备",
+      "text": "游戏开始时拥有马尔科的医药包"
+    },
+    {
+      "id": "resourceful",
+      "name": "足智多谋",
+      "text": "特殊行动：从弃牌堆获得一个肾上腺素或一个镇静剂"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "survivor2",
+  "name": "约翰逊·尼斯佩尔",
+  "nameEn": "Johnson Nispel",
+  "role": "工程师",
+  "folder": "幸存者二_约翰逊_工程师",
+  "inventorySlots": 6,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "large_backpack",
+      "name": "大号背包",
+      "text": "你的物品栏可以拥有最多 6 个物品"
+    },
+    {
+      "id": "engineering_expert",
+      "name": "工程专家",
+      "text": "当你使用工具箱修理无线电时，额外+1 修理进度"
+    }
+  ]
+}

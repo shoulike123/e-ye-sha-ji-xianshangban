@@ -1,0 +1,36 @@
+{
+  "faces": [
+    {
+      "file": "face_1_1.png",
+      "value": 1
+    },
+    {
+      "file": "face_2_0.png",
+      "value": 0
+    },
+    {
+      "file": "face_3_1.png",
+      "value": 1
+    },
+    {
+      "file": "face_4_1.png",
+      "value": 1
+    },
+    {
+      "file": "face_5_0.png",
+      "value": 0
+    },
+    {
+      "file": "face_6_3.png",
+      "value": 3
+    }
+  ],
+  "values": [
+    1,
+    0,
+    1,
+    1,
+    0,
+    3
+  ]
+}

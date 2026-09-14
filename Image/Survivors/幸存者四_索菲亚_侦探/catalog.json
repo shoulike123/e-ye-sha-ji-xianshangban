@@ -1,0 +1,24 @@
+{
+  "id": "survivor4",
+  "name": "索菲亚·斯科特",
+  "nameEn": "Sophia Scott",
+  "role": "侦探",
+  "folder": "幸存者四_索菲亚_侦探",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "nimble",
+      "name": "机敏灵巧",
+      "text": "游戏开始时拥有索菲亚的相机"
+    },
+    {
+      "id": "observant",
+      "name": "观察入微",
+      "text": "特殊行动：移动通过秘密通道（如果你拥有手电筒，则本行动变为额外行动）"
+    }
+  ]
+}

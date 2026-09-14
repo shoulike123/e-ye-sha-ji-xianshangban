@@ -1,0 +1,154 @@
+{
+  "characters": [
+    {
+      "id": "killer1",
+      "name": "屠夫",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 5,
+      "description": "起始力量 5。等级 3 解锁「残酷暴怒」。牌组：追逐×3、感知×2、疯狂×1、留下!!!!×1、设障×3、链锯轰鸣×2。",
+      "skills": []
+    },
+    {
+      "id": "killer2",
+      "name": "幽魂",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 2,
+      "description": "起始力量 2。等级 4 解锁「生命吸取」。牌组：追逐×2、消失×2、尖叫×2、感知×3、惊吓之迹×1、呼啸而过×2。",
+      "skills": []
+    },
+    {
+      "id": "killer3",
+      "name": "谋杀者",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 4,
+      "description": "起始力量 4。等级 3 解锁「死亡盛放」。牌组：追逐×4、尾随×3、谋杀预告×1、感知×1、潜藏威胁×1、逻辑推理×2。",
+      "skills": []
+    },
+    {
+      "id": "survivor1",
+      "name": "安娜·库布里克",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "学生。低调行事：对【感知】隐形。小心谨慎：搜索物品不会发出响声（钥匙与翻手提箱仍可能响）。",
+      "skills": [
+        {
+          "id": "low_profile",
+          "name": "低调行事",
+          "trigger": "passive",
+          "text": "你对【感知】隐形",
+          "effects": []
+        },
+        {
+          "id": "cautious",
+          "name": "小心谨慎",
+          "trigger": "passive",
+          "text": "你搜索物品时不会发出响声。翻手提箱仍按牌面响声标记结算。",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor2",
+      "name": "约翰逊·尼斯佩尔",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 6,
+      "description": "工程师。大号背包：物品栏最多 6 格。工程专家：用工具箱修理时额外 +1 进度。",
+      "skills": [
+        {
+          "id": "large_backpack",
+          "name": "大号背包",
+          "trigger": "passive",
+          "text": "你的物品栏可以拥有最多 6 个物品",
+          "effects": []
+        },
+        {
+          "id": "engineering_expert",
+          "name": "工程专家",
+          "trigger": "passive",
+          "text": "当你使用工具箱修理无线电时，额外+1 修理进度",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor3",
+      "name": "马尔科·卡尔文",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "医生。万全准备：开局拥有马尔科的医药包。足智多谋：可从弃牌堆取肾上腺素或镇静剂。",
+      "skills": [
+        {
+          "id": "well_prepared",
+          "name": "万全准备",
+          "trigger": "passive",
+          "text": "游戏开始时拥有马尔科的医药包",
+          "effects": []
+        },
+        {
+          "id": "resourceful",
+          "name": "足智多谋",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "特殊行动：从弃牌堆获得一个肾上腺素或一个镇静剂",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor4",
+      "name": "索菲娅·斯科特",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "侦探。机敏灵巧：开局拥有索菲娅的相机。观察入微：可走秘密通道。",
+      "skills": [
+        {
+          "id": "nimble",
+          "name": "机敏灵巧",
+          "trigger": "passive",
+          "text": "游戏开始时拥有索菲娅的相机",
+          "effects": []
+        },
+        {
+          "id": "observant",
+          "name": "观察入微",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "特殊行动：移动通过秘密通道（如果你拥有手电筒，则本行动变为额外行动）",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor5",
+      "name": "威廉·霍伯",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "运动员。坚韧不拔：未用物品加防时防御 +1。短跑冲刺：特殊行动移动 3（目的地响声）。",
+      "skills": [
+        {
+          "id": "tenacity",
+          "name": "坚韧不拔",
+          "trigger": "passive",
+          "text": "当你未使用任何物品来增强你的防御时，你的防御值+1",
+          "effects": []
+        },
+        {
+          "id": "sprint",
+          "name": "短跑冲刺",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "特殊行动：【移动】X3（在目的地触发警报）",
+          "effects": [{ "op": "move", "value": 3 }, { "op": "noise" }]
+        }
+      ]
+    }
+  ]
+}

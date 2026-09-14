@@ -1,0 +1,812 @@
+{
+  "id": "cabin",
+  "name": "木屋图二",
+  "width": 1000,
+  "height": 500,
+  "backgrounds": {
+    "survivor": "/Image/Maps/求生者2.jpg",
+    "killer": "/Image/Maps/杀手2.jpg"
+  },
+  "rooms": [
+    {
+      "id": "R1",
+      "name": "接待处",
+      "nameKiller": "接待处",
+      "x": 292.6,
+      "y": 433,
+      "tags": [
+        "entrance"
+      ]
+    },
+    {
+      "id": "R2",
+      "name": "会议中心",
+      "nameKiller": "会议中心",
+      "x": 395.2,
+      "y": 400,
+      "tags": []
+    },
+    {
+      "id": "R3",
+      "name": "娱乐室",
+      "nameKiller": "娱乐室",
+      "x": 473.7,
+      "y": 281.2,
+      "tags": [
+        "searchable"
+      ]
+    },
+    {
+      "id": "R4",
+      "name": "102号房",
+      "nameKiller": "102号房",
+      "x": 346.7,
+      "y": 269.9,
+      "tags": [
+        "special-fork"
+      ]
+    },
+    {
+      "id": "R5",
+      "name": "101号房",
+      "nameKiller": "101号房",
+      "x": 344.2,
+      "y": 197.9,
+      "tags": [
+        "special-book"
+      ]
+    },
+    {
+      "id": "G1",
+      "name": "西露营地",
+      "nameKiller": "野营营地",
+      "x": 229.9,
+      "y": 354.4,
+      "tags": []
+    },
+    {
+      "id": "G2",
+      "name": "森林小径",
+      "nameKiller": "南林小道",
+      "x": 172.5,
+      "y": 259.7,
+      "tags": []
+    },
+    {
+      "id": "G3",
+      "name": "旧采石场",
+      "nameKiller": "旧采石场",
+      "x": 119.9,
+      "y": 122.2,
+      "tags": [
+        "special-spiral"
+      ]
+    },
+    {
+      "id": "G4",
+      "name": "小屋",
+      "nameKiller": "小屋",
+      "x": 219.2,
+      "y": 136.7,
+      "tags": [
+        "searchable"
+      ]
+    },
+    {
+      "id": "G5",
+      "name": "北方小径",
+      "nameKiller": "北方小道",
+      "x": 342.7,
+      "y": 87,
+      "tags": []
+    },
+    {
+      "id": "B1",
+      "name": "东露营地",
+      "nameKiller": "东露营地",
+      "x": 573.9,
+      "y": 413.8,
+      "tags": []
+    },
+    {
+      "id": "B2",
+      "name": "湖景小屋",
+      "nameKiller": "湖景小屋",
+      "x": 707.6,
+      "y": 413.9,
+      "tags": [
+        "searchable"
+      ]
+    },
+    {
+      "id": "B3",
+      "name": "湖岸",
+      "nameKiller": "湖岸",
+      "x": 669.2,
+      "y": 303.6,
+      "tags": [
+        "repairable"
+      ]
+    },
+    {
+      "id": "B4",
+      "name": "篝火区",
+      "nameKiller": "篝火区",
+      "x": 576.4,
+      "y": 222.6,
+      "tags": [
+        "special-hammer"
+      ]
+    },
+    {
+      "id": "B5",
+      "name": "松林小径",
+      "nameKiller": "松林小径",
+      "x": 512,
+      "y": 110.7,
+      "tags": [
+        "hiddenExit"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "R1",
+      "to": "R2",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 287.2,
+          "y": 393.2,
+          "w": 50.6,
+          "h": 25.3,
+          "rotation": 29.5
+        },
+        "killer": {
+          "x": 281.2,
+          "y": 390.9,
+          "w": 55.9,
+          "h": 28,
+          "rotation": 31.3
+        }
+      }
+    },
+    {
+      "from": "R2",
+      "to": "R3",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 404.1,
+          "y": 321.2,
+          "w": 46.6,
+          "h": 23.4,
+          "rotation": 28.3
+        },
+        "killer": {
+          "x": 404,
+          "y": 317.4,
+          "w": 48.5,
+          "h": 24.2,
+          "rotation": 29.2
+        }
+      }
+    },
+    {
+      "from": "R3",
+      "to": "R4",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 375.8,
+          "y": 269.8,
+          "w": 51.4,
+          "h": 25.7,
+          "rotation": 89.7
+        },
+        "killer": {
+          "x": 379.5,
+          "y": 269.8,
+          "w": 46,
+          "h": 23.1,
+          "rotation": 88.7
+        }
+      }
+    },
+    {
+      "from": "R1",
+      "to": "G1",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 224.3,
+          "y": 401.6,
+          "w": 47.8,
+          "h": 23.9,
+          "rotation": -57.8
+        },
+        "killer": {
+          "x": 224.1,
+          "y": 398.7,
+          "w": 51.3,
+          "h": 25.7,
+          "rotation": 122.4
+        }
+      }
+    },
+    {
+      "from": "R3",
+      "to": "B4",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 473.9,
+          "y": 197.5,
+          "w": 45.5,
+          "h": 22.8,
+          "rotation": 88.9
+        },
+        "killer": {
+          "x": 473.5,
+          "y": 197.4,
+          "w": 50.1,
+          "h": 25.1,
+          "rotation": 90.1
+        }
+      }
+    },
+    {
+      "from": "G4",
+      "to": "G5",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 264.2,
+          "y": 108.6,
+          "w": 48,
+          "h": 24,
+          "rotation": 59.5
+        },
+        "killer": {
+          "x": 261.5,
+          "y": 107.7,
+          "w": 51.7,
+          "h": 25.8,
+          "rotation": 59.8
+        }
+      }
+    },
+    {
+      "from": "B2",
+      "to": "B3",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 637.6,
+          "y": 381.5,
+          "w": 48.4,
+          "h": 24.2,
+          "rotation": -76.4
+        },
+        "killer": {
+          "x": 634.8,
+          "y": 380.1,
+          "w": 56.1,
+          "h": 28.1,
+          "rotation": 102.3
+        }
+      }
+    },
+    {
+      "from": "G1",
+      "to": "G2",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "G2",
+      "to": "G3",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "G3",
+      "to": "G4",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 171.3,
+          "y": 92.6,
+          "w": 51.7,
+          "h": 25.8,
+          "rotation": -33.7
+        },
+        "killer": {
+          "x": 169.5,
+          "y": 91.9,
+          "w": 49.6,
+          "h": 24.8,
+          "rotation": -31
+        }
+      }
+    },
+    {
+      "from": "B1",
+      "to": "B4",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "B3",
+      "to": "B4",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "B4",
+      "to": "B5",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "G5",
+      "to": "B5",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 376.3,
+          "y": 79,
+          "w": 51,
+          "h": 25.5,
+          "rotation": 89.5
+        },
+        "killer": {
+          "x": 378.4,
+          "y": 78.8,
+          "w": 47.8,
+          "h": 23.9,
+          "rotation": 89.5
+        }
+      }
+    },
+    {
+      "from": "R5",
+      "to": "G2",
+      "bidirectional": true,
+      "pathType": "killer"
+    },
+    {
+      "from": "B1",
+      "to": "B3",
+      "bidirectional": true,
+      "pathType": "dash"
+    },
+    {
+      "from": "G2",
+      "to": "G4",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 159,
+          "y": 166.5,
+          "w": 49.7,
+          "h": 24.8,
+          "rotation": 238.8
+        },
+        "killer": {
+          "x": 159.5,
+          "y": 166.5,
+          "w": 47.7,
+          "h": 23.9,
+          "rotation": 236.6
+        }
+      }
+    },
+    {
+      "from": "R5",
+      "to": "R3",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 377.6,
+          "y": 197.4,
+          "w": 49.4,
+          "h": 24.7,
+          "rotation": 89.4
+        },
+        "killer": {
+          "x": 378.6,
+          "y": 197.4,
+          "w": 45.4,
+          "h": 22.7,
+          "rotation": 91.3
+        }
+      }
+    },
+    {
+      "from": "R2",
+      "to": "B1",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 491.8,
+          "y": 414.6,
+          "w": 50.5,
+          "h": 25.3,
+          "rotation": 121.1
+        },
+        "killer": {
+          "x": 493,
+          "y": 418.4,
+          "w": 47,
+          "h": 23.5,
+          "rotation": 122.7
+        }
+      }
+    },
+    {
+      "from": "G1",
+      "to": "R2",
+      "bidirectional": true,
+      "pathType": "door",
+      "blockade": {
+        "survivor": {
+          "x": 259.7,
+          "y": 337.8,
+          "w": 47.9,
+          "h": 23.9,
+          "rotation": -61.9
+        },
+        "killer": {
+          "x": 260.7,
+          "y": 335.6,
+          "w": 50.6,
+          "h": 25.3,
+          "rotation": -55.1
+        }
+      }
+    },
+    {
+      "from": "G3",
+      "to": "G5",
+      "bidirectional": true,
+      "pathType": "dash"
+    }
+  ],
+  "passages": [
+    {
+      "from": "B2",
+      "to": "R5",
+      "bidirectional": true
+    },
+    {
+      "from": "B1",
+      "to": "G3",
+      "bidirectional": true
+    }
+  ],
+  "zones": [
+    {
+      "id": "repair1",
+      "label": "修理",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 832,
+      "y": 235.5,
+      "r": 21.5,
+      "side": "survivor"
+    },
+    {
+      "id": "repair2",
+      "label": "",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 877.9,
+      "y": 237.4,
+      "r": 22.3,
+      "side": "survivor"
+    },
+    {
+      "id": "repair3",
+      "label": "",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 924.4,
+      "y": 236.9,
+      "r": 21.9,
+      "side": "survivor"
+    },
+    {
+      "id": "repair4",
+      "label": "",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 832.2,
+      "y": 283.6,
+      "r": 21.3,
+      "side": "survivor"
+    },
+    {
+      "id": "repair5",
+      "label": "",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 878.3,
+      "y": 283.1,
+      "r": 21.7,
+      "side": "survivor"
+    },
+    {
+      "id": "eye",
+      "label": "潜行",
+      "color": "#ffffff",
+      "shape": "circle",
+      "x": 760.4,
+      "y": 115.8,
+      "r": 35.4,
+      "side": "survivor"
+    },
+    {
+      "id": "discard",
+      "label": "弃牌堆",
+      "color": "#e04040",
+      "shape": "rect",
+      "x": 16.7,
+      "y": 330.7,
+      "w": 80.4,
+      "h": 119.4,
+      "side": "survivor"
+    },
+    {
+      "id": "treasure",
+      "label": "宝藏牌堆",
+      "color": "#3dcc6a",
+      "shape": "rect",
+      "x": 809.3,
+      "y": 72,
+      "w": 81.9,
+      "h": 118.1,
+      "side": "survivor"
+    },
+    {
+      "id": "discovery",
+      "label": "发现牌堆",
+      "color": "#3d8cff",
+      "shape": "rect",
+      "x": 809.9,
+      "y": 329.8,
+      "w": 78,
+      "h": 119.8,
+      "side": "survivor"
+    },
+    {
+      "id": "search",
+      "label": "搜索牌堆",
+      "color": "#e6c84a",
+      "shape": "rect",
+      "x": 899,
+      "y": 329.8,
+      "w": 78,
+      "h": 121.2,
+      "side": "survivor"
+    },
+    {
+      "id": "skill1",
+      "label": "幸存者技能牌",
+      "color": "#e6c84a",
+      "shape": "rect",
+      "x": 818.8,
+      "y": 70.8,
+      "w": 156.1,
+      "h": 112.5,
+      "side": "killer"
+    },
+    {
+      "id": "skill2",
+      "label": "幸存者技能牌",
+      "color": "#e6c84a",
+      "shape": "rect",
+      "x": 815.9,
+      "y": 194,
+      "w": 158.5,
+      "h": 110.6,
+      "side": "killer"
+    },
+    {
+      "id": "skill3",
+      "label": "幸存者技能牌",
+      "color": "#e6c84a",
+      "shape": "rect",
+      "x": 818.3,
+      "y": 314.8,
+      "w": 157.1,
+      "h": 111.6,
+      "side": "killer"
+    },
+    {
+      "id": "rescueTrack",
+      "label": "猜测修理",
+      "color": "#f0c14b",
+      "shape": "rect",
+      "x": 812.5,
+      "y": 450.6,
+      "w": 163.1,
+      "h": 27.5,
+      "side": "killer"
+    }
+  ],
+  "tokens": [
+    {
+      "id": "repair1",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 816.6,
+      "y": 222.9,
+      "w": 28,
+      "h": 28,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "修理1"
+    },
+    {
+      "id": "repair2",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 865,
+      "y": 223.4,
+      "w": 28,
+      "h": 28,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "修理2"
+    },
+    {
+      "id": "repair3",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 910.4,
+      "y": 222.5,
+      "w": 28,
+      "h": 28,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "修理3"
+    },
+    {
+      "id": "repair4",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 818.3,
+      "y": 269.5,
+      "w": 28,
+      "h": 28,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "修理4"
+    },
+    {
+      "id": "repair5",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 864.8,
+      "y": 269.5,
+      "w": 28,
+      "h": 28,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "修理5"
+    },
+    {
+      "id": "blockade",
+      "kind": "blockade",
+      "src": "/Image/UI/封堵.png",
+      "x": 40,
+      "y": 40,
+      "w": 32,
+      "h": 16,
+      "rotation": 0,
+      "side": "both",
+      "label": "封堵标记"
+    },
+    {
+      "id": "krepair1",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 845,
+      "y": 452.4,
+      "w": 24,
+      "h": 24,
+      "rotation": 0,
+      "side": "killer",
+      "label": "猜测修理1"
+    },
+    {
+      "id": "krepair2",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 871.8,
+      "y": 451.9,
+      "w": 24,
+      "h": 24,
+      "rotation": 0,
+      "side": "killer",
+      "label": "猜测修理2"
+    },
+    {
+      "id": "krepair3",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 896.5,
+      "y": 451.4,
+      "w": 24,
+      "h": 24,
+      "rotation": 0,
+      "side": "killer",
+      "label": "猜测修理3"
+    },
+    {
+      "id": "krepair4",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 924.6,
+      "y": 452.4,
+      "w": 24,
+      "h": 24,
+      "rotation": 0,
+      "side": "killer",
+      "label": "猜测修理4"
+    },
+    {
+      "id": "krepair5",
+      "kind": "repair",
+      "src": "/Image/UI/修理.png",
+      "x": 953.7,
+      "y": 452.4,
+      "w": 24,
+      "h": 24,
+      "rotation": 0,
+      "side": "killer",
+      "label": "猜测修理5"
+    },
+    {
+      "id": "suitcaseOpen",
+      "kind": "suitcase",
+      "src": "/Image/UI/手提箱.jpg",
+      "x": 308,
+      "y": 248,
+      "w": 52,
+      "h": 40,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "R4",
+      "label": "手提箱（可用）"
+    },
+    {
+      "id": "suitcaseUsed",
+      "kind": "suitcase",
+      "src": "/Image/UI/手提箱已用.jpg",
+      "x": 368,
+      "y": 248,
+      "w": 52,
+      "h": 40,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "R4",
+      "label": "手提箱（已用）"
+    }
+  ],
+  "survivorStartRoomId": "R1",
+  "killerStartRoomId": "B5"
+}

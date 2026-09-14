@@ -1,0 +1,19 @@
+---
+description: All 恶夜杀机 work stays inside this project folder
+alwaysApply: true
+---
+
+# 工作目录
+
+所有添加、修改、查规则都在 `night-hunt-web` 里完成。不要改 `d:\game` 根目录里的其它文件，也不要改 `node_modules/`。
+
+资料也在本文件夹：
+
+- `恶夜杀机 规则手册.PDF`
+- `恶夜杀机_线上规则书.docx` 等规则说明
+- `_rulebook_pages/` 规则书页图
+- `content/` 卡牌、角色、地图、规则 JSON
+- `Image/` 美术资源
+- `server/src/game/` 引擎；`client/src/` 界面
+
+改引擎或 `content/` 后需要重启游戏服务器。

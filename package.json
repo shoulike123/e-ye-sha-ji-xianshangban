@@ -1,0 +1,17 @@
+{
+  "name": "night-hunt-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Data-driven asymmetric horror board-game web engine (content-filled by you)",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w server & npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm run start -w server"
+  }
+}

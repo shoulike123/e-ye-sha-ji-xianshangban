@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>地图校准 · 恶夜杀机</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>地图校准</h1>
+    <label>地图
+      <select id="mapSelect"></select>
+    </label>
+    <label>视角
+      <select id="sideSelect">
+        <option value="survivor">求生者</option>
+        <option value="killer">杀手</option>
+      </select>
+    </label>
+    <button type="button" id="reloadBtn">重新加载</button>
+    <button type="button" class="primary" id="saveBtn">保存到游戏</button>
+    <span class="status" id="status">加载中…</span>
+    <nav class="nav">
+      <a href="/">回对局</a>
+      <a href="/map-debug/">移动调试</a>
+      <a href="/ui-layout/">求生者界面校准</a>
+      <a href="/ui-debug/">界面调试</a>
+    </nav>
+  </header>
+
+  <div class="layout">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <img class="map" id="mapImg" alt="地图底图" />
+        <svg class="overlay" id="overlay" viewBox="0 0 1000 500" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
+    <aside class="side">
+      <section>
+        <h2>图层</h2>
+        <label class="check"><input type="checkbox" id="showRooms" checked /> 圆形房间点</label>
+        <label class="check"><input type="checkbox" id="showZones" checked /> 高亮区域</label>
+        <label class="check"><input type="checkbox" id="showTokens" checked /> 道具</label>
+        <label class="check"><input type="checkbox" id="showEdges" checked /> 通道</label>
+        <label class="check"><input type="checkbox" id="showBlockades" checked /> 封堵标记（白门）</label>
+        <p class="hint">每扇白实线门在求生者图、杀手图上各有一枚封堵标记。切换「视角」后分别拖到白门上，保存后对局里封堵会显示在对应位置。</p>
+        <p class="hint">救援警车：每张图每侧 6 格（5→0）各有一辆警车。把它们拖进对应方框。求生者车开到第 N 格时，杀手图会显示杀手侧同一格的车。</p>
+      </section>
+
+      <section>
+        <h2>通道连线</h2>
+        <p class="hint">点「开始连线」，依次点两个地点即可加线。点已有连线可选中：改类型或删除。白实线=门（可封堵），蓝虚线=户外小径，黄虚线=杀手专用。只有门能封堵。</p>
+        <div class="add-row">
+          <select id="newEdgeType">
+            <option value="door">门（白实线）</option>
+            <option value="dash">户外小径（蓝虚线）</option>
+            <option value="killer">杀手通道（黄虚线）</option>
+          </select>
+          <button type="button" id="linkBtn">开始连线</button>
+        </div>
+        <div id="edgeList" class="token-list"></div>
+      </section>
+
+      <section>
+        <h2>选中对象</h2>
+        <div id="inspector" class="inspector muted">点击地图上的圆点、矩形、道具或连线。选中地点可改求生者名和杀手名。</div>
+      </section>
+
+      <section>
+        <h2>全部道具</h2>
+        <p class="hint">拖动改位置，角点等比例缩放，上方圆点旋转。改完点「保存到游戏」写入 content/maps。</p>
+        <div id="tokenList" class="token-list"></div>
+        <div class="add-row">
+          <select id="assetSelect"></select>
+          <button type="button" id="addTokenBtn">添加道具</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "id": "your-map-id",
+  "name": "你的地图名称",
+  "width": 900,
+  "height": 640,
+  "rooms": [
+    {
+      "id": "room_a",
+      "name": "房间甲",
+      "x": 200,
+      "y": 300,
+      "tags": ["entrance", "searchable"]
+    },
+    {
+      "id": "room_b",
+      "name": "房间乙",
+      "x": 450,
+      "y": 300,
+      "tags": ["searchable", "repairable"]
+    }
+  ],
+  "edges": [
+    { "from": "room_a", "to": "room_b", "bidirectional": true }
+  ],
+  "survivorStartRoomId": "room_a",
+  "killerStartRoomId": "room_b"
+}

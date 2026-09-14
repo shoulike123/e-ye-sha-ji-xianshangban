@@ -1,0 +1,26 @@
+{
+  "decks": {
+    "search": [
+      {
+        "id": "card_unique_id",
+        "name": "卡牌名称",
+        "type": "search",
+        "text": "你拥有权利的规则说明文字。",
+        "effects": [
+          { "op": "gainItem", "itemId": "key", "amount": 1 },
+          { "op": "noise", "at": "self" }
+        ]
+      }
+    ],
+    "killerAction": [
+      {
+        "id": "ka_unique_id",
+        "name": "行动名称",
+        "type": "killerAction",
+        "speed": "fast",
+        "text": "行动说明。",
+        "effects": [{ "op": "move", "value": 2 }]
+      }
+    ]
+  }
+}

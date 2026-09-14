@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>界面校准 · 恶夜杀机</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>界面校准</h1>
+    <label>面板
+      <select id="panelSelect">
+        <option value="hud">公共 · 顶栏三块位置</option>
+        <option value="status">公共 · 求生者状态栏</option>
+        <option value="keys">公共 · 钥匙格</option>
+        <option value="rescue">公共 · 救援警车格</option>
+        <option value="public">公共 · 进化 / 等级 / 力量</option>
+        <option value="skill3">求生者 · 技能背包 3 格</option>
+        <option value="skill6">求生者 · 技能背包 6 格</option>
+        <option value="killer">杀手 · 立绘 / 牌堆 / 手牌 / 进化 / 锁定牌</option>
+        <option value="killerInfo">杀手信息 · 进化牌 / 锁定牌 / 行动牌</option>
+      </select>
+    </label>
+    <label>预览杀手
+      <select id="killerSelect">
+        <option value="killer1">屠夫</option>
+        <option value="killer2">幽魂</option>
+        <option value="killer3">谋杀者</option>
+      </select>
+    </label>
+    <button type="button" id="reloadBtn">重新加载</button>
+    <button type="button" class="primary" id="saveBtn">保存到游戏</button>
+    <span class="status" id="status">加载中…</span>
+    <nav class="nav">
+      <a href="/" id="backToGame">回对局</a>
+      <a href="/map-calibrate/">地图校准</a>
+      <a href="/ui-debug/">界面调试</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <img class="map" id="bgImg" alt="界面底图" />
+        <div class="blank-bg" id="blankBg" hidden></div>
+        <div class="overlay" id="overlay"></div>
+      </div>
+      <p class="hint" id="hint">拖单个色块改位置，角点缩放。顶栏三块、钥匙格、警车格都可以单独拖。保存后刷新对局即可看到。</p>
+    </div>
+    <aside class="side">
+      <section>
+        <h2>选中对象</h2>
+        <div id="inspector" class="inspector muted">点击色块</div>
+      </section>
+      <section>
+        <h2>全部对象</h2>
+        <div id="pieceList" class="token-list"></div>
+      </section>
+    </aside>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

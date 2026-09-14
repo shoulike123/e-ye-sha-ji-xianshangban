@@ -1,0 +1,24 @@
+{
+  "id": "survivor1",
+  "name": "安娜·库布里克",
+  "nameEn": "Anna Kubrick",
+  "role": "学生",
+  "folder": "幸存者一_安娜_学生",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "low_profile",
+      "name": "低调行事",
+      "text": "你对【感知】隐形"
+    },
+    {
+      "id": "cautious",
+      "name": "小心谨慎",
+      "text": "你搜索钥匙地点时不会触发警报"
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>地图移动调试</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1 id="title">地图移动调试</h1>
+    <nav class="nav">
+      <a href="index.html">首页</a>
+      <a href="/map-calibrate/">校准程序</a>
+      <a href="/ui-debug/">界面调试</a>
+    </nav>
+    <span class="hint">白实线=门，蓝虚线=户外小径，黄虚线=杀手专用通道。墙不可穿。</span>
+    <div class="controls">
+      <label>本回合行动力
+        <select id="apSelect">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <button type="button" id="resetAp">重置行动力</button>
+      <button type="button" id="resetPos" class="primary">角色回起点</button>
+      <button type="button" id="calibrateBtn">校准圆点</button>
+      <button type="button" id="copyCoords" style="display:none">复制坐标</button>
+      <span class="stat">位置：<strong id="posLabel">—</strong></span>
+      <span class="stat">剩余行动力：<strong id="apLabel">2</strong></span>
+    </div>
+  </header>
+
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <img class="map" id="mapImg" alt="地图" />
+      <svg class="overlay" id="overlay" viewBox="0 0 1000 500" preserveAspectRatio="none"></svg>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+
+  <script>
+    (async function boot() {
+      const q = new URLSearchParams(location.search);
+      const mapId = q.get('map') || 'mansion';
+      const side = q.get('side') === 'killer' ? 'killer' : 'survivor';
+      const res = await fetch('/api/maps/' + mapId);
+      if (!res.ok) {
+        document.getElementById('log').textContent = '无法读取地图，请先启动服务端。';
+        return;
+      }
+      const map = await res.json();
+      const w = map.width || 1000;
+      const h = map.height || 500;
+      const rooms = {};
+      for (const r of map.rooms) {
+        rooms[r.id] = {
+          id: r.id,
+          name: side === 'killer' && r.nameKiller ? r.nameKiller : r.name,
+          x: r.x / w,
+          y: r.y / h,
+        };
+      }
+      const edges = (map.edges || []).map((e) => ({
+        a: e.from,
+        b: e.to,
+        type: e.pathType || 'door',
+      }));
+      for (const e of map.passages || []) {
+        edges.push({ a: e.from, b: e.to, type: 'passage' });
+      }
+      const zones = (map.zones || [])
+        .filter((z) => {
+          const s = z.side || 'survivor';
+          return s === 'both' || s === side;
+        })
+        .map((z) =>
+          z.shape === 'circle'
+            ? { ...z, x: z.x / w, y: z.y / h, r: (z.r || 20) / w }
+            : { ...z, x: z.x / w, y: z.y / h, w: (z.w || 40) / w, h: (z.h || 40) / h },
+        );
+      const start = side === 'killer' ? map.killerStartRoomId : map.survivorStartRoomId;
+      document.getElementById('title').textContent = `${map.name} · ${side === 'killer' ? '杀手' : '求生者'}`;
+      document.getElementById('overlay').setAttribute('viewBox', `0 0 ${w} ${h}`);
+      window.MAP_CONFIG = {
+        factionLabel: map.name,
+        faction: side,
+        storageKey: `${mapId}-${side}-room-xy`,
+        startRoom: start,
+        rooms,
+        edges,
+        zones,
+      };
+      const bg = side === 'killer' ? map.backgrounds?.killer : map.backgrounds?.survivor;
+      const img = document.getElementById('mapImg');
+      img.onload = () => {};
+      const s = document.createElement('script');
+      s.src = 'map-engine.js';
+      img.src = encodeURI(bg || '');
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

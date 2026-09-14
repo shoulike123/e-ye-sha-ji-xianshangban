@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>幸存者地图 · 移动调试</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>幸存者地图 · 移动调试</h1>
+    <nav class="nav">
+      <a href="index.html">首页</a>
+      <a href="killer.html">杀手地图</a>
+    </nav>
+    <span class="hint">白框=门，白虚线=分区；行动力按起点→终点最短路径消耗。墙不可穿。紫虚线特殊通道仅标注。</span>
+    <div class="controls">
+      <label>本回合行动力
+        <select id="apSelect">
+          <option value="1">1</option>
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <button type="button" id="resetAp">重置行动力</button>
+      <button type="button" id="resetPos" class="primary">角色回 R1</button>
+      <button type="button" id="calibrateBtn">校准圆点</button>
+      <button type="button" id="copyCoords" style="display:none">复制坐标</button>
+      <span class="stat">位置：<strong id="posLabel">—</strong></span>
+      <span class="stat">剩余行动力：<strong id="apLabel">2</strong></span>
+    </div>
+  </header>
+
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <img class="map" id="mapImg" src="/Image/Maps/求生者1.png" alt="幸存者地图" />
+      <svg class="overlay" id="overlay" viewBox="0 0 1000 500" preserveAspectRatio="none"></svg>
+    </div>
+  </div>
+  <div class="log" id="log"></div>
+
+  <script>
+    window.MAP_CONFIG = {
+      factionLabel: '幸存者地图',
+      storageKey: 'survivor-map-room-xy',
+      startRoom: 'R1',
+      rooms: {
+        R1: { id: 'R1', name: '大厅', x: 0.340, y: 0.450 },
+        R2: { id: 'R2', name: '陈列室', x: 0.340, y: 0.630 },
+        R3: { id: 'R3', name: '走廊', x: 0.470, y: 0.420 },
+        R4: { id: 'R4', name: '休息室', x: 0.455, y: 0.555 },
+        R5: { id: 'R5', name: '图书室', x: 0.475, y: 0.690 },
+        B1: { id: 'B1', name: '起居室', x: 0.335, y: 0.240 },
+        B2: { id: 'B2', name: '餐厅', x: 0.455, y: 0.235 },
+        B3: { id: 'B3', name: '厨房', x: 0.565, y: 0.175 },
+        B4: { id: 'B4', name: '储藏室', x: 0.695, y: 0.215 },
+        B5: { id: 'B5', name: '宴会厅', x: 0.605, y: 0.420 },
+        G1: { id: 'G1', name: '小径', x: 0.335, y: 0.855 },
+        G2: { id: 'G2', name: '墓地', x: 0.505, y: 0.875 },
+        G3: { id: 'G3', name: '棚屋', x: 0.675, y: 0.875 },
+        G4: { id: 'G4', name: '温室', x: 0.595, y: 0.655 },
+        G5: { id: 'G5', name: '花园', x: 0.755, y: 0.475 },
+      },
+      edges: [
+        { a: 'R1', b: 'B1', type: 'door' },
+        { a: 'R1', b: 'B2', type: 'door' },
+        { a: 'R1', b: 'R2', type: 'door' },
+        { a: 'R1', b: 'R3', type: 'door' },
+        { a: 'R2', b: 'R3', type: 'door' },
+        { a: 'R2', b: 'R5', type: 'door' },
+        { a: 'R2', b: 'G1', type: 'door' },
+        { a: 'R3', b: 'R4', type: 'door' },
+        { a: 'R3', b: 'B5', type: 'door' },
+        { a: 'R4', b: 'R5', type: 'door' },
+        { a: 'R4', b: 'B5', type: 'door' },
+        { a: 'R5', b: 'G4', type: 'door' },
+        { a: 'B1', b: 'B2', type: 'door' },
+        { a: 'B2', b: 'B3', type: 'door' },
+        { a: 'B2', b: 'B5', type: 'door' },
+        { a: 'B3', b: 'B4', type: 'door' },
+        { a: 'B4', b: 'G5', type: 'door' },
+        { a: 'G1', b: 'G2', type: 'dash' },
+        { a: 'G2', b: 'G3', type: 'dash' },
+        { a: 'G3', b: 'G4', type: 'dash' },
+        { a: 'G3', b: 'G5', type: 'dash' },
+        { a: 'B1', b: 'G2', type: 'passage' },
+        { a: 'B5', b: 'G5', type: 'passage' },
+      ],
+      zones: [
+        { id: 'repair1', label: '修理进度', color: '#ffffff', shape: 'circle', x: 0.058, y: 0.118, r: 0.022 },
+        { id: 'repair2', label: '', color: '#ffffff', shape: 'circle', x: 0.100, y: 0.118, r: 0.022 },
+        { id: 'repair3', label: '', color: '#ffffff', shape: 'circle', x: 0.142, y: 0.118, r: 0.022 },
+        { id: 'repair4', label: '', color: '#ffffff', shape: 'circle', x: 0.058, y: 0.188, r: 0.022 },
+        { id: 'repair5', label: '', color: '#ffffff', shape: 'circle', x: 0.100, y: 0.188, r: 0.022 },
+        { id: 'eye', label: '眼睛标记', color: '#ffffff', shape: 'circle', x: 0.825, y: 0.175, r: 0.030 },
+        { id: 'treasure', label: '宝藏牌堆', color: '#3dcc6a', shape: 'rect', x: 0.868, y: 0.078, w: 0.095, h: 0.30 },
+        { id: 'discard', label: '弃牌堆', color: '#e04040', shape: 'rect', x: 0.040, y: 0.680, w: 0.112, h: 0.240 },
+        { id: 'discovery', label: '发现牌堆', color: '#3d8cff', shape: 'rect', x: 0.805, y: 0.600, w: 0.075, h: 0.300 },
+        { id: 'search', label: '搜索牌堆', color: '#e6c84a', shape: 'rect', x: 0.890, y: 0.600, w: 0.075, h: 0.300 },
+      ],
+    };
+  </script>
+  <script src="map-engine.js"></script>
+</body>
+</html>

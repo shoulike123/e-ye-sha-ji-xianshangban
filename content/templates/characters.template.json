@@ -1,0 +1,37 @@
+{
+  "characters": [
+    {
+      "id": "your_killer_id",
+      "name": "你的杀手",
+      "faction": "killer",
+      "maxHp": 99,
+      "description": "在这里写杀手简介。",
+      "skills": [
+        {
+          "id": "skill_1",
+          "name": "技能名",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "技能说明。",
+          "effects": [{ "op": "stealth", "value": true }]
+        }
+      ]
+    },
+    {
+      "id": "your_survivor_id",
+      "name": "你的求生者",
+      "faction": "survivor",
+      "maxHp": 3,
+      "description": "在这里写求生者简介。",
+      "skills": [
+        {
+          "id": "passive_1",
+          "name": "被动",
+          "trigger": "passive",
+          "text": "移动 +1。",
+          "effects": [{ "op": "modifyMoveRange", "value": 1 }]
+        }
+      ]
+    }
+  ]
+}

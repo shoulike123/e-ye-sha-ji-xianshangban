@@ -1,0 +1,214 @@
+:root {
+  --ink: #f2e8d8;
+  --muted: #b9a890;
+  --panel: #1c1612ee;
+  --accent: #c9a227;
+  --legal: #3d9e6f;
+  --here: #d4553a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0b0908;
+  color: var(--ink);
+  min-height: 100vh;
+}
+header {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid #ffffff18;
+  background: #140f0c;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+}
+header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.hint { color: var(--muted); font-size: 0.88rem; }
+.nav a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-right: 0.75rem;
+}
+.nav a:hover { text-decoration: underline; }
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-left: auto;
+}
+label { font-size: 0.85rem; color: var(--muted); }
+select, button {
+  font: inherit;
+  border: 1px solid #ffffff22;
+  background: #2a211a;
+  color: var(--ink);
+  padding: 0.35rem 0.65rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: #8a3b24; border-color: transparent; }
+button.active { background: #2a5a3a; border-color: var(--legal); }
+.stat {
+  font-size: 0.9rem;
+  padding: 0.25rem 0.55rem;
+  background: #ffffff10;
+  border-radius: 4px;
+}
+.stage-wrap {
+  overflow: auto;
+  height: calc(100vh - 64px);
+  background: #050403;
+}
+.stage {
+  position: relative;
+  width: min(100%, 1600px);
+  margin: 0 auto;
+  line-height: 0;
+}
+.stage img.map {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.node {
+  fill: #1a120ccc;
+  stroke: #e8d5a8aa;
+  stroke-width: 2;
+  cursor: default;
+  transition: fill 0.12s, stroke 0.12s;
+}
+.node.legal {
+  fill: #1f6b4588;
+  stroke: var(--legal);
+  stroke-width: 3;
+  cursor: pointer;
+}
+.node.here {
+  fill: #8a3b2488;
+  stroke: var(--here);
+  stroke-width: 3;
+}
+.node-label {
+  fill: #fff6e4;
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.node-sub {
+  fill: #dcc9a8;
+  font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.cost-badge {
+  fill: #7dffb0;
+  font-size: 11px;
+  font-weight: 800;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: #0a1a10;
+  stroke-width: 3px;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.edge {
+  stroke: #e8d5a844;
+  stroke-width: 2;
+  fill: none;
+  pointer-events: none;
+}
+.edge.door { stroke-dasharray: none; }
+.edge.dash { stroke-dasharray: 6 4; stroke: #9ad0ff66; }
+.edge.passage {
+  stroke-dasharray: 2 6;
+  stroke: #c080e066;
+  stroke-width: 2;
+  opacity: 0.55;
+}
+.edge.killer {
+  stroke-dasharray: 5 5;
+  stroke: #f0ba2ed9;
+  stroke-width: 3;
+}
+.zone {
+  pointer-events: none;
+  stroke-width: 2.5;
+}
+.zone-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  paint-order: stroke fill;
+  stroke: #000a;
+  stroke-width: 3px;
+}
+.node.calibrate { cursor: grab; stroke: #4af; stroke-width: 3; }
+.node.calibrate:active { cursor: grabbing; }
+.token {
+  filter: drop-shadow(0 2px 4px #000a);
+  transition: cx 0.28s ease, cy 0.28s ease;
+  pointer-events: none;
+}
+.log {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  width: min(320px, 90vw);
+  max-height: 160px;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid #ffffff18;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.log div { border-bottom: 1px solid #ffffff08; padding: 0.15rem 0; }
+
+/* hub */
+.hub {
+  max-width: 640px;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+}
+.hub h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.hub p { color: var(--muted); line-height: 1.5; }
+.hub-cards {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.hub-card {
+  display: block;
+  padding: 1.25rem 1.5rem;
+  background: #1a1510;
+  border: 1px solid #ffffff18;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.hub-card:hover { border-color: var(--accent); background: #221c16; }
+.hub-card strong { display: block; font-size: 1.15rem; margin-bottom: 0.35rem; }
+.hub-card span { color: var(--muted); font-size: 0.9rem; }

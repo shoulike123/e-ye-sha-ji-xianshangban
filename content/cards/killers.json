@@ -1,0 +1,47 @@
+{
+  "decks": {
+    "killerAction": [
+      { "id": "butcher_sense_1", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "butcher_sense_2", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "butcher_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "butcher_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "butcher_chase_3", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "butcher_block_1", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
+      { "id": "butcher_block_2", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
+      { "id": "butcher_block_3", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
+      { "id": "butcher_saw_1", "name": "链锯轰鸣", "type": "killerAction", "speed": "special", "owner": "killer1", "handCost": 2, "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。等级 4 变为快速。", "effects": [{ "op": "addFearRange", "value": 1 }, { "op": "move", "value": 1, "min": 0 }, { "op": "damageHere" }] },
+      { "id": "butcher_saw_2", "name": "链锯轰鸣", "type": "killerAction", "speed": "special", "owner": "killer1", "handCost": 2, "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。等级 4 变为快速。", "effects": [{ "op": "addFearRange", "value": 1 }, { "op": "move", "value": 1, "min": 0 }, { "op": "damageHere" }] },
+      { "id": "butcher_mad", "name": "疯狂", "type": "killerAction", "speed": "fast", "owner": "killer1", "handCost": 2, "text": "快速（费用 2）：在你地点封堵 1 扇门，本回合 +2 力量。没有可封的门时仍可打出，只 +2 力量。", "effects": [{ "op": "placeBlockade" }, { "op": "modifyPower", "value": 2 }] },
+      { "id": "butcher_stay", "name": "留下!!!!", "type": "killerAction", "speed": "slow", "owner": "killer1", "handCost": 4, "text": "慢速（费用 4）：封堵你地点的所有门。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockadeAll" }] },
+      { "id": "butcher_rage", "name": "残酷暴怒", "type": "killerAction", "speed": "special", "owner": "killer1", "locked": true, "unlockLevel": 3, "handCost": 1, "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索。若没找到人且拆掉了封堵，则重复。", "effects": [{ "op": "move", "value": 2, "min": 1 }, { "op": "rageSearch" }] },
+
+      { "id": "spectre_sense_1", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "spectre_sense_2", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "spectre_sense_3", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "spectre_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "spectre_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "spectre_scream_1", "name": "尖叫", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：惊吓距离 1 内所有幸存者。", "effects": [{ "op": "addFearRange", "value": 1 }] },
+      { "id": "spectre_scream_2", "name": "尖叫", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：惊吓距离 1 内所有幸存者。", "effects": [{ "op": "addFearRange", "value": 1 }] },
+      { "id": "spectre_whiz_1", "name": "呼啸而过", "type": "killerAction", "speed": "special", "owner": "killer2", "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。", "effects": [{ "op": "move", "value": 4, "min": 1 }, { "op": "addFearPath" }] },
+      { "id": "spectre_whiz_2", "name": "呼啸而过", "type": "killerAction", "speed": "special", "owner": "killer2", "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。", "effects": [{ "op": "move", "value": 4, "min": 1 }, { "op": "addFearPath" }] },
+      { "id": "spectre_vanish_1", "name": "消失", "type": "killerAction", "speed": "slow", "owner": "killer2", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "vanishScare" }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "spectre_vanish_2", "name": "消失", "type": "killerAction", "speed": "slow", "owner": "killer2", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "vanishScare" }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "spectre_trace", "name": "惊吓之迹", "type": "killerAction", "speed": "fast", "owner": "killer2", "handCost": 1, "text": "快速（费用 1）：所有至少 1 枚恐惧的幸存者必须揭示地点。", "effects": [{ "op": "exposeFeared" }] },
+      { "id": "spectre_drain", "name": "生命吸取", "type": "killerAction", "speed": "special", "owner": "killer2", "locked": true, "unlockLevel": 4, "handCost": 2, "text": "锁定。等级 4 入手。特殊（费用 2）：伤害所有至少拥有 1 枚恐惧的幸存者。", "effects": [{ "op": "damageFeared", "value": 1 }] },
+
+      { "id": "murder_sense", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
+      { "id": "murder_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "murder_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "murder_chase_3", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "murder_chase_4", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
+      { "id": "murder_tail_1", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "murder_tail_2", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "murder_tail_3", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "murder_logic_1", "name": "逻辑推理", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：感知任意 2 个相连地点（这两处彼此相邻即可，不必与你相邻）。", "effects": [{ "op": "senseAdjacentPair" }] },
+      { "id": "murder_logic_2", "name": "逻辑推理", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：感知任意 2 个相连地点（这两处彼此相邻即可，不必与你相邻）。", "effects": [{ "op": "senseAdjacentPair" }] },
+      { "id": "murder_omen", "name": "谋杀预告", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：惊吓所有幸存者。", "effects": [{ "op": "addFear", "value": 1 }] },
+      { "id": "murder_lurk", "name": "潜藏威胁", "type": "killerAction", "speed": "slow", "owner": "killer3", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓任意 1 名幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "lurkPick" }, { "op": "move", "value": 2, "min": 0 }] },
+      { "id": "murder_bloom", "name": "死亡盛放", "type": "killerAction", "speed": "slow", "owner": "killer3", "locked": true, "unlockLevel": 3, "handCost": 2, "text": "锁定。等级 3 入手。慢速（费用 2）：潜行 0–2。重现时消灭距离 1 以内的所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "bloomKill" }, { "op": "move", "value": 2, "min": 0 }] }
+    ]
+  }
+}

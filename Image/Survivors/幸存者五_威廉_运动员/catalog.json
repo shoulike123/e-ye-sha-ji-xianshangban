@@ -1,0 +1,24 @@
+{
+  "id": "survivor5",
+  "name": "威廉·霍伯",
+  "nameEn": "William Hopper",
+  "role": "运动员",
+  "folder": "幸存者五_威廉_运动员",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "tenacity",
+      "name": "坚韧不拔",
+      "text": "当你未使用任何物品来增强你的防御时，你的防御值+1"
+    },
+    {
+      "id": "sprint",
+      "name": "短跑冲刺",
+      "text": "特殊行动：【移动】X3（在目的地触发警报）"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>界面调试</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="in-game">
+  <header class="game-chrome">
+    <h1>恶夜杀机 · 界面调试</h1>
+    <span class="muted" id="roomLabel">房间 DEBUG</span>
+    <label class="muted">地图
+      <select id="mapSelect"></select>
+    </label>
+    <label class="muted">视角
+      <select id="sideSelect">
+        <option value="survivor">求生者</option>
+        <option value="killer">杀手</option>
+      </select>
+    </label>
+    <nav class="nav">
+      <a href="index.html">首页</a>
+      <a href="/map-calibrate/">校准</a>
+      <a href="/">回对局</a>
+    </nav>
+  </header>
+
+  <div class="table-layout">
+    <div class="stat-bar">
+      <span class="stat">回合 <strong>2</strong></span>
+      <span class="stat">阶段 <strong id="phaseLabel">幸存者行动</strong></span>
+      <div class="track-chips" id="chips"></div>
+      <span class="stat">杀手等级 <strong>1</strong></span>
+      <span class="stat">杀手力量 <strong id="powerLabel">5</strong></span>
+      <span class="stat">封堵 <strong>1/7</strong></span>
+    </div>
+
+    <div class="table-map">
+      <div class="board-wrap">
+        <div class="map-stage" id="stage">
+          <img class="map-bg" id="mapImg" alt="地图" />
+          <svg class="map-svg" id="overlay" viewBox="0 0 1000 500" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-bottom">
+      <div class="table-actions" id="actions"></div>
+      <div class="surv-dock" id="dock"></div>
+    </div>
+  </div>
+
+  <div class="hud-overlay" id="overlayPanel" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

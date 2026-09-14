@@ -1,0 +1,115 @@
+:root {
+  --ink: #f2e8d8;
+  --muted: #b9a890;
+  --panel: #16110e;
+  --accent: #c9a227;
+  --line: #ffffff18;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0b0908;
+  color: var(--ink);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: center;
+  padding: 0.65rem 1rem;
+  background: #140f0c;
+  border-bottom: 1px solid var(--line);
+}
+header h1 { margin: 0; font-size: 1.05rem; }
+header label { font-size: 0.82rem; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
+select, button, input[type="number"] {
+  font: inherit;
+  background: #2a211a;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: #8a3b24; border-color: transparent; }
+button.danger { background: #6a2420; border-color: transparent; }
+.status { font-size: 0.82rem; color: var(--muted); }
+.status.ok { color: #8fd6a8; }
+.status.err { color: #f08a7a; }
+.status.dirty { color: #f0c14b; }
+.nav { margin-left: auto; }
+.nav a { color: var(--accent); text-decoration: none; margin-left: 0.75rem; font-size: 0.85rem; }
+.layout { display: grid; grid-template-columns: 1fr 320px; height: calc(100vh - 56px); }
+.stage-wrap { overflow: auto; background: #050403; }
+.stage { position: relative; width: min(100%, 1600px); margin: 0 auto; line-height: 0; }
+.stage img.map { width: 100%; height: auto; display: block; user-select: none; pointer-events: none; }
+.overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.side {
+  overflow: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 0.75rem 0.9rem 1.5rem;
+}
+.side h2 { margin: 0 0 0.45rem; font-size: 0.92rem; }
+.side section { margin-bottom: 1.1rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--line); }
+.check { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; color: var(--muted); margin: 0.2rem 0; }
+.hint { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin: 0 0 0.55rem; }
+.inspector { font-size: 0.82rem; }
+.fields { display: grid; grid-template-columns: 72px 1fr; gap: 0.3rem 0.45rem; align-items: center; }
+.fields label { color: var(--muted); font-size: 0.78rem; }
+.fields input { width: 100%; }
+.fields input[type="text"] { padding: 0.25rem 0.4rem; }
+.token-list { display: flex; flex-direction: column; gap: 0.35rem; max-height: 280px; overflow: auto; }
+.token-item {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.token-item.active { border-color: var(--accent); background: #2a2118; }
+.token-item img { width: 36px; height: 36px; object-fit: contain; background: #0006; }
+.token-item .meta { font-size: 0.75rem; color: var(--muted); line-height: 1.35; }
+.token-item strong { color: var(--ink); font-size: 0.82rem; }
+.add-row { display: grid; grid-template-columns: 1fr auto; gap: 0.4rem; margin-top: 0.55rem; }
+.node { fill: #1a120ccc; stroke: #e8d5a8aa; stroke-width: 2; cursor: grab; }
+.node.sel { stroke: #4af; stroke-width: 3; }
+.zone-shape { cursor: grab; }
+.zone-shape.sel { stroke-width: 3.5; }
+.token-hit { cursor: grab; fill: #0000; stroke: #f0c14b66; }
+.token-hit.blockade { stroke: #e07070aa; }
+.token-hit.blockade.sel { stroke: #ff8a7a; stroke-width: 2; }
+.token-hit.sel { stroke: #f0c14b; stroke-width: 2; }
+.handle { fill: #fff; stroke: #222; stroke-width: 1; cursor: nwse-resize; }
+.handle.rot { fill: #7dffb0; cursor: grab; }
+.edge { fill: none; stroke: #e8d5a888; stroke-width: 3; pointer-events: stroke; cursor: pointer; }
+.edge.dash { stroke-dasharray: 8 6; stroke: #9ad0ffcc; }
+.edge.killer { stroke-dasharray: 6 6; stroke: #f0ba2e; stroke-width: 4; }
+.edge.door { stroke: #e8d5a888; }
+.edge.sel { stroke: #4af; stroke-width: 5; }
+.label {
+  fill: #fff6e4;
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: #000a;
+  stroke-width: 3px;
+}
+.sub {
+  fill: #dcc9a8;
+  font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .side { border-left: 0; border-top: 1px solid var(--line); }
+}
