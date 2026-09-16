@@ -1,10 +1,10 @@
 {
   "id": "mansion",
-  "name": "庄园图一",
+  "name": "豪宅",
   "width": 1000,
   "height": 500,
   "backgrounds": {
-    "survivor": "/Image/Maps/求生者1.png",
+    "survivor": "/Image/Maps/幸存者1.png",
     "killer": "/Image/Maps/杀手1.png"
   },
   "rooms": [

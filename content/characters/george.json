@@ -1,0 +1,29 @@
+{
+  "characters": [
+    {
+      "id": "survivor6",
+      "name": "乔治·卡朋特",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "教授。聪明绝顶：在有书本标记的地点可用特殊行动，弃掉一个工具箱来 +1 修理进度，或从搜索牌库抽取一张卡牌。思维敏捷：自己的小回合结束时，如果你在杀手距离 1 内，可以挑一张乔治的笔记。",
+      "skills": [
+        {
+          "id": "brilliant",
+          "name": "聪明绝顶",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "（在有书本标记的地点）特殊行动：弃掉一个工具箱来 +1 修理进度，或从搜索牌库抽取一张卡牌",
+          "effects": []
+        },
+        {
+          "id": "quick_thinking",
+          "name": "思维敏捷",
+          "trigger": "passive",
+          "text": "你的小回合结束时，如果你在杀手距离 1 内，你可以获得任意一张乔治的笔记",
+          "effects": []
+        }
+      ]
+    }
+  ]
+}

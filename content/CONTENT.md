@@ -28,11 +28,11 @@ content/
 | `killerActionsPerTurn` | 杀手每回合行动次数 |
 | `searchMakesNoise` / `repairMakesNoise` | 是否自动产生噪音 |
 | `keysNeeded` / `repairNeeded` / `rescueWaitRounds` | 胜负相关数值 |
-| `killerWinsOnAnyKill` | 击杀任意求生者即胜 |
+| `killerWinsOnAnyKill` | 击杀任意幸存者即胜 |
 | `survivorExitRequiresAllAliveAt` | 入口撤离所在房间 id |
 | `hiddenExitRequiresMapItem` | 隐藏出口需要持有 `map` 物品 |
-| `killerSeesSurvivorPositions` | 杀手是否看见求生者位置 |
-| `survivorSeesKillerPosition` | 求生者是否看见杀手（潜行仍可隐藏） |
+| `killerSeesSurvivorPositions` | 杀手是否看见幸存者位置 |
+| `survivorSeesKillerPosition` | 幸存者是否看见杀手（潜行仍可隐藏） |
 | `killerDrawOnTurnEnd` | 杀手回合结束抽牌数 |
 
 ## 地图
@@ -40,14 +40,14 @@ content/
 - `rooms[]`：`id`、`name`（显示名可中文）、`nameKiller`（可选，杀手侧房间名）、`x`/`y`（仅界面）、`tags[]`
 - 常用标签：`entrance`、`hiddenExit`、`searchable`、`repairable`
 - `edges[]`：`from`、`to`、`bidirectional`（默认 true）、`pathType`（`door` / `dash` / `killer`）
-- `pathType: "killer"`：杀手专用通道，常规移动消耗 1 行动力；求生者不能走
+- `pathType: "killer"`：杀手专用通道，常规移动消耗 1 行动力；幸存者不能走
 - `passages[]`：特殊通道，仅标注，**不计入移动**
-- `backgrounds`：`survivor` / `killer` 底图路径（图一 `求生者1.png` / `杀手1.png`，图二 `求生者2.jpg` / `杀手2.jpg`）
+- `backgrounds`：`survivor` / `killer` 底图路径（图一 `幸存者1.png` / `杀手1.png`，图二 `幸存者2.jpg` / `杀手2.jpg`）
 - `zones[]`：外围 UI 高亮；`side` 为 `killer` 时只在杀手视角显示
 - `tokens[]`：叠在地图上的道具（潜行/修理/封堵等），含位置、宽高、旋转
 - `survivorStartRoomId` / `killerStartRoomId`
 
-建房时可选手图：`mansion`（庄园图一）或 `cabin`（木屋图二）。校准程序：http://127.0.0.1:5173/map-calibrate/ （可编辑地点连线），保存后写入 `content/maps/*.json`。界面调试：http://127.0.0.1:5173/ui-debug/ 。
+建房时可选手图：`mansion`（豪宅）或 `cabin`（小屋）。校准程序：http://127.0.0.1:5173/map-calibrate/ （可编辑地点连线），保存后写入 `content/maps/*.json`。界面调试：http://127.0.0.1:5173/ui-debug/ 。
 
 ## 角色
 
@@ -68,7 +68,7 @@ content/
 |----|------|
 | `move` | `value` = 最大移动格数 |
 | `search` | 从搜索牌库抽牌 |
-| `searchSurvivors` | 攻击当前房间所有求生者 |
+| `searchSurvivors` | 攻击当前房间所有幸存者 |
 | `repair` | 增加修理进度 |
 | `noise` | `at`：`self` / `target` |
 | `stealth` / `reveal` | 潜行 / 现身 |
@@ -80,10 +80,10 @@ content/
 
 ## 胜负判定
 
-1. 杀手：任意求生者生命归零（若开启）
-2. 求生者：钥匙足够且全员在入口
-3. 求生者：持有地图且全员在隐藏出口
-4. 求生者：修理完成且救援倒计时归零
+1. 杀手：任意幸存者生命归零（若开启）
+2. 幸存者：钥匙足够且全员在入口
+3. 幸存者：持有地图且全员在隐藏出口
+4. 幸存者：修理完成且救援倒计时归零
 
 ## 模板
 

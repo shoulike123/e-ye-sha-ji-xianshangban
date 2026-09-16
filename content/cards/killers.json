@@ -13,7 +13,7 @@
       { "id": "butcher_saw_2", "name": "链锯轰鸣", "type": "killerAction", "speed": "special", "owner": "killer1", "handCost": 2, "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。等级 4 变为快速。", "effects": [{ "op": "addFearRange", "value": 1 }, { "op": "move", "value": 1, "min": 0 }, { "op": "damageHere" }] },
       { "id": "butcher_mad", "name": "疯狂", "type": "killerAction", "speed": "fast", "owner": "killer1", "handCost": 2, "text": "快速（费用 2）：在你地点封堵 1 扇门，本回合 +2 力量。没有可封的门时仍可打出，只 +2 力量。", "effects": [{ "op": "placeBlockade" }, { "op": "modifyPower", "value": 2 }] },
       { "id": "butcher_stay", "name": "留下!!!!", "type": "killerAction", "speed": "slow", "owner": "killer1", "handCost": 4, "text": "慢速（费用 4）：封堵你地点的所有门。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockadeAll" }] },
-      { "id": "butcher_rage", "name": "残酷暴怒", "type": "killerAction", "speed": "special", "owner": "killer1", "locked": true, "unlockLevel": 3, "handCost": 1, "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索。若没找到人且拆掉了封堵，则重复。", "effects": [{ "op": "move", "value": 2, "min": 1 }, { "op": "rageSearch" }] },
+      { "id": "butcher_rage", "name": "残酷暴怒", "type": "killerAction", "speed": "special", "owner": "killer1", "locked": true, "unlockLevel": 3, "handCost": 1, "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索房间。若没找到人且拆掉了封堵，则重复。", "effects": [{ "op": "move", "value": 2, "min": 1 }, { "op": "rageSearch" }] },
 
       { "id": "spectre_sense_1", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
       { "id": "spectre_sense_2", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },

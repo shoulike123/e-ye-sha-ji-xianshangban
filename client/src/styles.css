@@ -393,9 +393,10 @@ a.ghost-btn {
   padding: 0.4rem 0.55rem;
 }
 
+/* 战报用固定高度的滚动框：历史全都在里面，不会把整页越撑越长 */
 .table-log .log-box {
-  max-height: none;
-  overflow: visible;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .hero {
@@ -1781,10 +1782,44 @@ body.surv-item-dragging {
 .df-4 { transform: rotateX(90deg) translateZ(44px); }
 .df-5 { transform: rotateX(-90deg) translateZ(44px); }
 
+/* 同队幸存者的鼠标预选圈（1对2 / 1对3 互看） */
+.room-cursor {
+  fill: none;
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+  pointer-events: none;
+  opacity: 0.9;
+  animation: cursor-dash 1.2s linear infinite;
+}
+
+@keyframes cursor-dash {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+
 .dice-caption {
   color: #fff6e4;
   font-size: 1.05rem;
   text-shadow: 0 2px 8px #000;
+}
+
+/* 鸿运当骰：可点选重掷的骰子 */
+.dice-pick {
+  cursor: pointer;
+  pointer-events: auto;
+  border-radius: 10px;
+  padding: 4px;
+  transition: box-shadow 0.12s, background 0.12s;
+}
+
+.dice-pick:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dice-picked {
+  background: rgba(240, 193, 75, 0.22);
+  box-shadow: 0 0 0 3px #f0c14b, 0 0 14px #f0c14baa;
 }
 
 @keyframes dice-spin {
@@ -1851,7 +1886,13 @@ body.surv-item-dragging {
 .map-skill-card {
   position: absolute;
   z-index: 5;
-  pointer-events: none;
+  /* 这里必须是 auto：原来写成 none，导致地图上三张幸存者技能牌收不到点击，
+     写了 onClick 也永远不触发（放大功能等于没有）。 */
+  pointer-events: auto;
+  cursor: zoom-in;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .map-skill-card img {
@@ -1914,6 +1955,20 @@ body.surv-item-dragging {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.88rem;
+  /* 现在这一行是可点的按钮（点开看大图） */
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.15rem 0.3rem;
+  color: inherit;
+  text-align: left;
+  font-family: inherit;
+}
+
+.pile-inspect-row:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line);
 }
 
 .pile-inspect-row img {
@@ -1961,6 +2016,15 @@ body.surv-item-dragging {
   align-items: center;
   justify-content: center;
   color: var(--muted);
+}
+
+/* 整张立绘 / 技能图 / 牌堆里的牌面：给更大的画布，方便看清牌面文字 */
+.card-zoom.art {
+  width: min(760px, 96vw);
+}
+
+.card-zoom.art .card-zoom-art {
+  max-height: min(78vh, 900px);
 }
 
 .card-zoom-meta h3 {

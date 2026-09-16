@@ -20,7 +20,7 @@ export const UI = {
   searchBack: '/Image/Key/牌背1.png',
   searchBackLast: '/Image/Key/牌背2.png',
   discoveryBack: '/Image/Discovery/牌背.png',
-  rulesSurvivor: '/Image/UI/行动规则_求生者.png',
+  rulesSurvivor: '/Image/UI/行动规则_幸存者.png',
   rulesKiller: '/Image/UI/行动规则_杀手.png',
 };
 

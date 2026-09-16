@@ -19,10 +19,10 @@
     },
     {
       "id": "your_survivor_id",
-      "name": "你的求生者",
+      "name": "你的幸存者",
       "faction": "survivor",
       "maxHp": 3,
-      "description": "在这里写求生者简介。",
+      "description": "在这里写幸存者简介。",
       "skills": [
         {
           "id": "passive_1",

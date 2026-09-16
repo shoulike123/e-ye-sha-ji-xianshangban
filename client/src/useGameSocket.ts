@@ -36,6 +36,8 @@ export function useGameSocket() {
   const [connected, setConnected] = useState(false);
   const [state, setState] = useState<PublicSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** 同队幸存者正在预选的地点（1对2 / 1对3 里用来互看鼠标预选） */
+  const [cursors, setCursors] = useState<Array<{ playerId: string; roomId: string }>>([]);
 
   // 打开网页就接上对讲机；关掉页面时挂断
   useEffect(() => {
@@ -61,16 +63,41 @@ export function useGameSocket() {
       setState(snap);
       setError(null);
     });
+    // 同队其他人的鼠标预选：服务器每次发完整列表，直接覆盖
+    s.on('cursors', (list: Array<{ playerId: string; roomId: string }>) => {
+      setCursors(Array.isArray(list) ? list : []);
+    });
     return () => {
       s.disconnect();
     };
   }, []);
 
+  /**
+   * 还没连上时不能用 socket?.emit —— 那样 Promise 永远不会 settle，
+   * 调用方的 await 会一直挂着。这里统一拒绝并写进 error。
+   */
+  const requireSocket = useCallback(
+    (what: string) => {
+      if (socket) return socket;
+      const msg = `还没连上服务器，无法${what}`;
+      setError(msg);
+      throw new Error(msg);
+    },
+    [socket],
+  );
+
   /** 请服务器开一桌新牌 */
   const createRoom = useCallback(
     (name: string, mapId?: string) =>
       new Promise<PublicSnapshot>((resolve, reject) => {
-        socket?.emit('createRoom', { name, mapId }, (res: { ok: boolean; state?: PublicSnapshot; error?: string }) => {
+        let s: Socket;
+        try {
+          s = requireSocket('创建房间');
+        } catch (e) {
+          reject(e as Error);
+          return;
+        }
+        s.emit('createRoom', { name, mapId }, (res: { ok: boolean; state?: PublicSnapshot; error?: string }) => {
           if (res?.ok && res.state) {
             writeRoomSession(res.state.roomCode, name);
             setState(res.state);
@@ -78,14 +105,21 @@ export function useGameSocket() {
           } else reject(new Error(res?.error ?? 'create failed'));
         });
       }),
-    [socket],
+    [requireSocket],
   );
 
   /** 拿房间码坐下 */
   const joinRoom = useCallback(
     (roomCode: string, name: string) =>
       new Promise<PublicSnapshot>((resolve, reject) => {
-        socket?.emit(
+        let s: Socket;
+        try {
+          s = requireSocket('加入房间');
+        } catch (e) {
+          reject(e as Error);
+          return;
+        }
+        s.emit(
           'joinRoom',
           { roomCode, name },
           (res: { ok: boolean; state?: PublicSnapshot; error?: string }) => {
@@ -97,14 +131,21 @@ export function useGameSocket() {
           },
         );
       }),
-    [socket],
+    [requireSocket],
   );
 
   /** 把玩家点的行动（移动、打牌、结束回合……）送给规则引擎 */
   const sendAction = useCallback(
     (action: ClientAction) =>
       new Promise<void>((resolve, reject) => {
-        socket?.emit('action', action, (res: { ok: boolean; error?: string }) => {
+        let s: Socket;
+        try {
+          s = requireSocket('发送操作');
+        } catch (e) {
+          reject(e as Error);
+          return;
+        }
+        s.emit('action', action, (res: { ok: boolean; error?: string }) => {
           if (res?.ok) {
             setError(null);
             resolve();
@@ -115,14 +156,21 @@ export function useGameSocket() {
           }
         });
       }),
-    [socket],
+    [requireSocket],
   );
 
   /** 离开房间，网页回到“创建 / 加入” */
   const leaveRoom = useCallback(
     () =>
       new Promise<void>((resolve, reject) => {
-        socket?.emit('leaveRoom', (res: { ok: boolean; error?: string }) => {
+        let s: Socket;
+        try {
+          s = requireSocket('离开房间');
+        } catch (e) {
+          reject(e as Error);
+          return;
+        }
+        s.emit('leaveRoom', (res: { ok: boolean; error?: string }) => {
           if (res?.ok) {
             clearRoomSession();
             setState(null);
@@ -135,11 +183,26 @@ export function useGameSocket() {
           }
         });
       }),
+    [requireSocket],
+  );
+
+  /**
+   * 把「我现在鼠标预选哪一格」告诉同队其他人（fire-and-forget，不等回执）。
+   * 只有 1对2 / 1对3 里才有意义；其它模式服务端也不会转发给杀手。
+   */
+  const sendCursor = useCallback(
+    (roomId: string | null) => {
+      if (!socket) return;
+      socket.emit('cursorRoom', { roomId });
+    },
     [socket],
   );
 
   return useMemo(
-    () => ({ connected, state, error, setError, createRoom, joinRoom, sendAction, leaveRoom }),
-    [connected, state, error, createRoom, joinRoom, sendAction, leaveRoom],
+    () => ({
+      connected, state, error, setError, createRoom, joinRoom, sendAction, leaveRoom,
+      cursors, sendCursor,
+    }),
+    [connected, state, error, cursors, createRoom, joinRoom, sendAction, leaveRoom, sendCursor],
   );
 }

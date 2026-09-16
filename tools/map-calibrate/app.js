@@ -185,7 +185,7 @@
           h: 16,
           rotation: 0,
           side,
-          label: `警车${step}（${side === 'killer' ? '杀手' : '求生者'}）`,
+          label: `警车${step}（${side === 'killer' ? '杀手' : '幸存者'}）`,
         });
         added += 1;
       }
@@ -475,7 +475,7 @@
         </div>
         ${
           door
-            ? `<p class="hint">当前视角（${state.side === 'killer' ? '杀手' : '求生者'}）的封堵标记可拖到白门上。换视角再调另一张图。</p>
+            ? `<p class="hint">当前视角（${state.side === 'killer' ? '杀手' : '幸存者'}）的封堵标记可拖到白门上。换视角再调另一张图。</p>
                <button type="button" id="editBlockade">选中本视角封堵标记</button>`
             : `<p class="hint">只有白实线门可以封堵，本通道不会出现封堵标记。</p>`
         }`;
@@ -503,7 +503,7 @@
     }
     if (sel.type === 'blockade') {
       const e = (state.map.edges ?? [])[sel.index];
-      const sideLabel = (sel.side || state.side) === 'killer' ? '杀手地图' : '求生者地图';
+      const sideLabel = (sel.side || state.side) === 'killer' ? '杀手地图' : '幸存者地图';
       inspector.innerHTML = `<div><strong>封堵标记 ${e.from} ↔ ${e.to}</strong></div>
         <p class="hint">${sideLabel}。拖动改位置，角点缩放，绿点旋转。对局里封堵这扇门时，双方地图都会显示各自的标记。</p>
         <div class="fields">
@@ -562,7 +562,7 @@
       extra =
         field('X', obj.x, 'x') +
         field('Y', obj.y, 'y') +
-        `<label>求生者名</label><input type="text" data-text="name" value="${escapeHtml(obj.name ?? '')}" />` +
+        `<label>幸存者名</label><input type="text" data-text="name" value="${escapeHtml(obj.name ?? '')}" />` +
         `<label>杀手名</label><input type="text" data-text="nameKiller" value="${escapeHtml(obj.nameKiller ?? '')}" />`;
     }
     if (sel.type === 'zone' && obj.shape === 'circle') {

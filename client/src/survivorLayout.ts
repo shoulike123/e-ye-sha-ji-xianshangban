@@ -1,5 +1,5 @@
 /**
- * 求生者界面每一块该摆在屏幕的百分之几。
+ * 幸存者界面每一块该摆在屏幕的百分之几。
  * 数字来自校准页，存进 content/ui/survivor-layout.json。
  */
 import type { CSSProperties } from 'react';

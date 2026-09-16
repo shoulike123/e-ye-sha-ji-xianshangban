@@ -9,9 +9,13 @@
       { "id": "sk_axe", "name": "手斧", "type": "search", "text": "+1 防御值，或额外行动：移除你所在地点的一个封堵。", "effects": [{ "op": "gainItem", "itemId": "axe", "amount": 1 }] },
       { "id": "sk_lime", "name": "石灰粉", "type": "search", "text": "+2 防御值。", "effects": [{ "op": "gainItem", "itemId": "lime", "amount": 1 }] },
       { "id": "sk_whiskey", "name": "威士忌酒瓶", "type": "search", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
-      { "id": "sk_herb", "name": "草药", "type": "search", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "sk_herb", "name": "草药", "type": "search", "text": "特殊行动：治疗与你同一地点的受伤幸存者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
       { "id": "sk_toolbox_1", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
-      { "id": "sk_toolbox_2", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] }
+      { "id": "sk_toolbox_2", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
+
+      { "id": "sk_lamp", "name": "煤油灯", "type": "search", "text": "+1 防御值；或额外行动：移动通过一条秘密通道。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "lamp", "amount": 1 }] },
+      { "id": "sk_parcel", "name": "神秘包裹", "type": "search", "text": "额外行动：从发现牌堆抽取一张卡牌，并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "parcel", "amount": 1 }] },
+      { "id": "sk_lucky_dice", "name": "鸿运当骰", "type": "search", "text": "（本卡牌不算作物品）在遭遇期间，你可以重掷任意数量的骰子。", "effects": [{ "op": "gainItem", "itemId": "lucky_dice", "amount": 1 }] }
     ],
     "discovery": [
       { "id": "dc_key_1", "name": "钥匙", "type": "discovery", "text": "立刻将本卡放入钥匙立牌。也可以不要，改留另一张。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "key", "amount": 1 }] },
@@ -19,9 +23,9 @@
       { "id": "dc_whiskey_1", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
       { "id": "dc_whiskey_2", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
       { "id": "dc_whiskey_3", "name": "威士忌酒瓶", "type": "discovery", "text": "额外行动：在一个相邻地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "whiskey", "amount": 1 }] },
-      { "id": "dc_herb_1", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
-      { "id": "dc_herb_2", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
-      { "id": "dc_herb_3", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤求生者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_herb_1", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤幸存者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_herb_2", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤幸存者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
+      { "id": "dc_herb_3", "name": "草药", "type": "discovery", "text": "特殊行动：治疗与你同一地点的受伤幸存者（包括自己），并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "herb", "amount": 1 }] },
       { "id": "dc_ammo_1", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },
       { "id": "dc_ammo_2", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },
       { "id": "dc_ammo_3", "name": "弹药包", "type": "discovery", "text": "需要左轮手枪：+4 防御值。", "effects": [{ "op": "gainItem", "itemId": "ammo", "amount": 1 }] },

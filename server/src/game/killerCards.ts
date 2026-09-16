@@ -75,7 +75,7 @@ export function senseVisibleInRooms(state: GameState, roomIds: string[]): Player
   );
 }
 
-/** 离某格不超过 range 步的活着的求生者 */
+/** 离某格不超过 range 步的活着的幸存者 */
 export function survivorsWithin(
   state: GameState,
   from: string,
@@ -92,7 +92,7 @@ function killerActor(state: GameState): PlayerState | null {
   return state.killerId ? state.players[state.killerId] ?? null : null;
 }
 
-/** 距离内所有求生者各加 1 恐惧；没人就记“没有人受到惊吓” */
+/** 距离内所有幸存者各加 1 恐惧；没人就记“没有人受到惊吓” */
 export function fearAtRange(state: GameState, origin: string, range: number): string[] {
   const hits = survivorsWithin(state, origin, range);
   const names: string[] = [];
@@ -143,7 +143,7 @@ function applyQueued(state: GameState, k: PlayerState, fx: EffectDef): boolean {
       state.pendingPathDraft = { min, max, rooms: k.roomId ? [k.roomId] : [] };
       log(
         state,
-        `请依次点相邻地点规划路径（${min}–${max} 步）。再点同一格可取消该步。步数合法后在行动区确认，才会走路。`,
+        `请依次点相邻地点规划路径（${min}–${max} 步）。再点同一格可取消该步。步数合法后在行动区确认，才会移动。`,
       );
       return true;
     }
@@ -250,7 +250,7 @@ function applyQueued(state: GameState, k: PlayerState, fx: EffectDef): boolean {
         state,
         victims.length
           ? `${k.name} 发现了 ${victims.map((v) => v.name).join('、')}！`
-          : `${k.name} 搜查房间，没有发现人。`,
+          : `${k.name} 搜索房间，没有发现人。`,
       );
       if (fx.op === 'rageSearch' && !state.lastSearchFound && state.lastMoveCrossedBlockade) {
         log(state, '没找到人且拆掉了封堵，「残酷暴怒」再执行一次。');
@@ -321,7 +321,7 @@ export function completeKillerCardMove(state: GameState, toRoomId: string): bool
     return true;
   }
   const adj = killerAdjacentRooms(state, k.id);
-  if (!adj.includes(toRoomId)) throw new Error('只能走到相邻地点（可以往回走）');
+  if (!adj.includes(toRoomId)) throw new Error('只能移动到相邻地点（可以沿原路移回）');
   const taken = Math.max(0, state.lastMovePath.length - 1);
   if (taken >= max) throw new Error('步数已用完');
   const pathSoFar = state.lastMovePath.length ? [...state.lastMovePath] : [k.roomId];
@@ -340,8 +340,8 @@ export function completeKillerCardMove(state: GameState, toRoomId: string): bool
   log(
     state,
     nowTaken >= min
-      ? `已走 ${nowTaken} 步，还可走 ${max - nowTaken} 步（可往回走，也可结束移动）。`
-      : `已走 ${nowTaken} 步，至少还要走 ${min - nowTaken} 步（可往回走）。`,
+      ? `已移动 ${nowTaken} 步，还可移动 ${max - nowTaken} 步（可以沿原路移回，也可结束移动）。`
+      : `已移动 ${nowTaken} 步，至少还要移动 ${min - nowTaken} 步（可以沿原路移回）。`,
   );
   return false;
 }
@@ -355,12 +355,18 @@ export function confirmPathDraft(state: GameState): void {
   if (taken > draft.max) throw new Error(`最多 ${draft.max} 步`);
   const k = killerActor(state);
   if (!k) throw new Error('没有杀手');
-  state.lastMovePath = draft.rooms.length ? [...draft.rooms] : k.roomId ? [k.roomId] : [];
-  state.lastMoveCrossedBlockade = false;
+  /** 玩家确认的路线就是牌面移动的「实际路径」。
+   *  注意 tryMove 每次都会把 lastMovePath 覆盖成它自己算出的那一步路径，
+   *  所以逐格走完以后必须还原成玩家选的这条，否则「呼啸而过」的路径惊吓会打错格子。 */
+  const walked = draft.rooms.length ? [...draft.rooms] : k.roomId ? [k.roomId] : [];
+  let crossed = false;
   for (let i = 1; i < draft.rooms.length; i++) {
     const ok = tryMove(state, k.id, draft.rooms[i]!, 1, 1);
     if (!ok) throw new Error('路径不合法');
+    crossed = crossed || state.lastMoveCrossedBlockade;
   }
+  state.lastMovePath = walked;
+  state.lastMoveCrossedBlockade = crossed;
   if (draft.rooms.length <= 1 && k.roomId) {
     state.lastMovePath = [k.roomId];
     log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`);
@@ -410,14 +416,14 @@ export function forcedRevealAndSearch(state: GameState): boolean {
     else log(state, '死亡盛放：没有人受到影响。');
   } else if (kind === 'lurkPick') {
     state.pendingLurkPick = true;
-    log(state, '潜藏威胁：请选择任意 1 名求生者施加惊吓。');
+    log(state, '潜藏威胁：请选择任意 1 名幸存者施加惊吓。');
     return true;
   }
   forcedSearchHere(state);
   return Boolean(state.encounter);
 }
 
-/** 潜藏威胁重现：杀手点名惊吓哪一名求生者 */
+/** 潜藏威胁重现：杀手点名惊吓哪一名幸存者 */
 export function finishLurkPick(state: GameState, targetId: string): void {
   if (!state.pendingLurkPick) throw new Error('当前不是选择惊吓目标');
   const t = state.players[targetId];
@@ -439,12 +445,12 @@ export function forcedSearchHere(state: GameState): void {
   log(
     state,
     victims.length
-      ? `${k.name} 重现后搜查，发现了 ${victims.map((v) => v.name).join('、')}！`
-      : `${k.name} 重现后搜查，没有发现人。`,
+      ? `${k.name} 重现后搜索房间，发现了 ${victims.map((v) => v.name).join('、')}！`
+      : `${k.name} 重现后搜索房间，没有发现人。`,
   );
 }
 
-/** 求生者决定这次非遭遇伤害要不要出示古代护符 */
+/** 幸存者决定这次非遭遇伤害要不要出示古代护符 */
 export function confirmAmuletUse(state: GameState, use: boolean): void {
   const pending = state.pendingAmulet;
   if (!pending) throw new Error('当前没有护符选择');

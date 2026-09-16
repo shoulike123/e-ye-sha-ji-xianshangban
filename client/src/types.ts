@@ -196,6 +196,7 @@ export interface PublicSnapshot {
   controllingActive: boolean;
   players: PublicPlayerView[];
   map: MapDef;
+  playableMaps?: Array<{ id: string; name: string; backgrounds?: { survivor?: string; killer?: string } }>;
   rules: {
     keysNeeded: number;
     repairNeeded: number;
@@ -233,9 +234,19 @@ export interface PublicSnapshot {
     secondRoomId?: string | null;
   } | null;
   removableBoardBlockades?: Array<{ id: string; from: string; to: string }>;
+  /** 乔治还没被拿走的笔记（杀手视角为空） */
+  georgeNotes?: Array<{ id: string; name: string }>;
+  /** 3 张笔记的定义（图鉴用） */
+  allGeorgeNotes?: Array<{ id: string; name: string; text: string }>;
+  /** 等乔治挑笔记 */
+  pendingGeorgeNote?: boolean;
+  /** 局中是否有乔治 */
+  georgeInPlay?: boolean;
   encounterOpenHold?: boolean;
   killerLevel: number;
   pendingKillerDiscards: number;
+  /** 刚由进化入手、本次超员弃牌里不能弃的牌 */
+  justUnlockedCards?: string[];
   pendingBlockade: boolean;
   pendingBlockadePlace?: string | null;
   relocatableBlockades?: Array<{ id: string; from: string; to: string }>;
@@ -322,12 +333,22 @@ export interface PublicSnapshot {
   yourKillerLocked?: string[] | null;
   winner: 'killer' | 'survivors' | null;
   winReason: string | null;
-  logs: Array<{ t: number; text: string; vis?: 'all' | 'survivor' | 'killer' }>;
+  logs: Array<{
+    t: number;
+    text: string;
+    vis?: 'all' | 'survivor' | 'killer';
+    /** true = 幸存者回合期间对杀手也公开的共通信息 */
+    needsCommon?: boolean;
+  }>;
   pendingSenseColorPick?: 'R' | 'B' | 'G' | null;
   pendingPathDraft?: { min: number; max: number; rooms: string[] } | null;
   killerRepairGuess?: number;
   rematchReady?: string[];
   youRematchReady?: boolean;
+  /** 是否开启【替换「鸿运当骰」等牌】 */
+  replacementDeck?: boolean;
+  /** 遭遇防御掷完骰、等决定是否用「鸿运当骰」重掷 */
+  pendingDice?: { playerId: string; values: number[]; attack: number; extra: number } | null;
   allKillerCards?: Array<{ id: string; name: string; locked: boolean }>;
   survivorActionsDone?: boolean;
   activePlayerId: string | null;
@@ -341,6 +362,9 @@ export interface PublicSnapshot {
 export type ClientAction =
   | { type: 'setName'; name: string }
   | { type: 'setMode'; mode: GameMode }
+  | { type: 'setMap'; mapId: string }
+  /** 房主开关【替换「鸿运当骰」等牌】 */
+  | { type: 'setReplacementDeck'; on: boolean }
   | { type: 'setSoloKiller'; characterId: string }
   | { type: 'setSoloSurvivor'; characterId: string }
   | { type: 'setFaction'; faction: 'killer' | 'survivor' }
@@ -351,6 +375,17 @@ export type ClientAction =
   | { type: 'move'; toRoomId: string }
   | { type: 'search' }
   | { type: 'repair' }
+  /** 乔治·聪明绝顶：弃工具箱换 +1 修理进度 */
+  | { type: 'georgeToolboxRepair'; actorPlayerId?: string }
+  /** 乔治·聪明绝顶：从搜索牌库抽一张 */
+  | { type: 'georgeDraw'; actorPlayerId?: string }
+  /** 用一张笔记（额外行动）：响声那张要带 toRoomId */
+  | { type: 'useNote'; noteId: string; toRoomId?: string; actorPlayerId?: string }
+  /** 思维敏捷：挑一张笔记（null = 放弃） */
+  | { type: 'chooseGeorgeNote'; noteId: string | null }
+  /** 遭遇防御：用「鸿运当骰」重掷选中的骰子 / 接受当前结果 */
+  | { type: 'rerollEncounterDice'; diceIndexes: number[] }
+  | { type: 'resolveEncounterDice' }
   | { type: 'clearFear' }
   | { type: 'removeBlockade' }
   | { type: 'tradeItem'; targetPlayerId: string; itemId: string; amount?: number; receiveItemId?: string; fromPlayerId?: string }

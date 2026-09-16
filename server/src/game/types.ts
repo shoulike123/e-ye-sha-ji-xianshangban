@@ -4,7 +4,7 @@
  */
 import type { CardDef, CharacterDef, EffectDef, MapDef, RulesDef } from '../content/schema.js';
 
-/** 现在棋局走到哪一页：大厅、选角、求生者、发现、噪音、杀手、遭遇、结束 */
+/** 现在棋局走到哪一页：大厅、选角、幸存者、发现、噪音、杀手、遭遇、结束 */
 export type Phase =
   | 'lobby'
   | 'characterSelect'
@@ -17,10 +17,10 @@ export type Phase =
   | 'gameOver';
 
 export type Faction = 'killer' | 'survivor' | 'spectator';
-/** solo=一个人热座，duo=1对1，vs2=1VS2两人共控求生者，multi=1VS3各控自己 */
+/** solo=一个人热座，duo=1对1，vs2=1对2两人共控幸存者，multi=1对3各控自己 */
 export type GameMode = 'solo' | 'duo' | 'vs2' | 'multi';
-/** 遭遇四步：选人 → 杀手进攻 → 求生者加防 →（旧规则留下的逃离，当前几乎不用） */
-/** 遭遇：选人 → 杀手是否加攻 → 求生者是否加防 → 被发现的人可移动 1 格 */
+/** 遭遇四步：选人 → 杀手进攻 → 幸存者加防 →（旧规则留下的逃离，当前几乎不用） */
+/** 遭遇：选人 → 杀手是否加攻 → 幸存者是否加防 → 被发现的人可移动 1 格 */
 export type EncounterStep = 'pick' | 'attack' | 'defend' | 'flee';
 /** 杀手回合三阶段：快速牌 → 主要行动 → 慢速牌 */
 export type KillerTurnStep = 'fast' | 'main' | 'slow';
@@ -85,13 +85,21 @@ export interface PublicPlayerView {
   actedThisRound?: boolean;
 }
 
-/** all=两边都看；survivor=只有求生者；killer=只有杀手（潜行中的走路等） */
+/** all=两边都看；survivor=只有幸存者；killer=只有杀手（潜行中的走路等） */
 export type LogVis = 'all' | 'survivor' | 'killer';
 
 export interface LogEntry {
   t: number;
   text: string;
   vis?: LogVis;
+  /**
+   * true = 幸存者大回合期间也对杀手可见的「共通信息」。
+   * 幸存者层日志只有这一类能在幸存者回合透给杀手：
+   * 哪里响了、谁消除恐惧、谁被治疗、钥匙上架、修理刚好完成、哪扇封堵被处理、
+   * 阶段与胜负、骰点结论、遭遇。其余（搜索到什么、谁走到哪、谁用了什么牌、
+   * 发现翻牌与留牌）一律只能等该大回合结束后才随战报历史开放。
+   */
+  needsCommon?: boolean;
 }
 
 export type StealthRevealKind = 'vanishScare' | 'lurkPick' | 'bloomKill';
@@ -109,6 +117,17 @@ export interface DiceRoll {
   attack: number;
   success: boolean;
   survivorName: string;
+  /** true = 这次是重掷后的结果 */
+  rerolled?: boolean;
+}
+
+/** 等幸存者决定要不要用「鸿运当骰」重掷（重掷完才结算战斗） */
+export interface PendingDice {
+  playerId: string;
+  values: number[];
+  attack: number;
+  /** 还能重掷几次（鸿运当骰每张给 1 次） */
+  extra: number;
 }
 
 export interface EncounterState {
@@ -127,7 +146,7 @@ export interface EncounterState {
   defenseItems: Record<string, string | null>;
   defenseOptions: Record<string, string[]>;
   fleeQueue: string[];
-  /** 遭遇开始时被发现的求生者，战后可移 1 格 */
+  /** 遭遇开始时被发现的幸存者，战后可移 1 格 */
   discoveredIds: string[];
   /** 开战时该地有陷阱：本场遭遇必触发（防御 +2 一次） */
   trapArmed: boolean;
@@ -141,9 +160,9 @@ export interface GameState {
   mode: GameMode;
   soloKillerCharacterId: string | null;
   soloSurvivorCharacterIds: string[];
-  /** 1对1 / 1VS2：哪些真人在操控求生者棋子 */
+  /** 1对1 / 1对2：哪些真人在操控幸存者棋子 */
   survivorOperators: Array<{ id: string; name: string; connected: boolean }>;
-  /** 1VS2：一般行动/额外行动等队友确认 */
+  /** 1对2：一般行动/额外行动等队友确认 */
   pendingCoopAction: {
     fromControllerId: string;
     fromName: string;
@@ -158,6 +177,8 @@ export interface GameState {
   round: number;
   contentVersion: string;
   map: MapDef;
+  /** 开局时载入的全部地图，供大厅换图用（只把有底图的发给前端） */
+  maps: MapDef[];
   rules: RulesDef;
   characters: CharacterDef[];
   cardById: Record<string, CardDef>;
@@ -201,7 +222,7 @@ export interface GameState {
   pendingMoveRange: number | null;
   pendingCardSpeed: 'fast' | 'slow' | 'special' | null;
   pendingItemDiscard: { playerId: string; count: number } | null;
-  /** 1VS3：给予/互换等对方点确认 */
+  /** 1对3：给予/互换等对方点确认 */
   pendingTrade: {
     fromPlayerId: string;
     targetPlayerId: string;
@@ -232,7 +253,7 @@ export interface GameState {
   /** 木屋 R4 手提箱：true=图一可摸发现牌，false=图二本大回合已用 */
   suitcaseAvailable: boolean;
   encounterTailBonus: number;
-  /** 本求生者大回合已修满 5，等大回合结束再把警车放到 5 */
+  /** 本幸存者大回合已修满 5，等大回合结束再把警车放到 5 */
   pendingRescueArm: boolean;
   /** 杀手上次被允许看到的钥匙数（大回合结束才更新） */
   killerPublicKeys: number;
@@ -240,11 +261,18 @@ export interface GameState {
   killerRepairGuess: number;
   /** 进化发锁定牌导致手牌超员时，才允许自选弃一张 */
   pendingUnlockDiscard: boolean;
+  /**
+   * 刚因进化入手、本次超员弃牌里**不能弃**的牌（就是这一级新发的锁定牌）。
+   * 手牌满了再摸到的牌不会进这里 —— 那些本来就该弃。
+   */
+  justUnlockedCards: string[];
   /** 呼啸而过：先点路径，确认后才走路+惊吓 */
   pendingPathDraft: { min: number; max: number; rooms: string[] } | null;
   /** 感知已选颜色，等确认 */
   pendingSenseColorPick: 'R' | 'B' | 'G' | null;
   rematchReady: string[];
+  /** 是否开启【替换「鸿运当骰」等牌】 */
+  replacementDeck: boolean;
   /** 本回合临时力量（疯狂 +2、谋杀者重现 +3 等），与永久力量分开显示如 4+3；回合结束清掉 */
   killerTurnPowerBonus: number;
   /** 升级后停下来让杀手确认新效果 */
@@ -253,6 +281,10 @@ export interface GameState {
   pendingWhizSearch: boolean;
   /** 幽魂 3 级：当前这一次过度，等杀手选弃 3 伤害或不用 */
   pendingOverFearWound: { targetId: string } | null;
+  /** 遭遇防御掷完骰，等幸存者决定要不要用「鸿运当骰」重掷 */
+  pendingDice: PendingDice | null;
+  /** 本次防御还能重掷几次（手里每张「鸿运当骰」给 1 次） */
+  pendingExtraRerolls: number;
   pendingOverFearQueue: string[];
   /** 遭遇开战效果还没走完（先惊吓，再 5 级伤害，再选人） */
   encounterOpenHold: boolean;
@@ -260,6 +292,13 @@ export interface GameState {
   whizJustResolved: boolean;
   /** 升到谋杀者 4 级后，确认进化再立刻选 4 扇门 */
   pendingEvoFourBlockade: boolean;
+  /**
+   * 乔治的笔记：每张只有 1 份，被拿走就从这里移除（拿走 = 进乔治装备栏）。
+   * 用掉的进 survivorDiscard。
+   */
+  notesDeck: string[];
+  /** 乔治刚做完一般行动、满足「思维敏捷」条件，等他挑一张笔记（可以点放弃） */
+  pendingGeorgeNote: boolean;
   /**
    * 封堵：先算要放几块；槽位不够就先一块块移除场上封堵，再放置。
    * 不再把旧封堵“挪”到新门。
@@ -281,6 +320,13 @@ export interface BlockadeJob {
 export type ClientAction =
   | { type: 'setName'; name: string }
   | { type: 'setMode'; mode: GameMode }
+  /** 房主在大厅/选角阶段换地图（对局开始后不许换） */
+  | { type: 'setMap'; mapId: string }
+  /**
+   * 房主开关【替换「鸿运当骰」等牌】：
+   * 开启后搜索牌堆里各 1 张钥匙 / 手斧 / 威士忌酒瓶 换成鸿运当骰 / 煤油灯 / 神秘包裹。
+   */
+  | { type: 'setReplacementDeck'; on: boolean }
   | { type: 'setSoloKiller'; characterId: string }
   | { type: 'setSoloSurvivor'; characterId: string }
   | { type: 'setFaction'; faction: 'killer' | 'survivor' }
@@ -291,6 +337,20 @@ export type ClientAction =
   | { type: 'move'; toRoomId: string }
   | { type: 'search' }
   | { type: 'repair' }
+  /** 乔治·聪明绝顶：弃工具箱换 +1 修理进度 */
+  | { type: 'georgeToolboxRepair'; actorPlayerId?: string }
+  /** 乔治·聪明绝顶：从搜索牌库抽一张 */
+  | { type: 'georgeDraw'; actorPlayerId?: string }
+  /**
+   * 用一张笔记（额外行动）。
+   * 拆除封堵：不需要额外参数；响声：带 toRoomId 指定任意一格。
+   */
+  | { type: 'useNote'; noteId: string; toRoomId?: string; actorPlayerId?: string }
+  /** 思维敏捷：挑一张笔记（noteId 为空 = 放弃） */
+  | { type: 'chooseGeorgeNote'; noteId: string | null }
+  /** 遭遇防御：用「鸿运当骰」重掷选中的骰子，或接受当前结果 */
+  | { type: 'rerollEncounterDice'; diceIndexes: number[] }
+  | { type: 'resolveEncounterDice' }
   | { type: 'clearFear' }
   | { type: 'removeBlockade' }
   | { type: 'tradeItem'; targetPlayerId: string; itemId: string; amount?: number; receiveItemId?: string; fromPlayerId?: string }
@@ -342,6 +402,8 @@ export interface PublicSnapshot {
   controllingActive: boolean;
   players: PublicPlayerView[];
   map: MapDef;
+  /** 大厅里可选的地图（只列画好底图、能真正开打的） */
+  playableMaps: Array<{ id: string; name: string; backgrounds?: { survivor?: string; killer?: string } }>;
   rules: RulesDef;
   characters: CharacterDef[];
   noises: string[];
@@ -359,9 +421,19 @@ export interface PublicSnapshot {
   pendingOverFearWound?: { targetId: string } | null;
   pendingBlockadeJob?: BlockadeJob | null;
   removableBoardBlockades?: Array<{ id: string; from: string; to: string }>;
+  /** 乔治还没被拿走的笔记（杀手看不到内容） */
+  georgeNotes?: Array<{ id: string; name: string }>;
+  /** 乔治全部 3 张笔记的定义（双方都看得到，用于「乔治的笔记」图鉴） */
+  allGeorgeNotes?: Array<{ id: string; name: string; text: string }>;
+  /** 「思维敏捷」等乔治挑笔记 */
+  pendingGeorgeNote?: boolean;
+  /** 局中是否有乔治（决定要不要显示「乔治的笔记」按钮） */
+  georgeInPlay?: boolean;
   encounterOpenHold?: boolean;
   killerLevel: number;
   pendingKillerDiscards: number;
+  /** 刚由进化入手、本次超员弃牌里不能弃的牌 */
+  justUnlockedCards?: string[];
   pendingBlockade: boolean;
   pendingBlockadePlace?: string | null;
   relocatableBlockades?: Array<{ id: string; from: string; to: string }>;
@@ -372,6 +444,8 @@ export interface PublicSnapshot {
   killerRepairGuess?: number;
   rematchReady?: string[];
   youRematchReady?: boolean;
+  /** 是否开启【替换「鸿运当骰」等牌】 */
+  replacementDeck?: boolean;
   allKillerCards?: Array<{ id: string; name: string; locked: boolean }>;
   survivorActionsDone?: boolean;
   senseHighlight?: 'R' | 'B' | 'G' | null;
@@ -418,7 +492,7 @@ export interface PublicSnapshot {
   pendingItemDiscard: {
     playerId: string;
     count: number;
-    /** 给弃装界面用：即使当前仍是杀手视角也能看到该求生者背包 */
+    /** 给弃装界面用：即使当前仍是杀手视角也能看到该幸存者背包 */
     name?: string;
     inventorySlots?: number;
     items?: Record<string, number>;
@@ -450,6 +524,8 @@ export interface PublicSnapshot {
   lastDiscoveryCardId: string | null;
   discoveryOptions: string[];
   lastDiceRoll: DiceRoll | null;
+  /** 遭遇防御掷完骰、等决定是否重掷（鸿运当骰） */
+  pendingDice?: PendingDice | null;
   encounter: EncounterState | null;
   killerHandCount: number;
   killerDeckCount: number;

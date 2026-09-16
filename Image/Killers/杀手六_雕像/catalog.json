@@ -1,0 +1,26 @@
+{
+  "id": "killer6",
+  "name": "雕像",
+  "nameEn": "Statues",
+  "folder": "杀手六_雕像",
+  "startingPower": 5,
+  "portrait": "立绘.png",
+  "back": "牌背.png",
+  "intro": "人物介绍牌.png",
+  "levelCard": "等级牌.png",
+  "cards": [
+    "卡牌/01_感知.png",
+    "卡牌/02_感知.png",
+    "卡牌/03_巡邏.png",
+    "卡牌/04_巡邏.png",
+    "卡牌/05_巡邏.png",
+    "卡牌/06_處決.png",
+    "卡牌/07_重整旗鼓.png",
+    "卡牌/08_重整旗鼓.png",
+    "卡牌/09_釋放.png",
+    "卡牌/10_召唤石碑.png",
+    "卡牌/11_召唤石碑.png",
+    "卡牌/12_召唤石碑.png",
+    "卡牌/13_圍困.png"
+  ]
+}

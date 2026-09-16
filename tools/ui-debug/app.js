@@ -186,7 +186,7 @@
       $('phaseLabel').textContent = '杀手行动';
       $('powerLabel').textContent = state.mapId === 'cabin' ? '2' : '5';
     } else {
-      el.innerHTML = `<h3>行动 · 求生者（调试假数据）</h3>
+      el.innerHTML = `<h3>行动 · 幸存者（调试假数据）</h3>
         <p class="muted">点地图高亮格移动。当前位置：${roomName(state.youRoom)}</p>
         <div class="row">
           <button type="button">搜索</button>
@@ -226,7 +226,7 @@
     const bg =
       state.side === 'killer' ? state.map.backgrounds?.killer : state.map.backgrounds?.survivor;
     $('mapImg').src = encodeURI(bg || '');
-    document.title = `${state.map.name} · ${state.side === 'killer' ? '杀手' : '求生者'}界面调试`;
+    document.title = `${state.map.name} · ${state.side === 'killer' ? '杀手' : '幸存者'}界面调试`;
     $('sideSelect').value = state.side;
     $('mapSelect').value = state.mapId;
     const start = state.side === 'killer' ? state.map.killerStartRoomId : state.map.survivorStartRoomId;

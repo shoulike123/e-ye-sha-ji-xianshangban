@@ -3,12 +3,12 @@
  * 裁判（engine.ts）说“走一步 / 搜一下 / 封一扇门”，真正动手的是这里。
  * 卡牌 JSON 里的 effects 也会走到 runEffects / applyOne。
  */
-import type { EffectDef, MapDef } from '../content/schema.js';
+import type { CardDef, EffectDef, MapDef } from '../content/schema.js';
 import type { EffectContext, GameState, LogVis, PlayerState } from './types.js';
 
 /** 往战报本上写一行。vis='survivor' 的字杀手看不见 */
-export function log(state: GameState, text: string, vis: LogVis = 'all') {
-  state.logs.push({ t: Date.now(), text, vis });
+export function log(state: GameState, text: string, vis: LogVis = 'all', needsCommon = false) {
+  state.logs.push({ t: Date.now(), text, vis, needsCommon });
   if (state.logs.length > 200) state.logs.shift();
 }
 
@@ -59,12 +59,20 @@ export function itemName(itemId: string): string {
     flashlight: '手电筒',
     adrenaline: '肾上腺素',
     trap: '陷阱零件',
+    lamp: '煤油灯',
+    parcel: '神秘包裹',
   };
   return map[itemId] ?? itemId;
 }
 
 export function doorId(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/** 把一个门号字符串统一成规范写法；拿到的已经是规范写法就原样返回 */
+export function canonicalDoorId(raw: string): string {
+  const pair = parseDoor(raw);
+  return pair ? doorId(pair[0], pair[1]) : raw;
 }
 
 export function parseDoor(id: string): [string, string] | null {
@@ -92,7 +100,8 @@ export function generalAdjacentRooms(map: MapDef, from: string): string[] {
   return out;
 }
 
-/** 安娜「小心谨慎」：搜索到物品不响；搜到钥匙、翻手提箱仍按牌面响声 */
+/** 安娜「小心谨慎」：凡是她自己发动的「搜索」都不发出响声（钥匙、工具箱等一律不响）。
+ *  只作用于搜索动作；修理、草药、物品使用、翻手提箱等照常按牌面响声结算。 */
 export function isCautiousSearcher(state: GameState, playerId: string): boolean {
   const p = state.players[playerId];
   if (!p) return false;
@@ -107,6 +116,80 @@ export function isEngineeringExpert(state: GameState, playerId: string): boolean
   const ch = state.characters.find((c) => c.id === p.characterId);
   if (ch?.skills.some((s) => s.id === 'engineering_expert' || s.name.includes('工程专家'))) return true;
   return /约翰逊|engineer|survivor2/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
+}
+
+/** 索菲亚·斯科特（相机的主人） */
+export function isSophia(state: GameState, playerId: string): boolean {
+  const p = state.players[playerId];
+  if (!p) return false;
+  const ch = state.characters.find((c) => c.id === p.characterId);
+  return /survivor4|索菲亚|索菲娅|sophia/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
+}
+
+/** 马尔科·卡尔文（医药包的主人） */
+export function isMarco(state: GameState, playerId: string): boolean {
+  const p = state.players[playerId];
+  if (!p) return false;
+  const ch = state.characters.find((c) => c.id === p.characterId);
+  return /survivor3|马尔科|marco/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
+}
+
+/** 乔治·卡朋特（教授，笔记的主人） */
+export function isGeorge(state: GameState, playerId: string): boolean {
+  const p = state.players[playerId];
+  if (!p) return false;
+  const ch = state.characters.find((c) => c.id === p.characterId);
+  return /survivor6|乔治|george/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
+}
+
+/** 局中是否有乔治在场 */
+export function georgeInPlay(state: GameState): boolean {
+  return Object.values(state.players).some(
+    (p) => p.faction === 'survivor' && p.alive && isGeorge(state, p.id),
+  );
+}
+
+/** 这格是不是「有书本标记」的地点（乔治的特殊行动只能在这里做） */
+export function isBookRoom(state: GameState, roomId: string | null | undefined): boolean {
+  if (!roomId) return false;
+  const room = state.map.rooms.find((r) => r.id === roomId);
+  return Boolean(room?.tags.includes('special-book'));
+}
+
+/** 乔治的 3 张笔记定义 */
+export function georgeNoteDefs(state: GameState): CardDef[] {
+  return Object.values(state.cardById).filter((c) => c.type === 'note');
+}
+
+/** 乔治手里的这类笔记有几张 */
+export function countGeorgeNotes(p: PlayerState): number {
+  return Object.entries(p.items)
+    .filter(([id]) => id.startsWith('george_note_'))
+    .reduce((sum, [, n]) => sum + n, 0);
+}
+
+/**
+ * 乔治是否持有「用物品防御 +2」那张笔记。
+ * 只有真正使用了防御物品时才生效（由调用方判断），并且和其他加成叠加。
+ */
+export function georgeDefenseNoteBonus(state: GameState, p: PlayerState): number {
+  if (!isGeorge(state, p.id)) return 0;
+  return (p.items.george_note_defense ?? 0) > 0 ? 2 : 0;
+}
+
+/** 只能本人使用的物品（索菲亚的相机 / 马尔科的医药包）；不是本人就返回一句提示 */
+export function personalItemBlockReason(
+  state: GameState,
+  playerId: string,
+  itemId: string,
+): string | null {
+  if (itemId === 'sophia_camera') {
+    return isSophia(state, playerId) ? null : '索菲亚的相机只能由索菲亚本人使用';
+  }
+  if (itemId === 'marco_medkit') {
+    return isMarco(state, playerId) ? null : '马尔科的医药包只能由马尔科本人使用';
+  }
+  return null;
 }
 
 export function takeEarliestFromSurvivorDiscard(state: GameState, itemId: string): boolean {
@@ -142,7 +225,7 @@ export function unblockedDoorsAt(
   state: GameState,
   roomId: string,
 ): Array<{ id: string; other: string }> {
-  return doorsAt(state, roomId).filter((d) => !state.blockades.includes(d.id));
+  return doorsAt(state, roomId).filter((d) => !isDoorBlocked(state, d.id));
 }
 
 export function injuredSurvivorIds(state: GameState): string[] {
@@ -151,21 +234,21 @@ export function injuredSurvivorIds(state: GameState): string[] {
     .map((s) => s.id);
 }
 
-/** 与治疗者同一地点、还活着且已受伤的求生者（含自己） */
+/** 与治疗者同一地点、还活着且已受伤的幸存者（含自己） */
 export function injuredAlliesHere(state: GameState, healerId: string): string[] {
   const healer = state.players[healerId];
   if (!healer?.roomId) return [];
   return injuredSurvivorIds(state).filter((id) => state.players[id]?.roomId === healer.roomId);
 }
 
-/** 只能治疗同一地点的受伤求生者（包括自己） */
+/** 只能治疗同一地点的受伤幸存者（包括自己） */
 export function assertHealSameRoom(state: GameState, healerId: string, targetId: string): void {
   const healer = actor(state, healerId);
   const target = state.players[targetId];
   if (!target?.alive || target.faction !== 'survivor') throw new Error('治疗目标无效');
   if (target.hp >= target.maxHp) throw new Error(`${target.name} 未受伤，不能治疗`);
   if (!healer.roomId || healer.roomId !== target.roomId) {
-    throw new Error('只能治疗与你在同一地点的求生者（包括自己）');
+    throw new Error('只能治疗与你在同一地点的幸存者（包括自己）');
   }
 }
 
@@ -189,7 +272,7 @@ export function passageNeighbors(map: MapDef, from: string): string[] {
 
 export function trySecretPassage(state: GameState, playerId: string, toRoomId: string): void {
   const p = actor(state, playerId);
-  if (p.faction !== 'survivor' || !p.alive) throw new Error('只有求生者可通过秘密通道');
+  if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可通过秘密通道');
   if (!p.roomId) throw new Error('不在地图上');
   if (!passageNeighbors(state.map, p.roomId).includes(toRoomId)) {
     throw new Error('该地点没有通往目标的秘密通道');
@@ -237,11 +320,27 @@ function neighborsOpen(
     else if ((e.bidirectional ?? true) && e.to === from) other = e.from;
     if (!other) continue;
     const id = doorId(from, other);
-    const blocked = isDoorEdge(e.pathType) && state.blockades.includes(id);
+    /**
+     * 判断「这扇门被封了吗」必须用规范门号比较：
+     * 地图 JSON 里边的方向可能是 R1→B1，而封堵表里存的是排序后的 B1|R1，
+     * 直接用字符串全等会漏判 —— 之前就是这个原因导致「杀手走过封堵没拆掉」。
+     */
+    const blocked = isDoorEdge(e.pathType) && isDoorBlocked(state, id);
     if (blocked && !ignoreBlockades) continue;
     out.push(other);
   }
-  return out;
+  /**
+   * 排序后再返回：多条同样短的路线时，取房号靠前的那条。
+   * 不排序的话这里用的是地图 JSON 里的边顺序，会和客户端预览（也按房号排序）
+   * 选到不同路线 —— 表现就是「显示走 B5，实际走了 R1」。
+   */
+  return out.sort();
+}
+
+/** 这扇门（任意写法）是不是已经在封堵表里 */
+export function isDoorBlocked(state: GameState, door: string): boolean {
+  const want = canonicalDoorId(door);
+  return state.blockades.some((id) => canonicalDoorId(id) === want);
 }
 
 /** 某格的杀手邻接：封堵不挡路，可走杀手通道。 */
@@ -349,6 +448,8 @@ const DEFENSE_ITEMS: Record<
   axe: { bonus: 1, consume: true, killerDraw: 0 },
   /** 用左轮防御：须同时持有弹药包；每次弃 1 弹药包，左轮保留 */
   revolver: { bonus: 4, consume: true, consumeItemId: 'ammo', killerDraw: 0 },
+  /** 煤油灯（「替换鸿运当骰等牌」开启时的替换牌）：+1，可反复 */
+  lamp: { bonus: 1, consume: false, killerDraw: 0 },
 };
 
 export function defenseItemInfo(itemId: string) {
@@ -411,6 +512,22 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+/** 修理进度上限 = rules.repairNeeded（默认 5）。超出的部分不再累加。 */
+export function addRepairProgress(state: GameState, amount: number): number {
+  const cap = state.rules.repairNeeded;
+  const before = state.repairProgress;
+  state.repairProgress = Math.min(cap, before + amount);
+  return state.repairProgress - before;
+}
+
+/** 钥匙上限 = rules.keysNeeded（默认 5）。多出来的钥匙不上架、也不计数。 */
+export function addKeys(state: GameState, amount: number): number {
+  const cap = state.rules.keysNeeded;
+  const before = state.keysCollected;
+  state.keysCollected = Math.min(cap, before + amount);
+  return state.keysCollected - before;
+}
+
 export function killerHandMax(state: GameState): number {
   return state.rules.killerHandMax ?? 5;
 }
@@ -435,12 +552,10 @@ export function upgradeKiller(state: GameState) {
 }
 
 /**
- * 即将从摸牌堆拿 n 张但不够时：升级 → 洗弃牌接到摸牌堆底（原牌按顺序留顶上）。
- * 挡住攻击从摸牌堆弃 2、长剑等让杀手摸牌、回合结束摸 3，都走这里。
+ * 摸牌堆见底、但还要从里面拿牌时才调用：进化 → 把弃牌堆洗匀接到摸牌堆底。
+ * 「先摸完现有的、空了才进化」由调用方逐张控制，这里只管补牌。
  */
-function refillKillerDeckIfShort(state: GameState, need: number): void {
-  if (need <= 0) return;
-  if (state.killerDeck.length >= need) return;
+function refillKillerDeckIfEmpty(state: GameState): void {
   const kept = state.killerDeck.length;
   upgradeKiller(state);
   if (state.killerDiscard.length === 0) return;
@@ -487,12 +602,19 @@ export function drawDiscoveryCard(state: GameState): string | null {
   return state.discoveryDeck.shift() ?? null;
 }
 
+/**
+ * 杀手摸 n 张。**一张一张摸**：
+ * 摸牌堆空了但还要继续摸时，才触发进化 → 把弃牌堆洗匀接到摸牌堆底 → 再接着摸。
+ * 所以一次摸 3 张、中途牌堆见底，只会进化一次，剩下的张数用洗回来的牌继续摸。
+ * 手牌超上限时摸到的牌正面向上直接进弃牌堆（仍算从摸牌堆拿走）。
+ */
 export function drawKillerCards(state: GameState, n: number) {
   const max = killerHandMax(state);
-  refillKillerDeckIfShort(state, n);
   let got = 0;
   let overflow = 0;
   for (let i = 0; i < n; i++) {
+    // 每摸一张之前先看看牌堆还有没有；没有就现洗现摸
+    if (state.killerDeck.length === 0) refillKillerDeckIfEmpty(state);
     const c = state.killerDeck.shift();
     if (!c) break;
     if (state.killerHand.length < max) {
@@ -508,15 +630,18 @@ export function drawKillerCards(state: GameState, n: number) {
   if (overflow > 0) log(state, `多摸的 ${overflow} 张已直接置入弃牌堆。`);
 }
 
+/**
+ * 从摸牌堆弃 n 张（挡住攻击弃 2、长剑让杀手摸 1 等都走这里）。
+ * 同样是**一张一张拿**：中途牌堆见底就触发一次进化，再把弃牌洗回摸牌堆继续弃。
+ */
 export function discardFromKillerDeck(state: GameState, n: number) {
-  refillKillerDeckIfShort(state, n);
   let got = 0;
   for (let i = 0; i < n; i++) {
+    if (state.killerDeck.length === 0) refillKillerDeckIfEmpty(state);
     const c = state.killerDeck.shift();
-    if (c) {
-      state.killerDiscard.push(c);
-      got += 1;
-    }
+    if (!c) break;
+    state.killerDiscard.push(c);
+    got += 1;
   }
   if (got > 0) log(state, `杀手从牌库弃了 ${got} 张牌。`);
 }
@@ -545,7 +670,7 @@ export function setOverFearHandler(fn: (state: GameState, targetId: string) => v
   onSurvivorOverFear = fn;
 }
 
-/** 给求生者加恐惧。已经 2 枚再加就是过度，要点名报位置 */
+/** 给幸存者加恐惧。已经 2 枚再加就是过度，要点名报位置 */
 export function addFear(state: GameState, targetId: string, amount: number) {
   if (!state.rules.enableFear) return;
   const target = actor(state, targetId);
@@ -557,10 +682,16 @@ export function addFear(state: GameState, targetId: string, amount: number) {
       log(state, `${target.name} 获得恐惧标记（${target.fear}/${tokenMax}）。`);
     } else {
       target.overFear = true;
-      if (target.roomId) pushNoise(state, target.roomId);
+      /**
+       * 惊吓过度的响声要报成「谁在哪里因惊吓过度发出了声音」——
+       * 所以让 pushNoise 闭嘴，由这里写那一条（不重复报）。
+       */
+      if (target.roomId) pushNoise(state, target.roomId, true);
       log(
         state,
-        `${target.name} 惊吓过度！不上第三枚标记，在「${roomName(state, target.roomId)}」发出响声。`,
+        `${target.name} 在「${roomName(state, target.roomId)}」因惊吓过度发出了声音。`,
+        'all',
+        true,
       );
       onSurvivorOverFear?.(state, target.id);
     }
@@ -596,7 +727,7 @@ export function applyDamage(
     log(state, `${target.name} 倒下了！`);
     if (state.rules.killerWinsOnAnyKill) {
       state.winner = 'killer';
-      state.winReason = `${actor(state, sourceId).name} 击杀了一名求生者。`;
+      state.winReason = `${actor(state, sourceId).name} 击杀了一名幸存者。`;
       state.phase = 'gameOver';
     }
   }
@@ -612,7 +743,7 @@ export function applyHeal(state: GameState, targetId: string, amount: number): v
     throw new Error(`${target.name} 未受伤，不能治疗`);
   }
   target.hp = Math.min(target.maxHp, target.hp + amount);
-  log(state, `${target.name} 恢复生命至 ${target.hp}/${target.maxHp}。`);
+  log(state, `${target.name} 恢复生命至 ${target.hp}/${target.maxHp}。`, 'all', true);
 }
 
 export type HealItemDef = { amount: number; consume: boolean; noiseAtUser: boolean; clearFear?: boolean };
@@ -626,13 +757,16 @@ export function healItemDef(itemId: string): HealItemDef | null {
   return HEAL_ITEMS[itemId] ?? null;
 }
 
-/** 房间发出响声。已有标记则跳过；爆竹当回合不额外放标记。 */
-export function pushNoise(state: GameState, roomId: string) {
+/**
+ * 房间发出响声。已有标记则跳过；爆竹当回合不额外放标记。
+ * `quiet` = 调用方自己会写更具体的战报（比如惊吓过度），这里就别再报一条通用的。
+ */
+export function pushNoise(state: GameState, roomId: string, quiet = false) {
   if (state.firecrackerThisRound) return;
   if (!roomId) return;
   if (state.noises.includes(roomId)) return;
   state.noises.push(roomId);
-  log(state, `噪音出现在「${roomName(state, roomId)}」。`);
+  if (!quiet) log(state, `响声出现在「${roomName(state, roomId)}」。`, 'all', true);
 }
 
 export function removableBlockades(state: GameState): string[] {
@@ -643,18 +777,24 @@ export function removableBlockades(state: GameState): string[] {
 /** 只负责落到一扇门上。槽位不够时返回 full，由封堵任务先移除场上的块，不再「挪」旧封堵。 */
 export function tryPlaceBlockadeDoor(state: GameState, doorId: string): 'ok' | 'skip' | 'full' {
   if (!state.rules.enableBlockades) return 'skip';
-  if (state.blockades.includes(doorId)) return 'skip';
+  /**
+   * 统一门号写法（房号排序后用 | 拼）再存。
+   * 否则 "R1|B1" 和 "B1|R1" 会被当成两扇不同的门 ——
+   * 最典型的后果：杀手走过已封堵的门时拆不掉它（查的是规范写法，存的却是另一种写法）。
+   */
+  const id = canonicalDoorId(doorId);
+  if (isDoorBlocked(state, id)) return 'skip';
   const max = state.rules.blockadeTokenMax;
   if (state.blockades.length >= max) return 'full';
-  state.blockades.push(doorId);
+  state.blockades.push(id);
   if (!state.blockadesThisAction) state.blockadesThisAction = [];
-  state.blockadesThisAction.push(doorId);
-  const pair = parseDoor(doorId);
+  state.blockadesThisAction.push(id);
+  const pair = parseDoor(id);
   log(
     state,
     pair
       ? `封堵「${roomName(state, pair[0])}」与「${roomName(state, pair[1])}」之间的门（${state.blockades.length}/${max}）。`
-      : `封堵 ${doorId}（${state.blockades.length}/${max}）。`,
+      : `封堵 ${id}（${state.blockades.length}/${max}）。`,
   );
   return 'ok';
 }
@@ -688,7 +828,7 @@ function finishSealAllIfDone(state: GameState) {
 export function relocateBlockadeToPending(state: GameState, oldDoorId: string): void {
   const neu = state.pendingBlockadePlace;
   if (!neu) throw new Error('当前不是迁移封堵');
-  if (!state.blockades.includes(oldDoorId)) throw new Error('那里没有封堵');
+  if (!isDoorBlocked(state, oldDoorId)) throw new Error('那里没有封堵');
   if ((state.blockadesThisAction ?? []).includes(oldDoorId)) {
     throw new Error('不能拆除本次行动中刚封上的门');
   }
@@ -754,16 +894,21 @@ export function placeBlockade(state: GameState, doorOrRoom: string, otherRoom?: 
 export function placeAllDoorsAt(state: GameState, roomId: string): boolean {
   state.sealAllRoomId = roomId;
   state.pendingSealQueue = doorsAt(state, roomId)
-    .filter((d) => !state.blockades.includes(d.id))
+    .filter((d) => !isDoorBlocked(state, d.id))
     .map((d) => d.id);
   return continueSealQueue(state);
 }
 
 export function removeBlockade(state: GameState, doorOrRoom: string) {
-  if (state.blockades.includes(doorOrRoom)) {
-    const i = state.blockades.indexOf(doorOrRoom);
-    state.blockades.splice(i, 1);
-    const pair = parseDoor(doorOrRoom);
+  /**
+   * 按「规范化门号」找，而不是字符串全等：
+   * "R1|B1" 与 "B1|R1" 是同一扇门，旧存档里可能存的是没排序的那种写法。
+   */
+  const canonical = canonicalDoorId(doorOrRoom);
+  const hit = state.blockades.find((id) => canonicalDoorId(id) === canonical);
+  if (hit) {
+    state.blockades.splice(state.blockades.indexOf(hit), 1);
+    const pair = parseDoor(hit);
     log(
       state,
       pair
@@ -772,13 +917,14 @@ export function removeBlockade(state: GameState, doorOrRoom: string) {
     );
     return true;
   }
-  const hit = state.blockades.find((id) => {
+  // 传入的是房间号：拆该房间上任意一块封堵
+  const byRoom = state.blockades.find((id) => {
     const p = parseDoor(id);
     return p && (p[0] === doorOrRoom || p[1] === doorOrRoom);
   });
-  if (!hit) return false;
-  state.blockades.splice(state.blockades.indexOf(hit), 1);
-  const pair = parseDoor(hit);
+  if (!byRoom) return false;
+  state.blockades.splice(state.blockades.indexOf(byRoom), 1);
+  const pair = parseDoor(byRoom);
   log(
     state,
     pair
@@ -823,16 +969,18 @@ function applyOne(state: GameState, p: PlayerState, fx: EffectDef, ctx: EffectCo
       );
       setStealth(p, false);
       if (victims.length === 0) {
-        log(state, `${p.name} 搜查房间，没有发现人。`);
+        log(state, `${p.name} 搜索房间，没有发现人。`);
       } else {
-        log(state, `${p.name} 发现了 ${victims.length} 名求生者！`);
+        log(state, `${p.name} 发现了 ${victims.length} 名幸存者！`);
       }
       break;
     }
     case 'repair': {
       const amount = typeof fx.value === 'number' ? fx.value : 1;
-      state.repairProgress += amount;
+      const before = state.repairProgress;
+      addRepairProgress(state, amount);
       log(state, `无线电修理进度 ${state.repairProgress}/${state.rules.repairNeeded}。`);
+      announceRepairIfJustFinished(state, before);
       maybeArmRescue(state);
       if (state.rules.repairMakesNoise && p.roomId) pushNoise(state, p.roomId);
       break;
@@ -871,8 +1019,13 @@ function applyOne(state: GameState, p: PlayerState, fx: EffectDef, ctx: EffectCo
       const itemId = fx.itemId ?? 'item';
       const amount = fx.amount ?? 1;
       if (itemId === 'key') {
-        state.keysCollected += amount;
-        log(state, `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`);
+        const added = addKeys(state, amount);
+        log(
+          state,
+          added > 0
+            ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
+            : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
+        );
       } else {
         p.items[itemId] = (p.items[itemId] ?? 0) + amount;
         log(state, `${p.name} 获得 ${amount}×${itemName(itemId)}。`, 'survivor');
@@ -891,7 +1044,7 @@ function applyOne(state: GameState, p: PlayerState, fx: EffectDef, ctx: EffectCo
       break;
     case 'quietSearch':
       p.quietSearch = Boolean(fx.value ?? true);
-      log(state, `${p.name} 准备静默搜索。`);
+      log(state, `${p.name} 准备静默搜索物资。`);
       break;
     case 'addFear': {
       const amount = typeof fx.value === 'number' ? fx.value : 1;
@@ -906,7 +1059,7 @@ function applyOne(state: GameState, p: PlayerState, fx: EffectDef, ctx: EffectCo
     case 'clearFear':
       p.fear = 0;
       p.overFear = false;
-      log(state, `${p.name} 消除恐惧。`);
+      log(state, `${p.name} 消除恐惧。`, 'all', true);
       break;
     case 'placeBlockade':
       if (p.roomId) {
@@ -982,7 +1135,7 @@ function pathRooms(
   return null;
 }
 
-/** 尝试把棋子走到 toRoomId。步数不够、被封堵（求生者）或房间不存在就失败 */
+/** 尝试把棋子走到 toRoomId。步数不够、被封堵（幸存者）或房间不存在就失败 */
 export function tryMove(
   state: GameState,
   playerId: string,
@@ -1011,7 +1164,8 @@ export function tryMove(
   if (p.faction === 'killer') {
     for (let i = 0; i < path.length - 1; i++) {
       const id = doorId(path[i]!, path[i + 1]!);
-      if (state.blockades.includes(id)) {
+      // 用规范门号判定（地图边序可能给出另一种写法）
+      if (isDoorBlocked(state, id)) {
         crossed = true;
         // 潜行穿过封堵不拆；平时走过才拆
         if (!p.stealth) removeBlockade(state, id);
@@ -1120,32 +1274,32 @@ export function senseRooms(state: GameState, roomIds: string[]): void {
   );
 }
 
-/** 在搜索点抽 1 张。杀手搜到人会记 lastSearchFound，求生者抽到钥匙就上架 */
+/** 在搜索点抽 1 张。杀手搜到人会记 lastSearchFound，幸存者抽到钥匙就上架 */
 export function doSearch(state: GameState, playerId: string): void {
   const p = actor(state, playerId);
-  if (!p.roomId || !p.alive) throw new Error('无法搜索');
+  if (!p.roomId || !p.alive) throw new Error('无法搜索物资');
   const room = state.map.rooms.find((r) => r.id === p.roomId);
   if (!room?.tags.includes('searchable')) {
-    throw new Error('当前地点不能搜索');
+    throw new Error('当前地点不能搜索物资');
   }
   if (p.faction === 'survivor' && killerInRoom(state, p.roomId)) {
-    throw new Error('与杀手同地（或杀手在此进入潜行）不能搜索');
+    throw new Error('与杀手同地（或杀手在此进入潜行）不能搜索物资');
   }
   if (p.searchedThisTurn) {
-    throw new Error('本回合已经搜索过了');
+    throw new Error('本回合已经搜索过物资了');
   }
   p.searchedThisTurn = true;
   const cardId = drawSearchCard(state);
   if (!cardId) {
-    log(state, '搜索牌库已空。');
+    log(state, '搜索物资：牌库已空。');
     p.quietSearch = false;
     return;
   }
   const card = state.cardById[cardId];
   log(state, `${p.name} 找到了：${card?.name ?? cardId}。`, card && isKeyCard(card) ? 'all' : 'survivor');
-  // 安娜只让「搜索到的物品」静音；钥匙仍响。翻手提箱不走这里。
-  const annaQuietItem = isCautiousSearcher(state, playerId) && Boolean(card) && !isKeyCard(card);
-  const makeNoise = Boolean(card?.makesNoise) && !annaQuietItem;
+  // 安娜「小心谨慎」：她搜索时不发出任何响声，钥匙、工具箱等一律不响。
+  // 只影响「搜索」这一个动作；修理、草药、物品使用、翻手提箱照常按牌面响声结算。
+  const makeNoise = Boolean(card?.makesNoise) && !isCautiousSearcher(state, playerId);
   p.quietSearch = false;
   if (card && isKeyCard(card)) {
     runEffects({ state, actorId: playerId, effects: card.effects.filter((e) => e.op !== 'noise') });
@@ -1178,15 +1332,17 @@ export function doRepair(state: GameState, playerId: string): void {
     throw new Error('本阶段已经有人修理过了');
   }
   if (killerInRoom(state, p.roomId)) throw new Error('与杀手同地不能修理');
+  const before = state.repairProgress;
   state.repairedThisPhase = true;
   p.repairedThisTurn = true;
-  state.repairProgress += 1;
+  addRepairProgress(state, 1);
   log(state, `${p.name} 修理无线电（${state.repairProgress}/${state.rules.repairNeeded}）。`, 'survivor');
+  announceRepairIfJustFinished(state, before);
   maybeArmRescue(state);
   if (state.rules.repairMakesNoise && p.roomId) pushNoise(state, p.roomId);
 }
 
-/** 公开站在这格，或潜行是从这格进的：求生者都不能搜/修 */
+/** 公开站在这格，或潜行是从这格进的：幸存者都不能搜/修 */
 export function killerInRoom(state: GameState, roomId: string): boolean {
   return Object.values(state.players).some((pl) => {
     if (pl.faction !== 'killer' || !pl.alive) return false;
@@ -1194,6 +1350,17 @@ export function killerInRoom(state: GameState, roomId: string): boolean {
     if (pl.stealth && pl.stealthOriginRoomId === roomId) return true;
     return false;
   });
+}
+
+/**
+ * 修满的那一刻，双方都要知道「修理已完成」——这是共通信息。
+ * 中间的 1～4 次进度对杀手保密，所以只在刚好跨过 repairNeeded 这一下才广播。
+ */
+export function announceRepairIfJustFinished(state: GameState, before: number): void {
+  const need = state.rules.repairNeeded;
+  if (before < need && state.repairProgress >= need) {
+    log(state, '修理完成！救援系统启动。', 'all', true);
+  }
 }
 
 export function maybeArmRescue(state: GameState) {
@@ -1204,7 +1371,7 @@ export function maybeArmRescue(state: GameState) {
     state.rules.rescueWaitRounds > 0
   ) {
     state.pendingRescueArm = true;
-    log(state, `无线电已修满。求生者大回合结束后，警车才会放到 5。`, 'survivor');
+    log(state, `无线电已修满。幸存者大回合结束后，警车才会放到 5。`, 'survivor');
   }
 }
 
@@ -1223,7 +1390,7 @@ export function applyPassiveBonuses(state: GameState, playerId: string) {
   }
 }
 
-/** 钥匙到齐且人都在出口，或警车开到 0，求生者赢 */
+/** 钥匙到齐且人都在出口，或警车开到 0，幸存者赢 */
 export function checkSurvivorWin(state: GameState): void {
   if (state.phase === 'gameOver') return;
   const survivors = Object.values(state.players).filter(
@@ -1235,7 +1402,7 @@ export function checkSurvivorWin(state: GameState): void {
     state.winner = 'survivors';
     state.winReason = '无线电修好，警车抵达出口。';
     state.phase = 'gameOver';
-    log(state, '求生者胜利：救援抵达！');
+    log(state, '幸存者胜利：救援抵达！');
     return;
   }
 
@@ -1246,7 +1413,7 @@ export function checkSurvivorWin(state: GameState): void {
     state.winner = 'survivors';
     state.winReason = '集齐钥匙，从入口逃脱。';
     state.phase = 'gameOver';
-    log(state, '求生者胜利：从入口逃脱！');
+    log(state, '幸存者胜利：从入口逃脱！');
     return;
   }
 
@@ -1257,7 +1424,7 @@ export function checkSurvivorWin(state: GameState): void {
       state.winner = 'survivors';
       state.winReason = '从隐藏出口逃脱。';
       state.phase = 'gameOver';
-      log(state, '求生者胜利：隐藏出口！');
+      log(state, '幸存者胜利：隐藏出口！');
     }
   }
 }

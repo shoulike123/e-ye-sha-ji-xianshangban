@@ -1,14 +1,14 @@
 /**
  * 把程序内部的英文代号翻译成界面上的中文。
- * 电脑喜欢 lobby、survivorMain 这种短名字；人要看“大厅”“求生者行动”。
+ * 电脑喜欢 lobby、survivorMain 这种短名字；人要看“大厅”“幸存者行动”。
  */
 
 export const PHASE_LABEL: Record<string, string> = {
   lobby: '大厅',
   characterSelect: '选角',
-  survivorMain: '求生者行动',
+  survivorMain: '幸存者行动',
   discovery: '发现',
-  noiseReport: '噪音汇报',
+  noiseReport: '响声汇报',
   killerMain: '杀手行动',
   encounter: '遭遇战',
   upkeep: '结算',
@@ -17,13 +17,13 @@ export const PHASE_LABEL: Record<string, string> = {
 
 export const FACTION_LABEL: Record<string, string> = {
   killer: '杀手',
-  survivor: '求生者',
+  survivor: '幸存者',
   spectator: '旁观',
 };
 
 export const WINNER_LABEL: Record<string, string> = {
   killer: '杀手',
-  survivors: '求生者',
+  survivors: '幸存者',
 };
 
 export const ITEM_LABEL: Record<string, string> = {
@@ -31,7 +31,7 @@ export const ITEM_LABEL: Record<string, string> = {
   map: '地图',
   board: '木板',
   item: '物品',
-  sophia_camera: '索菲娅的相机',
+  sophia_camera: '索菲亚的相机',
   marco_medkit: '马尔科的医药包',
   axe: '手斧',
   lime: '石灰粉',
@@ -48,6 +48,14 @@ export const ITEM_LABEL: Record<string, string> = {
   flashlight: '手电筒',
   adrenaline: '肾上腺素',
   trap: '陷阱零件',
+  // 乔治的笔记
+  george_note_blockade: '乔治的笔记·拆除封堵',
+  george_note_noise: '乔治的笔记·响声',
+  george_note_defense: '乔治的笔记·防御',
+  // 替换牌
+  lamp: '煤油灯',
+  parcel: '神秘包裹',
+  lucky_dice: '鸿运当骰',
 };
 
 /** 房间显示名。杀手有时看到另一套地名；没有就显示“编号+中文名” */

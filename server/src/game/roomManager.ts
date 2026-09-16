@@ -112,4 +112,9 @@ export class RoomManager {
     if (!state) return [];
     return listControllerIds(state);
   }
+
+  /** 这一桌的原始棋盘（只有服务器自己用；别发给客户端） */
+  stateOf(roomCode: string): GameState | undefined {
+    return this.rooms.get(roomCode);
+  }
 }

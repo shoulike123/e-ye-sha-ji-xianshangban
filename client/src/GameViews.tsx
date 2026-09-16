@@ -1,7 +1,7 @@
 /**
  * 对局屏幕：大厅选角 + 开打后的整张桌子。
  *
- * 上半：顶栏、求生者状态、地图。
+ * 上半：顶栏、幸存者状态、地图。
  * 下半：行动区（一般行动确认后结束小回合；交换/额外随时可用）、装备栏、战报。
  * 网页只负责显示和收集点击，合不合法由服务器裁判。
  */
@@ -10,7 +10,7 @@ import type { Faction, PublicSnapshot, ClientAction } from './types';
 import { Board } from './Board';
 import { SurvivorSkillBoards, SurvivorStatusBar } from './SurvivorDock';
 import { TrackChips, TrackOverlay, type TrackPanel } from './TableHud';
-import { DiceOverlay } from './DiceRoll';
+import { DiceOverlay, DiceTray } from './DiceRoll';
 import { DEFAULT_SURVIVOR_LAYOUT, mergeSurvivorLayout, type SurvivorLayout } from './survivorLayout';
 import { KillerActionDock } from './KillerDock';
 import { PileInspect, type PileKind } from './PileInspect';
@@ -34,6 +34,10 @@ interface Props {
   error: string | null;
   onAction: (a: ClientAction) => Promise<void>;
   onLeave?: () => void;
+  /** 同队幸存者正在预选的地点（1对2 / 1对3） */
+  cursors?: Array<{ playerId: string; roomId: string }>;
+  /** 把本机鼠标预选的地点报给同队 */
+  onCursorRoom?: (roomId: string | null) => void;
 }
 
 const DEFENSE_ITEM_HINT: Record<string, { bonus: number; needs?: string; hint: string }> = {
@@ -85,7 +89,7 @@ function persistActionScale(n: number): number {
   return next;
 }
 
-/** 选角色大厅：选杀手/求生者、准备、房主开打 */
+/** 选角色大厅：选杀手/幸存者、准备、房主开打 */
 export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
   const killers = state.characters.filter((c) => c.faction === 'killer');
   const survivors = state.characters.filter((c) => c.faction === 'survivor');
@@ -125,19 +129,59 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
         <h2>房间 {state.roomCode}</h2>
         <p className="muted">
           {solo
-            ? `单人热座：必须选好 1 名杀手和 ${neededSurv} 名求生者。你依次操控三名求生者，再操控杀手。`
+            ? `单人热座：必须选好 1 名杀手和 ${neededSurv} 名幸存者。你依次操控三名幸存者，再操控杀手。`
             : duo
-              ? `1 对 1：两人加入后一人选杀手，一人点选 ${neededSurv} 名求生者并操控她们。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+              ? `1 对 1：两人加入后一人选杀手，一人点选 ${neededSurv} 名幸存者并操控她们。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
               : vs2
-                ? `1VS2：三人加入后一人选杀手，两人点选 ${neededSurv} 名求生者并共控她们。一般行动和额外行动需另一人确认，交换物品不用。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
-                : `1VS3：必须凑齐 1 名杀手 + ${neededSurv} 名求生者。每人只选并操控自己的角色；求生者只能交出自己的物品，给予或互换需对方确认，栏满只能互换。全员选角并准备后由房主开始。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
+                ? `1对2：三人加入后一人选杀手，两人点选 ${neededSurv} 名幸存者并共控她们。一般行动和额外行动需另一人确认，交换物品不用。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+                : `1对3：必须凑齐 1 名杀手 + ${neededSurv} 名幸存者。每人只选并操控自己的角色；幸存者只能交出自己的物品，给予或互换需对方确认，栏满只能互换。全员选角并准备后由房主开始。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
           {' '}地图：<strong>{state.map.name}</strong>
         </p>
         <p className="muted">
           阵容 {rosterOk ? '已齐' : '未齐'}：杀手{' '}
           {solo ? (state.soloKillerCharacterId ? 1 : 0) : duo || vs2 ? (duoKillerReady ? 1 : 0) : multiKillers}/1
-          ，求生者 {solo || duo || vs2 ? soloSurvIds.length : multiSurvs}/{neededSurv}
+          ，幸存者 {solo || duo || vs2 ? soloSurvIds.length : multiSurvs}/{neededSurv}
         </p>
+        {isHost && (
+          <div className="stack">
+            <span className="muted">选择地图（换图后所有人会看到新底图）</span>
+            <div className="row">
+              {(state.playableMaps ?? []).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={state.map.id === m.id ? 'primary' : undefined}
+                  onClick={() => onAction({ type: 'setMap', mapId: m.id })}
+                >
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* 设置：可选规则 */}
+        {isHost && (
+          <div className="stack">
+            <span className="muted">设置</span>
+            <div className="row">
+              <button
+                type="button"
+                className={state.replacementDeck ? 'primary' : undefined}
+                onClick={() =>
+                  onAction({ type: 'setReplacementDeck', on: !state.replacementDeck })
+                }
+              >
+                替换「鸿运当骰」等牌：{state.replacementDeck ? '开' : '关'}
+              </button>
+            </div>
+            {state.replacementDeck && (
+              <p className="muted">
+                搜索牌堆里的 1 把钥匙、1 个手斧、1 瓶威士忌酒瓶 会换成
+                鸿运当骰、煤油灯、神秘包裹。
+              </p>
+            )}
+          </div>
+        )}
         {isHost && (
           <div className="row">
             <button
@@ -159,14 +203,14 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
               className={vs2 ? 'primary' : undefined}
               onClick={() => onAction({ type: 'setMode', mode: 'vs2' })}
             >
-              1VS2
+              1对2
             </button>
             <button
               type="button"
               className={!solo && !duo && !vs2 ? 'primary' : undefined}
               onClick={() => onAction({ type: 'setMode', mode: 'multi' })}
             >
-              1VS3
+              1对3
             </button>
           </div>
         )}
@@ -183,16 +227,16 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
                       state.soloKillerCharacterId
                         ? `杀手：${state.characters.find((c) => c.id === state.soloKillerCharacterId)?.name}`
                         : '杀手：未选',
-                      soloSurvIds.length ? `求生者：${soloSurvNames}` : '求生者：未选',
+                      soloSurvIds.length ? `幸存者：${soloSurvNames}` : '幸存者：未选',
                     ].join(' · ')
                   : duo && p.faction === 'survivor'
                     ? soloSurvIds.length
-                      ? `求生者：${soloSurvNames}`
-                      : '求生者：未选'
+                      ? `幸存者：${soloSurvNames}`
+                      : '幸存者：未选'
                     : vs2 && p.faction === 'survivor'
                       ? soloSurvIds.length
-                        ? `共控求生者：${soloSurvNames}`
-                        : '求生者：未选'
+                        ? `共控幸存者：${soloSurvNames}`
+                        : '幸存者：未选'
                     : p.characterId
                       ? state.characters.find((c) => c.id === p.characterId)?.name
                       : '未选角色'}
@@ -221,7 +265,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
             ))}
           </div>
           <div className="panel stack">
-            <h3>选择求生者（{soloSurvIds.length}/{neededSurv}）</h3>
+            <h3>选择幸存者（{soloSurvIds.length}/{neededSurv}）</h3>
             <p className="muted">点选最多 {neededSurv} 人，再点一次可取消。</p>
             {survivors.map((c) => (
               <button
@@ -248,21 +292,21 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
                 type="button"
                 onClick={() => onAction({ type: 'setFaction', faction: 'survivor' })}
               >
-                求生者
+                幸存者
               </button>
             </div>
             {(duo || vs2) && (
               <p className="muted">
                 {duo
-                  ? `一人选杀手并选角色，另一人选求生者并点选 ${neededSurv} 名角色。`
-                  : `一人选杀手并选角色，两人选求生者并共同点选 ${neededSurv} 名角色。`}
+                  ? `一人选杀手并选角色，另一人选幸存者并点选 ${neededSurv} 名角色。`
+                  : `一人选杀手并选角色，两人选幸存者并共同点选 ${neededSurv} 名角色。`}
               </p>
             )}
           </div>
 
           {(duo || vs2) && state.you.faction === 'survivor' ? (
             <div className="panel stack">
-              <h3>选择求生者（{soloSurvIds.length}/{neededSurv}）</h3>
+              <h3>选择幸存者（{soloSurvIds.length}/{neededSurv}）</h3>
               <p className="muted">
                 {duo
                   ? `点选最多 ${neededSurv} 人，再点一次可取消。对局中由你操控这三人。`
@@ -287,8 +331,8 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
                 {duo
                   ? '先选杀手阵营，再选 1 名杀手角色。'
                   : vs2
-                    ? '先选杀手阵营，再选 1 名杀手角色。求生者那边两人一起点选 3 名角色。'
-                    : `先选阵营，再选 1 名角色。1VS3：杀手 1 人、求生者 ${neededSurv} 人，每人只操控自己。`}
+                    ? '先选杀手阵营，再选 1 名杀手角色。幸存者那边两人一起点选 3 名角色。'
+                    : `先选阵营，再选 1 名角色。1对3：杀手 1 人、幸存者 ${neededSurv} 人，每人只操控自己。`}
               </p>
               {(state.you.faction === 'killer' ? killers : survivors).map((c) => {
                 const disabled =
@@ -340,12 +384,12 @@ export function LobbyView({ state, isHost, error, onAction, onLeave }: Props) {
       {isHost && !canStart && (
         <p className="muted">
           {solo
-            ? `选齐 1 名杀手和 ${neededSurv} 名求生者，并准备后才能开始。`
+            ? `选齐 1 名杀手和 ${neededSurv} 名幸存者，并准备后才能开始。`
             : duo
-              ? `两人分别选好杀手与 ${neededSurv} 名求生者，并都准备后才能开始。`
+              ? `两人分别选好杀手与 ${neededSurv} 名幸存者，并都准备后才能开始。`
               : vs2
-                ? `三人：1 名杀手 + 2 名求生者操控者点齐 ${neededSurv} 名角色并都准备后才能开始。`
-                : `选齐 1 名杀手和 ${neededSurv} 名求生者，并全员准备后才能开始。`}
+                ? `三人：1 名杀手 + 2 名幸存者操控者点齐 ${neededSurv} 名角色并都准备后才能开始。`
+                : `选齐 1 名杀手和 ${neededSurv} 名幸存者，并全员准备后才能开始。`}
         </p>
       )}
     </div>
@@ -373,7 +417,7 @@ function canOpenSuitcase(state: PublicSnapshot, roomId: string | null | undefine
   return (state.pileCounts?.discovery ?? 0) > 0;
 }
 
-/** 你现在用哪一边的眼睛看棋盘（求生者看不见杀手潜行位置） */
+/** 你现在用哪一边的眼睛看棋盘（幸存者看不见杀手潜行位置） */
 function viewerFactionOf(state: PublicSnapshot): Faction | null {
   if (state.mode === 'solo') {
     if (
@@ -410,7 +454,7 @@ function confirmAct(label: string): boolean {
   return window.confirm(`确定要${label}？`);
 }
 
-/** 杀手视角可以先把求生者立绘摆在地图上（只自己看得见，不算正式位置） */
+/** 杀手视角可以先把幸存者立绘摆在地图上（只自己看得见，不算正式位置） */
 function readPlacedStandee(key: string): Record<string, string> {
   try {
     const raw = localStorage.getItem(key);
@@ -457,7 +501,7 @@ function inventoryUsed(items: Record<string, number> | undefined): number {
 }
 
 /** 开打后的整张桌子：顶栏、地图、行动区、战报、行动规则 */
-export function GameView({ state, error, onAction, onLeave }: Props) {
+export function GameView({ state, error, onAction, onLeave, cursors = [], onCursorRoom }: Props) {
   const [pendingCard, setPendingCard] = useState<string | null>(null);
   const [pendingPayIds, setPendingPayIds] = useState<string[]>([]);
   const [payForCard, setPayForCard] = useState<string | null>(null);
@@ -473,6 +517,8 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
   const [actionScale, setActionScale] = useState(readActionScale);
   const [survLayout, setSurvLayout] = useState<SurvivorLayout>(DEFAULT_SURVIVOR_LAYOUT);
   const [logOpen, setLogOpen] = useState(true);
+  /** 战报滚动容器：新的一条写进来后自动滚到底部 */
+  const logBoxRef = useRef<HTMLDivElement | null>(null);
   const [extraOpen, setExtraOpen] = useState(false);
   const [killerInfoOpen, setKillerInfoOpen] = useState(false);
   const [artZoom, setArtZoom] = useState<{ src: string; caption: string } | null>(null);
@@ -484,13 +530,20 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
   const [placeTargetId, setPlaceTargetId] = useState<string | null>(null);
   const [standeeMoveOn, setStandeeMoveOn] = useState(false);
   const [inspectPile, setInspectPile] = useState<PileKind | null>(null);
+  /** 在牌堆面板里点开的那一张（放大看牌面） */
+  const [pileCardZoom, setPileCardZoom] = useState<{ id: string; name: string } | null>(null);
   const [inspectCardId, setInspectCardId] = useState<string | null>(null);
   const [evoPayIds, setEvoPayIds] = useState<string[]>([]);
   const [extraPick, setExtraPick] = useState<{
-    kind: 'whiskey' | 'adrenaline' | 'sprint';
+    kind: 'whiskey' | 'adrenaline' | 'sprint' | 'noteNoise';
     rooms: string[];
     actorPlayerId?: string;
+    noteId?: string;
   } | null>(null);
+  /** 乔治的笔记图鉴 / 挑笔记弹窗 */
+  const [georgePanelOpen, setGeorgePanelOpen] = useState(false);
+  /** 鸿运当骰：选中的骰子下标 */
+  const [diceSelect, setDiceSelect] = useState<number[]>([]);
   const placeKey = `nh_place_${state.roomCode}_killer`;
   const [placed, setPlaced] = useState<Record<string, string>>(() => readPlacedStandee(placeKey));
   const isActive = state.controllingActive;
@@ -543,8 +596,10 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
     isSurvivorView && state.phase === 'survivorMain' && (isActive || !sharedControl);
   const soloHint =
     state.mode === 'solo'
-      ? state.pendingSurvivorPick
-        ? '单人：在行动区选择下一名求生者（也可点立绘或状态栏），可随时改选，确认后才开始'
+      ? !isSurvivorView && (state.phase === 'survivorMain' || state.phase === 'discovery')
+        ? '幸存者正在行动'
+        : state.pendingSurvivorPick
+        ? '单人：在行动区选择下一名幸存者（也可点立绘或状态栏），可随时改选，确认后才开始'
         : state.pendingDiscoveryPick
           ? '单人：在行动区选择谁来翻发现牌'
           : state.phase === 'survivorMain' || state.phase === 'discovery'
@@ -559,18 +614,18 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
       : state.mode === 'duo'
         ? state.you.faction === 'survivor'
           ? state.pendingSurvivorPick
-            ? '1对1：在行动区选择下一名求生者（也可点立绘或状态栏），确认后才开始'
+            ? '1对1：在行动区选择下一名幸存者（也可点立绘或状态栏），确认后才开始'
             : state.pendingDiscoveryPick
               ? '1对1：在行动区选择谁来翻发现牌'
-              : `1对1：你操控 3 名求生者，当前行动「${state.you.name}」`
+              : `1对1：你操控 3 名幸存者，当前行动「${state.you.name}」`
           : '1对1：你操控杀手'
         : state.mode === 'vs2'
           ? state.you.faction === 'survivor'
-            ? '1VS2：两人共控 3 名求生者。一般行动和额外行动需另一人确认，交换物品不用。'
-            : '1VS2：你操控杀手。对面两人共控 3 名求生者。'
+            ? '1对2：两人共控 3 名幸存者。一般行动和额外行动需另一人确认，交换物品不用。'
+            : '1对2：你操控杀手。对面两人共控 3 名幸存者。'
           : state.you.faction === 'survivor'
-            ? '1VS3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。栏满只能互换。额外行动只显示你能做的。'
-            : '1VS3：你操控杀手。对面 3 名求生者各自操作。';
+            ? '1对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。栏满只能互换。额外行动只显示你能做的。'
+            : '1对3：你操控杀手。对面 3 名幸存者各自操作。';
 
   useEffect(() => {
     setMoveDest(null);
@@ -582,6 +637,13 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
       setExtraOpen(false);
     }
   }, [state.phase]);
+
+  /** 战报有新内容时滚到底，保证最新一条始终可见 */
+  useEffect(() => {
+    if (!logOpen) return;
+    const box = logBoxRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [state.logs, logOpen]);
 
   useEffect(() => {
     if (!state.pendingSurvivorPick && !state.pendingDiscoveryPick) setPickedNextId(null);
@@ -719,6 +781,20 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
   const startRoom = state.you.roomId;
   const senseFirst = state.pendingSensePair?.firstRoomId;
   const pathDraftRooms = state.pendingPathDraft?.rooms ?? [];
+  /** 预览路线的约束必须和服务器一致：杀手能走专用通道、幸存者不能穿封堵
+   *  （否则会出现「预览绕远路」和「预览的路线实际走不通」） */
+  const pathOpts = isSurvivorView
+    ? { blockades: state.blockades }
+    : { allowKiller: true };
+  /** 普通移动的可达上限：优先用服务端算好的 moveLeft（已含被动加成），没有就退回规则值 */
+  const moveRange = state.you.moveLeft > 0 ? state.you.moveLeft : state.rules.survivorMoveRange ?? 2;
+  /**
+   * 预览路线必须同时满足「不被封堵挡住」和「步数在移动力以内」。
+   * 否则会出现「画出了路线、但目标房间不可点」的误导
+   * （例如绕开封锁要 4 步，而他只有 2 步移动力）。
+   */
+  const reachablePreview = (path: string[] | null, maxSteps: number) =>
+    path && path.length - 1 <= maxSteps ? path : null;
   const previewPath = pathDraftRooms.length
     ? pathDraftRooms
     : senseFirst
@@ -726,17 +802,19 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         ? [senseFirst, state.pendingSensePair.secondRoomId]
         : [senseFirst]
       : extraDest && extraPick
-        ? extraPick.kind === 'whiskey'
+        ? extraPick.kind === 'whiskey' || extraPick.kind === 'noteNoise'
           ? [extraDest]
           : startRoom
-            ? (shortestPath(state.map, startRoom, extraDest) ?? [startRoom, extraDest])
+            ? (shortestPath(state.map, startRoom, extraDest, pathOpts) ?? [startRoom, extraDest])
             : [extraDest]
         : fleeDest && startRoom
-          ? (shortestPath(state.map, startRoom, fleeDest) ?? [startRoom, fleeDest])
+          ? (reachablePreview(shortestPath(state.map, startRoom, fleeDest, pathOpts), 1) ??
+            [startRoom, fleeDest])
           : blockadeDest
             ? [blockadeDest]
             : startRoom && moveDest
-              ? (shortestPath(state.map, startRoom, moveDest) ?? [startRoom, moveDest])
+              ? (reachablePreview(shortestPath(state.map, startRoom, moveDest, pathOpts), moveRange) ??
+                [])
               : [];
   const youRoom = state.map.rooms.find((r) => r.id === state.you.roomId);
   const killerHere =
@@ -762,6 +840,36 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
   const canUnblockHere = roomHasBlockade(state.blockades, state.you.roomId);
   const canAxeUnblock = canUnblockHere && (state.you.items.axe ?? 0) > 0;
   const canClearFear = state.rules.enableFear !== false;
+  /**
+   * 个人物品只能本人使用（服务端也会拦）：索菲亚的相机、马尔科的医药包。
+   * 界面就不该给不是本人的人显示这两个按钮。
+   */
+  const isSophiaPiece = (p: { id: string; characterId: string | null; name: string }) => {
+    const c = state.characters.find((x) => x.id === p.characterId);
+    return /survivor4|索菲亚|索菲娅|sophia/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
+  };
+  const isMarcoPiece = (p: { id: string; characterId: string | null; name: string }) => {
+    const c = state.characters.find((x) => x.id === p.characterId);
+    return /survivor3|马尔科|marco/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
+  };
+  /** 乔治·卡朋特（笔记的主人） */
+  const isGeorgePiece = (p: { id: string; characterId: string | null; name: string }) => {
+    const c = state.characters.find((x) => x.id === p.characterId);
+    return /survivor6|乔治|george/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
+  };
+  const canUseOwnPersonalItem = (itemId: string) =>
+    itemId === 'sophia_camera'
+      ? isSophiaPiece(state.you)
+      : itemId === 'marco_medkit'
+        ? isMarcoPiece(state.you)
+        : true;
+  /** 这件个人物品能不能落在 p 手里（服务端同样会拦） */
+  const canPieceHoldItem = (p: { id: string; characterId: string | null; name: string }, itemId: string) =>
+    itemId === 'sophia_camera'
+      ? isSophiaPiece(p)
+      : itemId === 'marco_medkit'
+        ? isMarcoPiece(p)
+        : true;
   const passageEnds = state.you.roomId ? passageNeighbors(state.map, state.you.roomId) : [];
   const whiskeyRooms = state.you.roomId ? generalNeighbors(state.map, state.you.roomId) : [];
   const adrenalineRooms = state.you.roomId
@@ -786,7 +894,8 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
     Boolean(state.you.roomId) ||
     canClearFear ||
     (injuredAlliesHere(state).length > 0 &&
-      ((state.you.items.herb ?? 0) > 0 || (state.you.items.marco_medkit ?? 0) > 0)) ||
+      ((state.you.items.herb ?? 0) > 0 ||
+        ((state.you.items.marco_medkit ?? 0) > 0 && isMarcoPiece(state.you)))) ||
     (Boolean(ch?.skills.some((s) => s.id === 'resourceful')) &&
       !state.you.skillUsedThisTurn.includes('resourceful') &&
       (marcoDiscardHas.adrenaline || marcoDiscardHas.sedative));
@@ -875,6 +984,16 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         toRoomId: extraDest,
         actorPlayerId: extraPick.actorPlayerId,
       });
+    } else if (extraPick.kind === 'noteNoise') {
+      void runSurvivor(
+        `用乔治的笔记在${roomDisplayName(state.map, extraDest, viewerFaction)}发出响声`,
+        {
+          type: 'useNote',
+          noteId: extraPick.noteId ?? 'george_note_noise',
+          toRoomId: extraDest,
+          actorPlayerId: extraPick.actorPlayerId,
+        },
+      );
     } else {
       void runSurvivor(
         extraPick.kind === 'whiskey'
@@ -1023,14 +1142,6 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         })
       : [],
   );
-  const killerMainDone =
-    killerChoice === 'special' ||
-    (killerChoice === 'actions' && (state.killerMainActionsLeft ?? 2) < 2);
-  const killerHasPlayableSpecial = [...killerPlayable].some(
-    (cid) => effectiveCardSpeed(state, state.cardById[cid]) === 'special',
-  );
-  const killerHasMainOption = Boolean(state.you.roomId) || (!killerChoice && killerHasPlayableSpecial);
-  const canLeaveKillerMain = killerMainDone || !killerHasMainOption;
   const finishKillerPlay = (cid: string, pay: string[]) => {
     const card = state.cardById[cid];
     const skipHint = killerBlockadeSkipHint(state, card);
@@ -1099,7 +1210,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         )}
         {state.mode === 'vs2' && (
           <span className="stat">
-            模式 <strong>1VS2</strong>
+            模式 <strong>1对2</strong>
           </span>
         )}
         <TrackChips
@@ -1131,6 +1242,12 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         <button type="button" className="ghost-btn" onClick={() => setRulesOpen(true)}>
           行动规则
         </button>
+        {/* 双方都能看：乔治的 3 张笔记图鉴 */}
+        {state.georgeInPlay && (
+          <button type="button" className="ghost-btn" onClick={() => setGeorgePanelOpen(true)}>
+            乔治的笔记
+          </button>
+        )}
         <a className="ghost-btn" href="/ui-layout/" target="_blank">
           界面校准
         </a>
@@ -1243,6 +1360,20 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
             onSurvivorClick={pickSurvivor}
             onPileClick={setInspectPile}
             turnOrder={state.turnOrder}
+            remoteCursors={
+              /**
+               * 只有 1对2 / 1对3 需要互看预选：
+               * 1对1 和单人热座下幸存者就一个操控者，看了没意义。
+               */
+              state.mode === 'vs2' || state.mode === 'multi'
+                ? cursors.filter((c) => c.playerId !== state.you.id)
+                : []
+            }
+            onRoomHover={
+              state.mode === 'vs2' || state.mode === 'multi'
+                ? (roomId) => onCursorRoom?.(roomId)
+                : undefined
+            }
           />
           {!isSurvivorView && (
           <div className="killer-place-bar">
@@ -1266,7 +1397,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
               ))}
             <span className="muted">
               {!standeeMoveOn
-                ? '开启后可随时移动三名求生者立绘（仅杀手地图，与真实位置无关）'
+                ? '开启后可随时移动三名幸存者立绘（仅杀手地图，与真实位置无关）'
                 : '点房间摆放或移动立绘，再点同一房间拿起。已知位置也可移动。'}
             </span>
           </div>
@@ -1336,7 +1467,9 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                 查看杀手信息
               </button>
             </div>
-            {actingSurvivor && (
+            {/* 幸存者侧：明确写出现在轮到谁。杀手侧一律只见「幸存者正在行动」——
+                轮到谁行动、谁在翻发现牌，都是幸存者层情报，不能透给杀手。 */}
+            {actingSurvivor && isSurvivorView && (
               <p className="acting-now">
                 当前小回合：<strong>{actingSurvivor.name}</strong>
                 {state.phase === 'discovery' ? ' · 翻发现牌' : isActive ? ' · 正在操作' : ' · 等待操作'}
@@ -1349,9 +1482,11 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
               <p className="muted">
                 {state.phase === 'survivorMain' && isSurvivorView
                   ? sharedControl
-                    ? `等待「${actingSurvivor?.name ?? '当前求生者'}」进行一般行动。任何求生者仍可交换物品或额外行动。`
-                    : `等待「${actingSurvivor?.name ?? '当前求生者'}」进行一般行动。你仍可交出自己的物品或做自己的额外行动；给予或互换需对方确认，栏满只能互换。`
-                  : '等待当前玩家行动…'}
+                    ? `等待「${actingSurvivor?.name ?? '当前幸存者'}」进行一般行动。任何幸存者仍可交换物品或额外行动。`
+                    : `等待「${actingSurvivor?.name ?? '当前幸存者'}」进行一般行动。你仍可交出自己的物品或做自己的额外行动；给予或互换需对方确认，栏满只能互换。`
+                  : isSurvivorView
+                    ? '等待当前玩家行动…'
+                    : '幸存者正在行动'}
               </p>
             )}
             {extraPick && (
@@ -1390,7 +1525,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     className="primary"
                     onClick={() => void onAction({ type: 'finishSurvivorPhase' })}
                   >
-                    求生者所有操作已结束
+                    幸存者所有操作已结束
                   </button>
                 )}
               </div>
@@ -1399,7 +1534,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
               <div className="stack">
                 <p className="muted">
                   {state.pendingDiscoveryPick
-                    ? '发现阶段：点状态栏或立绘选择翻牌的求生者。'
+                    ? '发现阶段：点状态栏或立绘选择翻牌的幸存者。'
                     : sharedControl
                       ? '点状态栏、立绘或下方按钮选择行动者。做一般行动前可反复换人，其他角色选项会一直保留。'
                       : '点自己的立绘或下方按钮开始小回合。只能操控自己的角色。'}
@@ -1432,10 +1567,10 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
             {(state.pendingSurvivorPick || state.pendingDiscoveryPick) && !isSurvivorView && (
               <p className="muted">
                 {state.pendingDiscoveryPick
-                  ? '等待求生者选择谁来翻发现牌…'
+                  ? '等待幸存者选择谁来翻发现牌…'
                   : sharedControl
-                    ? '等待求生者选择行动顺序…'
-                    : '等待求生者点选自己开始小回合…'}
+                    ? '等待幸存者选择行动顺序…'
+                    : '等待幸存者点选自己开始小回合…'}
               </p>
             )}
 
@@ -1458,11 +1593,11 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                 <h4>同地给予物品</h4>
                 <p className="muted">
                   {sharedControl
-                    ? '发现阶段之前，只要两名求生者在同一地点就可以互相给予或 1 换 1（钥匙除外）。两边背包都满了也可以互换。三人同地则任意两人之间都能给。'
+                    ? '发现阶段之前，只要两名幸存者在同一地点就可以互相给予或 1 换 1（钥匙除外）。两边背包都满了也可以互换。三人同地则任意两人之间都能给。'
                     : '只能从自己的装备栏交出物品。拖到同地队友空格是给予，拖到已有牌是互换；对方确认后才会到手。栏满只能互换，不能硬塞。'}
                 </p>
                 {tradeGroups.length === 0 ? (
-                  <p className="muted">目前没有两名求生者在同一地点。</p>
+                  <p className="muted">目前没有两名幸存者在同一地点。</p>
                 ) : (
                   tradeGroups.map(({ roomId, list }) => (
                     <div key={roomId} className="stack">
@@ -1476,6 +1611,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                         list
                           .filter((receiver) => receiver.id !== giver.id)
                           .flatMap((receiver) => {
+                            {/* 个人物品可以交给队友保管，但只有本人能用（服务端会把关使用） */}
                             const giveIds = ownedItemIds(giver.items);
                             const recvIds = ownedItemIds(receiver.items);
                             const recvCap = receiver.inventorySlots || 3;
@@ -1562,7 +1698,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                 <p className="muted">
                   {state.pendingItemDiscard.name
                     ? `「${state.pendingItemDiscard.name}」`
-                    : '求生者'}
+                    : '幸存者'}
                   装备栏已满（{state.pendingItemDiscard.inventorySlots ?? state.you.inventorySlots}{' '}
                   格），请弃置 {state.pendingItemDiscard.count} 件。可以弃刚拿到的，也可以弃旧的。
                 </p>
@@ -1603,13 +1739,13 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
               <div className="stack">
                 <h4>
                   正在翻牌：
-                  {state.players.find((p) => p.id === state.discoveryActorId)?.name ?? '求生者'}
+                  {state.players.find((p) => p.id === state.discoveryActorId)?.name ?? '幸存者'}
                 </h4>
                 <p className="muted">
                   {discoveryOptions.length === 1
                     ? '发现牌堆只剩这一张，直接收下。'
                     : state.discoveryActorId
-                      ? `由「${state.players.find((p) => p.id === state.discoveryActorId)?.name ?? '求生者'}」翻牌：留 1 张，另一张进入弃牌堆。`
+                      ? `由「${state.players.find((p) => p.id === state.discoveryActorId)?.name ?? '幸存者'}」翻牌：留 1 张，另一张进入弃牌堆。`
                       : '摸 2 选 1：留下的牌归翻牌者，另一张进入弃牌堆。'}
                   钥匙也带响声：无论要不要都会在翻牌者所在地点响；不要则进弃牌堆，钥匙架不加。
                 </p>
@@ -1662,7 +1798,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                   {state.noises.length > 0 && (
                     <img className="inline-noise" src={encodeURI(UI.noise)} alt="响声" />
                   )}
-                  确认噪音（
+                  确认响声（
                   {state.firecrackerThisRound
                     ? '所有地点发出响声！'
                     : noiseNames || '无'}
@@ -1688,9 +1824,9 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                       : enc.step === 'attack'
                         ? '杀手选择是否用一张卡牌加攻（每次攻击前都问）'
                         : enc.step === 'defend'
-                          ? '求生者已知道杀手是否加攻，再选择是否加防'
+                          ? '幸存者已知道杀手是否加攻，再选择是否加防'
                           : enc.step === 'flee'
-                            ? '被发现的求生者可移动 1 格或取消'
+                            ? '被发现的幸存者可移动 1 格或取消'
                             : '遭遇中'}
                 </p>
                 {enc.step === 'pick' &&
@@ -1701,8 +1837,8 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                   <div className="stack">
                     <p className="muted">
                       {Object.keys(enc.defenses).length
-                        ? '伤害成功。请再选一名尚未被伤害的求生者。挡住则整场结束。'
-                        : '有多人在遭遇地点，请先选择一名求生者。没有闪避和防御牌。'}
+                        ? '伤害成功。请再选一名尚未被伤害的幸存者。挡住则整场结束。'
+                        : '有多人在遭遇地点，请先选择一名幸存者。没有闪避和防御牌。'}
                     </p>
                     <div className="row">
                       {state.players
@@ -1823,6 +1959,63 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                       </button>
                     </div>
                   )}
+                {/* 鸿运当骰：掷完骰、点选要重掷的骰子（只能重掷 1 次） */}
+                {enc.step === 'defend' && state.pendingDice && state.pendingDice.playerId === state.you.id && (
+                  <div className="stack">
+                    <p className="muted">
+                      掷骰结果：
+                      <strong>
+                        {state.pendingDice.values.join(' + ')} ={' '}
+                        {state.pendingDice.values.reduce((a, b) => a + b, 0)}
+                      </strong>
+                      （杀手攻击力 {state.pendingDice.attack}）
+                    </p>
+                    <DiceTray
+                      values={state.pendingDice.values}
+                      seed={`${state.pendingDice.playerId}-${state.pendingDice.attack}`}
+                      selectable
+                      selected={diceSelect}
+                      onToggle={(i) =>
+                        setDiceSelect((cur) =>
+                          cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i],
+                        )
+                      }
+                    />
+                    <p className="muted">
+                      「鸿运当骰」本场可重掷 <strong>1 次</strong>：
+                      点骰子选中要重掷的那些（再点一次取消，选中的外轮廓会高亮），
+                      没选中的保持不变。<strong>重掷后的结果必须接受。</strong>
+                      {state.pendingDice.extra <= 0 && '（本场已经用过了）'}
+                    </p>
+                    <div className="row">
+                      <button
+                        type="button"
+                        disabled={state.pendingDice.extra <= 0 || diceSelect.length === 0}
+                        onClick={() => {
+                          void onAction({ type: 'rerollEncounterDice', diceIndexes: diceSelect });
+                          setDiceSelect([]);
+                        }}
+                      >
+                        重掷选中的 {diceSelect.length} 颗
+                      </button>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => void onAction({ type: 'resolveEncounterDice' })}
+                      >
+                        接受这个结果
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* 别人在决定重掷时，双方都能看到当前点数 */}
+                {enc.step === 'defend' && state.pendingDice && state.pendingDice.playerId !== state.you.id && (
+                  <p className="muted">
+                    {state.players.find((pl) => pl.id === state.pendingDice?.playerId)?.name ?? '幸存者'} 掷骰：
+                    <strong>{state.pendingDice.values.join(' + ')}</strong>
+                    （攻击力 {state.pendingDice.attack}）· 正在决定是否用「鸿运当骰」重掷
+                  </p>
+                )}
                 {enc.step === 'flee' &&
                   isSurvivorView &&
                   enc.fleeQueue[0] === state.you.id &&
@@ -1830,7 +2023,9 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                   !(state.pendingKillerDiscards > 0) && (
                   <div className="stack">
                     <p className="muted">
-                      点地图选 1 格，再点同一格可取消。确认后才移动。杀手看不见这次移动。
+                      轮到 <strong>{state.players.find((pl) => pl.id === enc.fleeQueue[0])?.name ?? '幸存者'}</strong>
+                      ：点地图选相邻 1 格，再点同一格可取消，确认后才移动。杀手看不见这次移动。
+                      （本场遭遇每人只移动这一次）
                     </p>
                     {fleeDest && (
                       <button type="button" className="primary" onClick={() => void confirmFleeDest()}>
@@ -1845,7 +2040,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                         setFleePick(false);
                       }}
                     >
-                      取消移动
+                      留在原地
                     </button>
                   </div>
                 )}
@@ -1900,18 +2095,18 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     <button
                       type="button"
                       disabled={state.you.mainActionUsed || Boolean(moveDest)}
-                      onClick={() => void runSurvivor('搜索', { type: 'search' })}
+                      onClick={() => void runSurvivor('搜索物资', { type: 'search' })}
                     >
-                      搜索
+                      搜索物资
                     </button>
                   )}
                   {canRepairHere && (
                     <button
                       type="button"
                       disabled={state.you.mainActionUsed || Boolean(moveDest)}
-                      onClick={() => void runSurvivor('修理无线电', { type: 'repair' })}
+                      onClick={() => void runSurvivor('修理', { type: 'repair' })}
                     >
-                      修理无线电
+                      修理
                     </button>
                   )}
                   {canClearFear && (
@@ -1972,23 +2167,135 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     </button>
                   )}
                 </div>
+
+                {/* —— 乔治专属：聪明绝顶 + 笔记 —— */}
+                {(() => {
+                  const george = state.you;
+                  const isGeo = /survivor6|乔治|george/i.test(
+                    `${george.characterId ?? ''} ${
+                      state.characters.find((c) => c.id === george.characterId)?.name ?? ''
+                    } ${george.name}`,
+                  );
+                  if (!isGeo) return null;
+                  const bookHere = Boolean(youRoom?.tags.includes('special-book'));
+                  const brilliantLeft = !state.you.skillUsedThisTurn.includes('brilliant');
+                  const canBrilliant =
+                    bookHere && !killerHere && brilliantLeft && !state.you.mainActionUsed && !moveDest;
+                  const noteIds = Object.keys(state.you.items).filter((id) =>
+                    id.startsWith('george_note_'),
+                  );
+                  return (
+                    <div className="stack" style={{ marginTop: '0.4rem' }}>
+                      <span className="muted">乔治·聪明绝顶（书本地点 · 同地无杀手 · 每回合 1 次）</span>
+                      <div className="row">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={!canBrilliant}
+                          title={
+                            !bookHere
+                              ? '只能在有书本标记的地点使用'
+                              : killerHere
+                                ? '与杀手同地不能使用'
+                                : !brilliantLeft
+                                  ? '本回合已经用过'
+                                  : undefined
+                          }
+                          onClick={() =>
+                            void runSurvivor('聪明绝顶：弃工具箱 +1 修理', {
+                              type: 'georgeToolboxRepair',
+                            })
+                          }
+                        >
+                          弃工具箱 +1 修理（{state.you.items.toolbox ?? 0}）
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canBrilliant}
+                          onClick={() =>
+                            void runSurvivor('聪明绝顶：抽一张搜索牌', { type: 'georgeDraw' })
+                          }
+                        >
+                          抽一张搜索牌
+                        </button>
+                      </div>
+                      {noteIds.length > 0 && (
+                        <>
+                          <span className="muted">乔治的笔记（额外行动）</span>
+                          <div className="row">
+                            {noteIds.map((nid) => {
+                              if (nid === 'george_note_blockade') {
+                                const cnt = state.blockades.filter(
+                                  (b) => b.split('|')[0] === state.you.roomId || b.split('|')[1] === state.you.roomId,
+                                ).length;
+                                return (
+                                  <button
+                                    key={nid}
+                                    type="button"
+                                    disabled={cnt === 0}
+                                    title={cnt === 0 ? '你所在地点没有封堵可拆' : `将拆除 ${Math.min(2, cnt)} 块`}
+                                    onClick={() =>
+                                      void runSurvivor('用笔记拆除封堵', {
+                                        type: 'useNote',
+                                        noteId: nid,
+                                      })
+                                    }
+                                  >
+                                    拆封堵（{Math.min(2, cnt)}）
+                                  </button>
+                                );
+                              }
+                              if (nid === 'george_note_noise') {
+                                return (
+                                  <button
+                                    key={nid}
+                                    type="button"
+                                    onClick={() =>
+                                      setExtraPick({
+                                        kind: 'noteNoise',
+                                        noteId: nid,
+                                        rooms: state.map.rooms.map((r) => r.id),
+                                      })
+                                    }
+                                  >
+                                    响声（任意一格）
+                                  </button>
+                                );
+                              }
+                              return (
+                                <span key={nid} className="muted">
+                                  防御笔记：用物品防御时 +2（常驻）
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
             {isActive && state.you.faction === 'killer' && state.pendingKillerDiscards > 0 && (
               <div className="stack">
-                <p className="muted">手牌超过上限，请弃置 {state.pendingKillerDiscards} 张。</p>
+                <p className="muted">
+                  手牌超过上限，请弃置 {state.pendingKillerDiscards} 张。
+                  {(state.justUnlockedCards ?? []).length > 0 && '（刚由进化入手的牌本次不能弃）'}
+                </p>
                 <div className="row">
-                  {(state.yourKillerHand ?? []).map((cid, idx) => (
-                    <button
-                      key={`${cid}-d-${idx}`}
-                      type="button"
-                      className="card"
-                      onClick={() => onAction({ type: 'discardKillerCard', cardId: cid })}
-                    >
-                      <h4>弃置 {state.cardById[cid]?.name ?? cid}</h4>
-                    </button>
-                  ))}
+                  {(state.yourKillerHand ?? [])
+                    .filter((cid) => !(state.justUnlockedCards ?? []).includes(cid))
+                    .map((cid, idx) => (
+                      <button
+                        key={`${cid}-d-${idx}`}
+                        type="button"
+                        className="card"
+                        onClick={() => onAction({ type: 'discardKillerCard', cardId: cid })}
+                      >
+                        <h4>弃置 {state.cardById[cid]?.name ?? cid}</h4>
+                      </button>
+                    ))}
                 </div>
               </div>
             )}
@@ -2045,7 +2352,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
 
             {isActive && state.phase === 'killerMain' && state.you.faction === 'killer' && state.pendingLurkPick && (
               <div className="stack">
-                <p className="muted">潜藏威胁：请选择任意 1 名求生者施加惊吓。</p>
+                <p className="muted">潜藏威胁：请选择任意 1 名幸存者施加惊吓。</p>
                 <div className="row">
                   {state.players
                     .filter((pl) => pl.faction === 'survivor' && pl.alive)
@@ -2152,7 +2459,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
 
             {isActive && state.you.faction === 'killer' && state.pendingWhizSearch && (
               <div className="stack">
-                <p className="muted">呼啸而过之后：可以弃 2 张手牌搜索当前格（不占行动）。点选手牌，再确认。</p>
+                <p className="muted">呼啸而过之后：可以弃 2 张手牌搜索房间当前格（不占行动）。点选手牌，再确认。</p>
                 <div className="row">
                   {killerHand.map((cid) => (
                     <button
@@ -2176,7 +2483,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     disabled={evoPayIds.length !== 2}
                     onClick={() => onAction({ type: 'confirmWhizSearch', payCardIds: evoPayIds })}
                   >
-                    弃 2 张并搜索
+                    弃 2 张并搜索房间
                   </button>
                   <button type="button" onClick={() => onAction({ type: 'skipWhizSearch' })}>
                     不用
@@ -2188,7 +2495,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
             {isActive && state.you.faction === 'killer' && state.pendingOverFearWound && (
               <div className="stack">
                 <p className="muted">
-                  {state.players.find((pl) => pl.id === state.pendingOverFearWound?.targetId)?.name ?? '求生者'}{' '}
+                  {state.players.find((pl) => pl.id === state.pendingOverFearWound?.targetId)?.name ?? '幸存者'}{' '}
                   惊恐过度。可以弃 3 张手牌造成 1 点伤害（非遭遇时对方可用护符）。
                 </p>
                 <div className="row">
@@ -2257,10 +2564,10 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     {killerStep === 'fast' && '快速卡牌阶段：可打任意张快速牌。'}
                     {killerStep === 'main' &&
                       !killerChoice &&
-                      '二选一：执行 2 个普通行动（移动 1 / 搜索），或打出 1 张特殊行动牌（箭头）。'}
+                      '二选一：执行 2 个普通行动（移动 1 / 搜索房间），或打出 1 张特殊行动牌（箭头）。'}
                     {killerStep === 'main' &&
                       killerChoice === 'actions' &&
-                      `普通行动剩余 ${state.killerMainActionsLeft}：每次可移动 1 或搜索。`}
+                      `普通行动剩余 ${state.killerMainActionsLeft}：每次可移动 1 或搜索房间。`}
                     {killerStep === 'main' && killerChoice === 'special' && '已选择特殊行动牌。'}
                     {killerStep === 'slow' && '慢速卡牌阶段：可打出沙漏类慢速牌。'}
                     {state.you.stealth ? ' · 潜行中' : ''}
@@ -2273,27 +2580,13 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     </button>
                   )}
                   {killerStep === 'main' && !killerChoice && (
-                    <>
-                      <button
-                        type="button"
-                        className="primary"
-                        onClick={() => onAction({ type: 'chooseKillerMain', choice: 'actions' })}
-                      >
-                        选择 2 次移动/搜索
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canLeaveKillerMain}
-                        title={
-                          canLeaveKillerMain
-                            ? undefined
-                            : '第三阶段必须进行 1–2 次行动，或打出 1 张特殊行动牌'
-                        }
-                        onClick={() => onAction({ type: 'advanceKillerStep' })}
-                      >
-                        进入慢速阶段
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => onAction({ type: 'chooseKillerMain', choice: 'actions' })}
+                    >
+                      选择 2 次移动/搜索房间
+                    </button>
                   )}
                   {killerStep === 'main' && killerChoice === 'actions' && (
                     <>
@@ -2302,20 +2595,10 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                         disabled={state.killerMainActionsLeft <= 0 || Boolean(pendingCard)}
                         onClick={() => onAction({ type: 'search' })}
                       >
-                        搜索
+                        搜索房间
                       </button>
-                      <button
-                        type="button"
-                        disabled={!canLeaveKillerMain}
-                        title={
-                          canLeaveKillerMain
-                            ? undefined
-                            : '第三阶段必须至少完成 1 次移动或搜索'
-                        }
-                        onClick={() => onAction({ type: 'advanceKillerStep' })}
-                      >
-                        进入慢速阶段
-                      </button>
+                      {/* 第三阶段必须行动：不再提供「进入慢速阶段」。
+                          2 次普通行动用完、或打出特殊牌后，会自动进入慢速阶段。 */}
                     </>
                   )}
                   {killerStep === 'slow' && (
@@ -2342,7 +2625,8 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                 <div className="row">
                   {(state.yourKillerHand ?? [])
                     .filter((cid) => {
-                      if (payForCard) return true;
+                      // 支付费用时：正在打出的那张牌不参与支付，只能点它取消
+                      if (payForCard) return cid !== payForCard;
                       const speed = effectiveCardSpeed(state, state.cardById[cid]);
                       if (killerStep === 'fast') return speed === 'fast';
                       if (killerStep === 'main') return speed === 'special' && killerChoice !== 'actions';
@@ -2392,14 +2676,18 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                   !moveDest &&
                   (() => {
                     const healItems = ['herb', 'marco_medkit'].filter(
-                      (id) => (state.you.items[id] ?? 0) > 0,
+                      (id) => (state.you.items[id] ?? 0) > 0 && canUseOwnPersonalItem(id),
                     );
                     const healTargets = injuredAlliesHere(state);
                     if (healItems.length === 0 || healTargets.length === 0) return null;
                     return (
                       <div className="stack">
                         <h4>治疗（须同地点）</h4>
-                        <p className="muted">只能治疗与你在同一地点的受伤求生者，包括自己。草药会在你所在地点发出响声。未受伤的角色不能作为治疗目标。</p>
+                        <p className="muted">
+                          只能治疗与你在同一地点的受伤幸存者，包括自己。草药会在你所在地点发出响声。
+                          未受伤的角色不能作为治疗目标。
+                          {healItems.includes('marco_medkit') ? '医药包是马尔科的个人物品，只有他能用。' : ''}
+                        </p>
                         {healItems.flatMap((itemId) =>
                           healTargets.map((t) => (
                             <button
@@ -2642,7 +2930,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                   className={rulesSide === 'survivor' ? 'primary' : ''}
                   onClick={() => setRulesSide('survivor')}
                 >
-                  求生者
+                  幸存者
                 </button>
                 <button
                   type="button"
@@ -2658,7 +2946,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
             </div>
             <img
               src={encodeURI(rulesSide === 'survivor' ? UI.rulesSurvivor : UI.rulesKiller)}
-              alt={rulesSide === 'survivor' ? '求生者行动规则' : '杀手行动规则'}
+              alt={rulesSide === 'survivor' ? '幸存者行动规则' : '杀手行动规则'}
               draggable={false}
             />
           </div>
@@ -2694,8 +2982,9 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
       {logOpen && (
         <div className="table-log panel">
           <h3>战报</h3>
-          <div className="log-box">
-            {[...state.logs].reverse().map((l, i) => (
+          {/* 战报历史全程保留：从开局到现在都看得到，最新的一条在最下面并自动滚动过去 */}
+          <div className="log-box" ref={logBoxRef}>
+            {state.logs.map((l, i) => (
               <div key={`${l.t}-${i}`}>{l.text}</div>
             ))}
           </div>
@@ -2711,7 +3000,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
           <div className="surv-board-pop-stage panel stack" onClick={(e) => e.stopPropagation()}>
             <h3>古代护符</h3>
             <p>
-              {state.players.find((p) => p.id === state.pendingAmulet?.playerId)?.name ?? '求生者'}{' '}
+              {state.players.find((p) => p.id === state.pendingAmulet?.playerId)?.name ?? '幸存者'}{' '}
               受到牌伤。是否出示古代护符来防止这次伤害？（不能防止消灭效果）
             </p>
             <div className="row">
@@ -2736,7 +3025,20 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
           cards={inspectCards}
           hidden={inspectHidden}
           cardById={state.cardById}
+          onCardClick={(cardId) => {
+            const found = inspectCards.find((c) => c.id === cardId);
+            setPileCardZoom({ id: cardId, name: found?.name ?? cardId });
+          }}
           onClose={() => setInspectPile(null)}
+        />
+      )}
+      {pileCardZoom && (
+        <CardZoom
+          card={state.cardById[pileCardZoom.id]}
+          cardId={pileCardZoom.id}
+          fallbackName={pileCardZoom.name}
+          size="art"
+          onClose={() => setPileCardZoom(null)}
         />
       )}
       {inspectCardId &&
@@ -2788,7 +3090,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
           />
         ))}
       {artZoom && (
-        <CardZoom src={artZoom.src} caption={artZoom.caption} onClose={() => setArtZoom(null)} />
+        <CardZoom src={artZoom.src} caption={artZoom.caption} size="art" onClose={() => setArtZoom(null)} />
       )}
       {state.pendingTrade &&
         isSurvivorView &&
@@ -2857,14 +3159,14 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
         <div className="hud-overlay">
           <div className="hud-overlay-card" onClick={(e) => e.stopPropagation()}>
             <div className="hud-overlay-head">
-              <h3>确认求生者行动</h3>
+              <h3>确认幸存者行动</h3>
             </div>
             <div className="stack">
               <p>{state.pendingCoopAction.summary}</p>
               {state.pendingCoopAction.youMustConfirm ? (
                 <>
                   <p className="muted">
-                    「{state.pendingCoopAction.fromName}」提出此一般行动或额外行动，确认后才生效。交换物品不走这一步。
+                    「{state.pendingCoopAction.fromName}」提出此一般行动或额外行动，确认后才生效。交换物品不需要这一步。
                   </p>
                   <div className="row">
                     <button
@@ -2884,7 +3186,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                 </>
               ) : (
                 <>
-                  <p className="muted">等待另一名求生者操控者确认。对方拒绝后不会执行。</p>
+                  <p className="muted">等待另一名幸存者操控者确认。对方拒绝后不会执行。</p>
                   <button
                     type="button"
                     onClick={() => void onAction({ type: 'respondCoopAction', accept: false })}
@@ -2908,7 +3210,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
               {sharedControl
                 ? state.mode === 'vs2'
                   ? '两人都可以点。一般行动和额外行动需另一人确认后才生效。'
-                  : '任何求生者都可以在求生者大回合内使用，不受小回合限制。'
+                  : '任何幸存者都可以在幸存者大回合内使用，不受小回合限制。'
                 : '只显示你自己能做的额外行动。别人行动时你也可以用。'}
             </p>
             <div className="stack">
@@ -2921,7 +3223,7 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                     </button>,
                   );
                 };
-                if ((p.items.sophia_camera ?? 0) > 0) {
+                if ((p.items.sophia_camera ?? 0) > 0 && canPieceHoldItem(p, 'sophia_camera')) {
                   add('cam', '相机（原地响声，一次性）', () =>
                     void runSurvivor(`${p.name}使用相机`, {
                       type: 'useItem',
@@ -2929,6 +3231,39 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
                       actorPlayerId: p.id,
                     }),
                   );
+                }
+                // —— 乔治的笔记（额外行动，只有乔治本人能用）——
+                if (isGeorgePiece(p) && (p.items.george_note_blockade ?? 0) > 0) {
+                  const onHere = p.roomId
+                    ? state.blockades.filter((b) => {
+                        const pair = b.split('|');
+                        return pair[0] === p.roomId || pair[1] === p.roomId;
+                      }).length
+                    : 0;
+                  add(
+                    'noteBlock',
+                    onHere > 0
+                      ? `笔记·拆除封堵（本格 ${Math.min(2, onHere)} 块）`
+                      : '笔记·拆除封堵（本格没有封堵）',
+                    () => {
+                      if (onHere === 0) return;
+                      void runSurvivor(`${p.name}用笔记拆除封堵`, {
+                        type: 'useNote',
+                        noteId: 'george_note_blockade',
+                        actorPlayerId: p.id,
+                      });
+                    },
+                  );
+                }
+                if (isGeorgePiece(p) && (p.items.george_note_noise ?? 0) > 0) {
+                  add('noteNoise', '笔记·响声（任意一格）', () => {
+                    setExtraPick({
+                      kind: 'noteNoise',
+                      noteId: 'george_note_noise',
+                      rooms: state.map.rooms.map((r) => r.id),
+                      actorPlayerId: p.id,
+                    });
+                  });
                 }
                 if ((p.items.whiskey ?? 0) > 0) {
                   add('whiskey', '威士忌酒瓶（点相邻地点）', () => {
@@ -3130,11 +3465,123 @@ export function GameView({ state, error, onAction, onLeave }: Props) {
           </div>
         </div>
       )}
+      {/* —— 乔治的笔记：图鉴（双方都能开）—— */}
+      {georgePanelOpen && (
+        <div className="hud-overlay" onClick={() => setGeorgePanelOpen(false)} role="presentation">
+          <div
+            className="hud-overlay-card"
+            role="dialog"
+            aria-label="乔治的笔记"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '900px' }}
+          >
+            <div className="hud-overlay-head">
+              <h3>乔治的笔记</h3>
+              <button type="button" className="ghost-btn" onClick={() => setGeorgePanelOpen(false)}>
+                关闭
+              </button>
+            </div>
+            <p className="muted">点击可放大查看。每张笔记各 1 份，只有乔治本人能使用。</p>
+            <div className="row" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
+              {(state.allGeorgeNotes ?? []).map((n) => {
+                const takenByGeorge =
+                  isSurvivorView && Object.keys(state.you.items).includes(n.id);
+                const left = (state.georgeNotes ?? []).some((g) => g.id === n.id);
+                const src = cardArtSrc(state.cardById[n.id], n.id);
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="card"
+                    style={{ width: '190px' }}
+                    onClick={() =>
+                      src && setArtZoom({ src, caption: n.name })
+                    }
+                  >
+                    {src ? (
+                      <img className="inline-card-art" src={encodeURI(src)} alt="" />
+                    ) : null}
+                    <h4>{n.name}</h4>
+                    <div className="muted">{n.text}</div>
+                    <div className="muted">
+                      {isSurvivorView
+                        ? left
+                          ? '还在牌堆里'
+                          : takenByGeorge
+                            ? '乔治已持有'
+                            : '已被拿走'
+                        : '（乔治是否持有对杀手隐藏）'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* —— 思维敏捷：等乔治挑一张笔记 —— */}
+      {state.pendingGeorgeNote &&
+        isSurvivorView &&
+        (() => {
+          // 只有乔治本人在场时才弹（单人热座/共控下由操控者代点）
+          const geo = state.players.find(
+            (pl) =>
+              pl.faction === 'survivor' &&
+              /survivor6|乔治|george/i.test(
+                `${pl.characterId ?? ''} ${
+                  state.characters.find((c) => c.id === pl.characterId)?.name ?? ''
+                } ${pl.name}`,
+              ),
+          );
+          return geo && state.activePlayerId === geo.id;
+        })() && (
+        <div className="hud-overlay">
+          <div className="hud-overlay-card" role="dialog" aria-label="挑选乔治的笔记">
+            <h3>思维敏捷：挑一张笔记</h3>
+            <p className="muted">
+              小回合结束时你在杀手距离 1 内，可以从剩下的笔记里挑一张（拿走就没了，占装备栏）。
+            </p>
+            <div className="row" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
+              {(state.georgeNotes ?? []).map((n) => {
+                const src = cardArtSrc(state.cardById[n.id], n.id);
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="card"
+                    style={{ width: '190px' }}
+                    onClick={() => {
+                      if (state.mode !== 'vs2' && !confirmAct(`拿走笔记「${n.name}」`)) return;
+                      void onAction({ type: 'chooseGeorgeNote', noteId: n.id });
+                    }}
+                  >
+                    {src ? (
+                      <img className="inline-card-art" src={encodeURI(src)} alt="" />
+                    ) : null}
+                    <h4>{n.name}</h4>
+                    <div className="muted">{state.cardById[n.id]?.text}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                onClick={() => void onAction({ type: 'chooseGeorgeNote', noteId: null })}
+              >
+                不拿
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {state.phase === 'gameOver' && (
         <div className="hud-overlay">
           <div className="hud-overlay-card rematch-overlay-card">
             <h2 className="rematch-title">
-              {state.winner === 'killer' ? '杀手胜利！' : '求生者胜利！'}
+              {state.winner === 'killer' ? '杀手胜利！' : '幸存者胜利！'}
             </h2>
             {state.winReason && <p className="muted">{state.winReason}</p>}
             <button

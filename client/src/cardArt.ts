@@ -26,6 +26,14 @@ export const ITEM_CARD: Record<string, string> = {
   trap: '/Image/Discovery/32_陷阱零件.png',
   sophia_camera: '/Image/UI/索菲亚的相机.png',
   marco_medkit: '/Image/UI/马尔科的医疗包.png',
+  // 乔治的笔记
+  george_note_blockade: '/Image/Notes/笔记_拆除封堵.png',
+  george_note_noise: '/Image/Notes/笔记_响声.png',
+  george_note_defense: '/Image/Notes/笔记_防御.png',
+  // 替换牌（开启「替换鸿运当骰等牌」后进搜索牌堆）
+  lamp: '/Image/Search/煤油灯.png',
+  parcel: '/Image/Search/神秘包裹.png',
+  lucky_dice: '/Image/Search/鸿运当骰.png',
 };
 
 const SEARCH_BY_NAME: Record<string, string> = {
@@ -35,6 +43,10 @@ const SEARCH_BY_NAME: Record<string, string> = {
   威士忌酒瓶: '/Image/Key/07_威士忌酒瓶.png',
   草药: '/Image/Key/08_草药.png',
   工具箱: '/Image/Key/09_工具箱.png',
+  // 替换牌
+  煤油灯: '/Image/Search/煤油灯.png',
+  神秘包裹: '/Image/Search/神秘包裹.png',
+  鸿运当骰: '/Image/Search/鸿运当骰.png',
 };
 
 const DISCOVERY_BY_NAME: Record<string, string> = {

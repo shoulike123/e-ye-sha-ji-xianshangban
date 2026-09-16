@@ -7,8 +7,10 @@ import {
   addFear,
   addKillerTurnPower,
   applyDamage,
+  canonicalDoorId,
   clearTrapAfterEncounter,
   doorId,
+  isDoorBlocked,
   isDoorEdge,
   log,
   parseDoor,
@@ -32,14 +34,14 @@ export const EVOLUTION_TEXT: Record<KillerKind, string[]> = {
   ],
   spectre: [
     '发生遭遇时，【惊吓】地点中的所有目标',
-    '在使用「呼啸而过」后，你可以弃掉 2 张卡牌来【搜索】',
-    '每当有求生者惊恐过度时，你可以弃掉 3 张卡牌来伤害该求生者',
+    '在使用「呼啸而过」后，你可以弃掉 2 张卡牌来【搜索房间】',
+    '每当有幸存者惊恐过度时，你可以弃掉 3 张卡牌来伤害该幸存者',
     '解锁「生命吸取」',
     '发生遭遇时，在攻击前伤害地点中的所有目标',
   ],
   murderer: [
     '/',
-    '如果你在重现时遇到任何求生者，本回合 +3 力量',
+    '如果你在重现时遇到任何幸存者，本回合 +3 力量',
     '解锁「死亡盛放」',
     '力量 +1；在任意地点总计【封堵】×4（可以在多个地点使用）',
     '发生遭遇时，在攻击前伤害地点中的所有目标',
@@ -89,7 +91,7 @@ function allUnblockedDoorIds(state: GameState): string[] {
   for (const e of state.map.edges) {
     if (!isDoorEdge(e.pathType)) continue;
     const id = doorId(e.from, e.to);
-    if (!state.blockades.includes(id)) seen.add(id);
+    if (!isDoorBlocked(state, id)) seen.add(id);
   }
   return [...seen];
 }
@@ -129,7 +131,11 @@ export function runUpgrade(state: GameState): void {
   if (state.killerHand.length > max) {
     state.pendingUnlockDiscard = true;
     state.pendingKillerDiscards = state.killerHand.length - max;
+    /** 刚入手的锁定牌本次不能弃（满手牌时摸进来的牌不在此列，那些就该弃） */
+    state.justUnlockedCards = [...unlocked];
     log(state, `进化入手牌后手牌超过 ${max}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
+  } else {
+    state.justUnlockedCards = [];
   }
   if (!state.pendingEvolutionAck) {
     state.pendingEvolutionAck = { fromLevel: beforeLv, toLevel: state.killerLevel };
@@ -153,7 +159,7 @@ export function applyNewEvolutionLevel(state: GameState, newLevel: number): void
 export function applyMurdererRevealPower(state: GameState): void {
   if (killerKindOf(state) !== 'murderer' || state.killerLevel < 2) return;
   if (!state.lastSearchFound) return;
-  log(state, '谋杀者进化 2 级：重现时搜到人，本回合力量 +3。');
+  log(state, '谋杀者进化 2 级：重现时搜索房间找到人，本回合力量 +3。');
   addKillerTurnPower(state, 3);
 }
 
@@ -204,7 +210,7 @@ export function resolveOverFearWound(state: GameState, use: boolean, payCardIds:
     state.killerDiscard.push(id);
   }
   const names = pay.map((id) => state.cardById[id]?.name ?? id);
-  log(state, `幽魂弃置「${names.join('、')}」，伤害 ${t?.name ?? '求生者'}。`);
+  log(state, `幽魂弃置「${names.join('、')}」，伤害 ${t?.name ?? '幸存者'}。`);
   if (t?.alive && state.killerId) {
     applyDamage(state, t.id, 1, state.killerId);
   }
@@ -266,7 +272,7 @@ export function finishEncounterOpen(state: GameState): void {
   const alive = survivorsInRoom(state, enc.roomId);
   if (alive.length === 0) {
     // 当前模式打死人通常已 gameOver；各自为战等模式可能地点清空但局未终——必须清掉遭遇，否则行动区卡住。
-    log(state, '遭遇地点已没有存活求生者，遭遇结束。');
+    log(state, '遭遇地点已没有存活幸存者，遭遇结束。');
     onEncounterOpenNoTargets?.(state);
     return;
   }
@@ -303,21 +309,21 @@ export function maybeOfferWhizSearch(state: GameState): void {
   state.whizJustResolved = false;
   if (killerKindOf(state) !== 'spectre' || state.killerLevel < 2) return;
   if (state.killerHand.length < 2) {
-    log(state, '幽魂进化 2 级：手里不足 2 张，不能弃牌搜索。');
+    log(state, '幽魂进化 2 级：手里不足 2 张，不能弃牌搜索房间。');
     return;
   }
   state.pendingWhizSearch = true;
-  log(state, '幽魂进化 2 级：可以弃 2 张手牌，搜索走完后的当前格（不占行动）。');
+  log(state, '幽魂进化 2 级：可以弃 2 张手牌，搜索移动结束后的当前房间（不占行动）。');
 }
 
 export function resolveWhizSearch(state: GameState, use: boolean, payCardIds: string[]): boolean {
-  if (!state.pendingWhizSearch) throw new Error('当前没有呼啸后的搜索选择');
+  if (!state.pendingWhizSearch) throw new Error('当前没有呼啸后的搜索房间选择');
   state.pendingWhizSearch = false;
   if (!use) {
-    log(state, '幽魂不使用呼啸后的搜索。');
+    log(state, '幽魂不使用呼啸后的搜索房间。');
     return false;
   }
-  if (state.killerHand.length < 2) throw new Error('手里不足 2 张，不能弃牌搜索');
+  if (state.killerHand.length < 2) throw new Error('手里不足 2 张，不能弃牌搜索房间');
   const pay = [...new Set(payCardIds)];
   if (pay.length !== 2) throw new Error('请自选弃置 2 张手牌');
   for (const id of pay) {
@@ -330,12 +336,12 @@ export function resolveWhizSearch(state: GameState, use: boolean, payCardIds: st
   }
   const names = pay.map((id) => state.cardById[id]?.name ?? id);
   const k = state.killerId ? state.players[state.killerId] : null;
-  log(state, `幽魂弃置「${names.join('、')}」，搜索「${roomName(state, k?.roomId)}」。`);
+  log(state, `幽魂弃置「${names.join('、')}」，搜索房间「${roomName(state, k?.roomId)}」。`);
   if (!k?.roomId) return false;
   const victims = survivorsInRoom(state, k.roomId);
   state.lastSearchFound = victims.length > 0;
-  if (victims.length === 0) log(state, `${k.name} 搜索，没有发现人。`);
-  else log(state, `${k.name} 搜索，发现了 ${victims.map((v) => v.name).join('、')}！`);
+  if (victims.length === 0) log(state, `${k.name} 搜索房间，没有发现人。`);
+  else log(state, `${k.name} 搜索房间，发现了 ${victims.map((v) => v.name).join('、')}！`);
   return victims.length > 0;
 }
 
@@ -436,8 +442,8 @@ export function startAnyDoorsBlockade(state: GameState, want: number): boolean {
 export function removeBoardBlockade(state: GameState, doorIdStr: string): void {
   const job = state.pendingBlockadeJob;
   if (!job || job.removeLeft <= 0) throw new Error('当前不是移除场上封堵');
-  if (!state.blockades.includes(doorIdStr)) throw new Error('那里没有封堵');
-  if ((state.blockadesThisAction ?? []).includes(doorIdStr)) {
+  if (!isDoorBlocked(state, doorIdStr)) throw new Error('那里没有封堵');
+  if (state.blockadesThisAction?.some((id) => canonicalDoorId(id) === canonicalDoorId(doorIdStr))) {
     throw new Error('不能拆除本次刚封上的门');
   }
   if (job.kind === 'sealAll' && job.roomId && doorTouchesRoom(doorIdStr, job.roomId)) {
@@ -497,7 +503,7 @@ export function pickAnyDoorRoom(state: GameState, roomId: string): void {
       ((e.from === job.firstRoomId && e.to === roomId) || (e.to === job.firstRoomId && e.from === roomId)),
   );
   if (!edge) throw new Error('这两个地点之间没有可封的门');
-  if (state.blockades.includes(id)) throw new Error('这扇门已经封上了');
+  if (isDoorBlocked(state, id)) throw new Error('这扇门已经封上了');
   job.secondRoomId = roomId;
   log(state, `已选「${roomName(state, job.firstRoomId)}」与「${roomName(state, roomId)}」，请在行动区确认封堵。`);
 }

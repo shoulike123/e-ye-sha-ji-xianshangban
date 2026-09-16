@@ -31,6 +31,8 @@ export interface GameContent {
     search: CardDef[];
     discovery: CardDef[];
     killerAction: CardDef[];
+    /** 乔治的笔记 */
+    note: CardDef[];
     byId: Record<string, CardDef>;
   };
 }
@@ -50,7 +52,7 @@ function loadMaps(): MapDef[] {
     .map((f) => MapSchema.parse(readJson(path.join(dir, f))));
 }
 
-/** 读取角色（杀手、求生者），跳过 demo 练习档 */
+/** 读取角色（杀手、幸存者），跳过 demo 练习档 */
 function loadCharacters(): CharacterDef[] {
   const dir = path.join(CONTENT_ROOT, 'characters');
   const list: CharacterDef[] = [];
@@ -65,12 +67,13 @@ function loadCharacters(): CharacterDef[] {
   return list;
 }
 
-/** 读取搜索牌、发现牌、杀手行动牌，并做成“按编号查找”的字典 */
+/** 读取搜索牌、发现牌、杀手行动牌、乔治的笔记，并做成“按编号查找”的字典 */
 function loadCards(): GameContent['cards'] {
   const dir = path.join(CONTENT_ROOT, 'cards');
   const search: CardDef[] = [];
   const discovery: CardDef[] = [];
   const killerAction: CardDef[] = [];
+  const note: CardDef[] = [];
   const byId: Record<string, CardDef> = {};
 
   const push = (list: CardDef[], raw: unknown) => {
@@ -86,13 +89,15 @@ function loadCards(): GameContent['cards'] {
         search?: unknown[];
         discovery?: unknown[];
         killerAction?: unknown[];
+        note?: unknown[];
       };
     };
     for (const c of data.decks?.search ?? []) push(search, c);
     for (const c of data.decks?.discovery ?? []) push(discovery, c);
     for (const c of data.decks?.killerAction ?? []) push(killerAction, c);
+    for (const c of data.decks?.note ?? []) push(note, c);
   }
-  return { search, discovery, killerAction, byId };
+  return { search, discovery, killerAction, note, byId };
 }
 
 /** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 */
@@ -136,12 +141,12 @@ export function saveMap(map: MapDef): MapDef {
   return parsed;
 }
 
-/** 求生者界面按钮/立绘该摆在哪，记在这个文件里 */
+/** 幸存者界面按钮/立绘该摆在哪，记在这个文件里 */
 export function survivorLayoutPath() {
   return path.join(CONTENT_ROOT, 'ui', 'survivor-layout.json');
 }
 
-/** 读出求生者界面摆放 */
+/** 读出幸存者界面摆放 */
 export function loadSurvivorLayout(): SurvivorLayout {
   const file = survivorLayoutPath();
   if (!fs.existsSync(file)) {
@@ -150,7 +155,7 @@ export function loadSurvivorLayout(): SurvivorLayout {
   return SurvivorLayoutSchema.parse(readJson(file));
 }
 
-/** 校准页保存求生者界面摆放 */
+/** 校准页保存幸存者界面摆放 */
 export function saveSurvivorLayout(data: unknown): SurvivorLayout {
   const parsed = SurvivorLayoutSchema.parse(data);
   const file = survivorLayoutPath();

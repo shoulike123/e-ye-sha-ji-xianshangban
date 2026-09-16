@@ -1,5 +1,5 @@
 /**
- * 求生者状态条和技能/背包板。
+ * 幸存者状态条和技能/背包板。
  * 上面三张头像是谁在场；下面三块板是技能和口袋里的东西。
  */
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
@@ -36,7 +36,7 @@ interface SkillProps extends SharedProps {
   showItems: boolean;
   youItems?: Record<string, number>;
   tradeEnabled?: boolean;
-  /** 1VS3：只能从自己的栏拖出，别人给来的不能拒 */
+  /** 1对3：只能从自己的栏拖出，别人给来的不能拒 */
   dragOwnOnly?: boolean;
   onTradeItem?: (args: {
     fromPlayerId: string;
@@ -315,6 +315,14 @@ export function SurvivorSkillBoards({
   const itemsOf = (p: PublicPlayerView) =>
     p.id === youId && youItems ? youItems : p.items;
 
+  /** 这名幸存者的装备栏上限。Server 侧同序兜底：棋子 inventorySlots → 立绘表 slots → 角色定义 → 3。
+   *  拖拽投放判定与槽位绘制必须共用这一个函数，否则会出现「看着有空位却拖不进去」。 */
+  const slotCapacityOf = (p: PublicPlayerView) => {
+    const ch = characters.find((c) => c.id === p.characterId);
+    const art = survivorArtFor(p.characterId, ch?.name);
+    return p.inventorySlots || art?.slots || ch?.inventorySlots || 3;
+  };
+
   const tradeOk = (fromId: string, toId: string) => {
     if (!tradeEnabled || fromId === toId) return false;
     if (dragOwnOnly && fromId !== youId) return false;
@@ -329,7 +337,7 @@ export function SurvivorSkillBoards({
     if (hit.itemId) return hit;
     const recv = survivors.find((s) => s.id === hit.playerId);
     if (!recv) return null;
-    const cap = recv.inventorySlots || 3;
+    const cap = slotCapacityOf(recv);
     if (flattenItems(itemsOf(recv)).length >= cap) return null;
     return hit;
   };
@@ -420,10 +428,8 @@ export function SurvivorSkillBoards({
   };
 
   const slotUi = (p: PublicPlayerView, raise: boolean) => {
-    const ch = characters.find((c) => c.id === p.characterId);
-    const art = survivorArtFor(p.characterId, ch?.name);
     const packed = flattenItems(itemsOf(p));
-    const slotCount = p.inventorySlots || art?.slots || ch?.inventorySlots || 3;
+    const slotCount = slotCapacityOf(p);
     const slotBoxes = slotCount > 3 ? layout.skillBoard.slots6 : layout.skillBoard.slots3;
     return (
       <ItemSlots

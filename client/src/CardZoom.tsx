@@ -21,6 +21,8 @@ export function CardZoom({
   caption,
   canPlay,
   playHint,
+  size = 'card',
+  fallbackName,
   onPlay,
   onClose,
 }: {
@@ -30,16 +32,25 @@ export function CardZoom({
   caption?: string | null;
   canPlay?: boolean;
   playHint?: string | null;
+  /** card=普通卡牌尺寸；art=整张立绘/技能图/牌堆里的牌面，放大显示 */
+  size?: 'card' | 'art';
+  /** cardById 里查不到定义时（例如牌堆里的牌）用来显示名字 */
+  fallbackName?: string | null;
   onPlay?: () => void;
   onClose: () => void;
 }) {
   const art = src ?? cardArtSrc(card ?? undefined, cardId);
-  const name = card?.name ?? caption ?? cardId ?? '卡牌';
+  const name = card?.name ?? fallbackName ?? caption ?? cardId ?? '卡牌';
   const kind = killerActionKind(card);
   const cost = cardHandCost(card);
   return (
     <div className="card-zoom-mask" onClick={onClose} role="presentation">
-      <div className="card-zoom" role="dialog" aria-label={name} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`card-zoom${size === 'art' ? ' art' : ''}`}
+        role="dialog"
+        aria-label={name}
+        onClick={(e) => e.stopPropagation()}
+      >
         {art ? (
           <img className="card-zoom-art" src={encodeURI(art)} alt={name} draggable={false} />
         ) : (

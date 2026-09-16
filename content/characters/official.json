@@ -28,6 +28,60 @@
       "skills": []
     },
     {
+      "id": "killer4",
+      "name": "女猎手",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 3,
+      "description": "起始力量 3。牌组：追逐×3、感知×2、擲斧×1、追蹤×3、屏息×1、猎手本能×2、陷阱重置×1（锁定）。等级表见 Image/Killers/杀手四_女猎手/等级牌.png。",
+      "skills": []
+    },
+    {
+      "id": "killer5",
+      "name": "狼人",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 6,
+      "description": "起始力量 6。牌组：追逐×4、感知×2、嚎叫×2、狂野撕咬×2、鲜血追猎×1、领地意识×1、超听觉×1（锁定）。等级表见 Image/Killers/杀手五_狼人/等级牌.png。",
+      "skills": []
+    },
+    {
+      "id": "killer6",
+      "name": "雕像",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 5,
+      "description": "起始力量 5。牌组：感知×2、巡邏×3、處決×1、重整旗鼓×2、釋放×1、召唤石碑×3、圍困×1（锁定）。等级表见 Image/Killers/杀手六_雕像/等级牌.png。",
+      "skills": []
+    },
+    {
+      "id": "killer7",
+      "name": "未命名",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 2,
+      "description": "起始力量 2。牌组：爬行×3、变形×1、伏擊×2、红外探测×2、恐诡管道×3、戰鬥適應×1、刺耳噪声×1（锁定）。等级表见 Image/Killers/杀手七_未命名/等级牌.png。",
+      "skills": []
+    },
+    {
+      "id": "killer8",
+      "name": "扼杀者",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 4,
+      "description": "起始力量 4。牌组：荊棘纏繞×2、茂盛×2、扼殺×1、枝條生長×4、傳送聚合×3、狂亂枝條×1（锁定）。等级表见 Image/Killers/杀手八_扼杀者/等级牌.png。",
+      "skills": []
+    },
+    {
+      "id": "killer9",
+      "name": "女王",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 2,
+      "description": "起始力量 2。牌组：感知×2、抓住他們×2、召喚亡者×2、毒液之觸×2、屍群來了×2、屍體爆炸×1、汽化×1、君臨天下×1（锁定）。等级表见 Image/Killers/杀手九_女王/等级牌.png。",
+      "skills": []
+    },
+    {
       "id": "survivor1",
       "name": "安娜·库布里克",
       "faction": "survivor",
@@ -81,13 +135,13 @@
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 3,
-      "description": "医生。万全准备：开局拥有马尔科的医药包。足智多谋：可从弃牌堆取肾上腺素或镇静剂。",
+      "description": "医生。万全准备：开局拥有马尔科的医药包（个人物品，仅本人可用）。足智多谋：可从弃牌堆取肾上腺素或镇静剂。",
       "skills": [
         {
           "id": "well_prepared",
           "name": "万全准备",
           "trigger": "passive",
-          "text": "游戏开始时拥有马尔科的医药包",
+          "text": "游戏开始时拥有马尔科的医药包（个人物品：只有马尔科本人能用）",
           "effects": []
         },
         {
@@ -102,17 +156,17 @@
     },
     {
       "id": "survivor4",
-      "name": "索菲娅·斯科特",
+      "name": "索菲亚·斯科特",
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 3,
-      "description": "侦探。机敏灵巧：开局拥有索菲娅的相机。观察入微：可走秘密通道。",
+      "description": "侦探。机敏灵巧：开局拥有索菲亚的相机（个人物品，仅本人可用）。观察入微：可移动通过秘密通道。",
       "skills": [
         {
           "id": "nimble",
           "name": "机敏灵巧",
           "trigger": "passive",
-          "text": "游戏开始时拥有索菲娅的相机",
+          "text": "游戏开始时拥有索菲亚的相机（个人物品：只有索菲亚本人能用）",
           "effects": []
         },
         {
@@ -145,7 +199,7 @@
           "name": "短跑冲刺",
           "trigger": "activated",
           "oncePerTurn": true,
-          "text": "特殊行动：【移动】X3（在目的地触发警报）",
+          "text": "特殊行动：【移动】X3（在目的地发出响声）",
           "effects": [{ "op": "move", "value": 3 }, { "op": "noise" }]
         }
       ]

@@ -8,28 +8,18 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { GameView, LobbyView } from './GameViews';
 import { useGameSocket } from './useGameSocket';
 
-interface MapOption {
-  id: string;
-  name: string;
-}
-
 export default function App() {
-  const { connected, state, error, setError, createRoom, joinRoom, sendAction, leaveRoom } = useGameSocket();
+  const { connected, state, error, setError, createRoom, joinRoom, sendAction, leaveRoom, cursors, sendCursor } = useGameSocket();
   const [name, setName] = useState(() => localStorage.getItem('nh_name') ?? '');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [maps, setMaps] = useState<MapOption[]>([]);
-  const [mapId, setMapId] = useState(() => localStorage.getItem('nh_map') ?? '');
   const [lanUrls, setLanUrls] = useState<string[]>([]);
 
-  // 问服务器：有哪些地图、同学该打开哪个网址
+  // 问服务器：同学该打开哪个网址（地图在房间里面选）
   useEffect(() => {
     fetch('/api/content/meta')
       .then((r) => r.json())
-      .then((data: { maps?: MapOption[]; mapId?: string; lanUrls?: string[] }) => {
-        const list = data.maps ?? [];
-        setMaps(list);
-        setMapId((prev) => prev || data.mapId || list[0]?.id || '');
+      .then((data: { lanUrls?: string[] }) => {
         if (data.lanUrls?.length) setLanUrls(data.lanUrls);
       })
       .catch(() => {
@@ -37,15 +27,14 @@ export default function App() {
       });
   }, []);
 
-  /** 点“创建”：记住昵称和地图，请服务器开一桌 */
+  /** 点“创建”：只记住昵称；地图进房间后再选 */
   const onCreate = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       localStorage.setItem('nh_name', name);
-      if (mapId) localStorage.setItem('nh_map', mapId);
-      await createRoom(name || '房主', mapId || undefined);
+      await createRoom(name || '房主');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -113,7 +102,7 @@ export default function App() {
             ) : (
               <> 你这台电脑的局域网地址（端口 5173）</>
             )}
-            ，输入房间码加入。1 对 1：房主切「1对1」，一人杀手、一人操控 3 名求生者。1VS2：切「1VS2」，一人杀手、两人共控 3 名求生者。1VS3：切「1VS3」，需要 1 名杀手 + 3 名求生者，每人只操控自己的角色。
+            ，输入房间码加入。1 对 1：房主切「1对1」，一人杀手、一人操控 3 名幸存者。1对2：切「1对2」，一人杀手、两人共控 3 名幸存者。1对3：切「1对3」，需要 1 名杀手 + 3 名幸存者，每人只操控自己的角色。
           </p>
           <p className="muted">{connected ? '已连接服务器' : '正在连接…'}</p>
         </header>
@@ -127,18 +116,7 @@ export default function App() {
               <span className="muted">昵称</span>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="房主" />
             </label>
-            {maps.length > 0 && (
-              <label className="stack">
-                <span className="muted">地图</span>
-                <select value={mapId} onChange={(e) => setMapId(e.target.value)}>
-                  {maps.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <p className="muted">地图进房间后再选。</p>
             <button className="primary" type="submit" disabled={!connected || busy}>
               创建
             </button>
@@ -196,6 +174,8 @@ export default function App() {
             }
           }}
           onLeave={state.mode === 'solo' ? () => void leaveToHome(true) : undefined}
+          cursors={cursors}
+          onCursorRoom={sendCursor}
         />
       )}
     </div>

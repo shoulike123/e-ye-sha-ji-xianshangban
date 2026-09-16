@@ -30,12 +30,12 @@ function unblockedDoorsAt(state: PublicSnapshot, roomId: string): string[] {
   return doorsAt(state, roomId).filter((id) => !state.blockades.includes(id));
 }
 
-/** 还活着但已经受伤的求生者（给治疗按钮用） */
+/** 还活着但已经受伤的幸存者（给治疗按钮用） */
 export function injuredSurvivors(state: PublicSnapshot) {
   return state.players.filter((s) => s.faction === 'survivor' && s.alive && s.hp < s.maxHp);
 }
 
-/** 与当前行动者同一地点、可以互相治疗的受伤求生者（包括自己） */
+/** 与当前行动者同一地点、可以互相治疗的受伤幸存者（包括自己） */
 export function injuredAlliesHere(state: PublicSnapshot) {
   const roomId = state.you.roomId;
   if (!roomId) return [];

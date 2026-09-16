@@ -14,7 +14,7 @@
     </label>
     <label>视角
       <select id="sideSelect">
-        <option value="survivor">求生者</option>
+        <option value="survivor">幸存者</option>
         <option value="killer">杀手</option>
       </select>
     </label>
@@ -24,7 +24,7 @@
     <nav class="nav">
       <a href="/">回对局</a>
       <a href="/map-debug/">移动调试</a>
-      <a href="/ui-layout/">求生者界面校准</a>
+      <a href="/ui-layout/">幸存者界面校准</a>
       <a href="/ui-debug/">界面调试</a>
     </nav>
   </header>
@@ -45,8 +45,8 @@
         <label class="check"><input type="checkbox" id="showTokens" checked /> 道具</label>
         <label class="check"><input type="checkbox" id="showEdges" checked /> 通道</label>
         <label class="check"><input type="checkbox" id="showBlockades" checked /> 封堵标记（白门）</label>
-        <p class="hint">每扇白实线门在求生者图、杀手图上各有一枚封堵标记。切换「视角」后分别拖到白门上，保存后对局里封堵会显示在对应位置。</p>
-        <p class="hint">救援警车：每张图每侧 6 格（5→0）各有一辆警车。把它们拖进对应方框。求生者车开到第 N 格时，杀手图会显示杀手侧同一格的车。</p>
+        <p class="hint">每扇白实线门在幸存者图、杀手图上各有一枚封堵标记。切换「视角」后分别拖到白门上，保存后对局里封堵会显示在对应位置。</p>
+        <p class="hint">救援警车：每张图每侧 6 格（5→0）各有一辆警车。把它们拖进对应方框。幸存者车开到第 N 格时，杀手图会显示杀手侧同一格的车。</p>
       </section>
 
       <section>
@@ -65,7 +65,7 @@
 
       <section>
         <h2>选中对象</h2>
-        <div id="inspector" class="inspector muted">点击地图上的圆点、矩形、道具或连线。选中地点可改求生者名和杀手名。</div>
+        <div id="inspector" class="inspector muted">点击地图上的圆点、矩形、道具或连线。选中地点可改幸存者名和杀手名。</div>
       </section>
 
       <section>

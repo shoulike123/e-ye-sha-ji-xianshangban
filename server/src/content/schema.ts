@@ -43,6 +43,8 @@ export const EffectSchema = z.object({
     'exposeFeared',
     'onReveal',
     'rageSearch',
+    // 鸿运当骰：遭遇期间可重掷骰子
+    'luckyDice',
   ]),
   value: z.union([z.number(), z.boolean(), z.string()]).optional(),
   min: z.number().optional(),
@@ -88,6 +90,8 @@ export const CardSchema = z.object({
     'killerAction',
     'upgrade',
     'item',
+    // 乔治的笔记：拿到手才有效，只有乔治本人能用
+    'note',
   ]),
   speed: z.enum(['fast', 'slow', 'special']).optional(),
   text: z.string(),

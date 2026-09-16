@@ -62,6 +62,10 @@ interface BoardProps {
   onSurvivorClick?: (playerId: string) => void;
   onPileClick?: (kind: PileKind) => void;
   turnOrder?: string[];
+  /** 同队幸存者正在预选的地点（1对2 / 1对3 互看鼠标预选） */
+  remoteCursors?: Array<{ playerId: string; roomId: string }>;
+  /** 鼠标移到某一格（null = 移出地图），用来把预选位置报给同队 */
+  onRoomHover?: (roomId: string | null) => void;
 }
 
 const OVERLAY_ZONE_IDS = new Set([
@@ -96,6 +100,14 @@ function hexToRgba(hex: string, alpha: number) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/** 同队共享预选时，按存活幸存者顺序分配颜色（和座位色一致） */
+const CURSOR_COLORS = ['#f0c14b', '#6fd3ff', '#8ce06a', '#ff8f6f', '#c79bff'];
+
+function cursorColor(index: number) {
+  if (index < 0) return CURSOR_COLORS[0]!;
+  return CURSOR_COLORS[index % CURSOR_COLORS.length]!;
+}
+
 function zoneVisible(zone: Pick<MapZone, 'side'>, faction: Faction | null) {
   const side = zone.side ?? 'survivor';
   if (side === 'both') return true;
@@ -110,7 +122,7 @@ function tokenRescueStep(id: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** 求生者 repair1…5；杀手地图猜测齿轮 krepair1…5 */
+/** 幸存者 repair1…5；杀手地图猜测齿轮 krepair1…5 */
 function tokenRepairStep(id: string): number | null {
   const m = /^(?:k)?repair(\d+)$/.exec(id);
   if (!m) return null;
@@ -145,6 +157,11 @@ function tokenTransform(x: number, y: number, w: number, h: number, rotation = 0
 const STANDEE_H = 68;
 const SURVIVOR_STANDEE_W = Math.round(STANDEE_H * (489 / 781));
 const KILLER_STANDEE_W = Math.round(STANDEE_H * (934 / 1040));
+
+/** 地点圆点半径（地图原始坐标；图是 1000×500） */
+const ROOM_R = 20;
+/** 牌子 emoji 挂在圆点下方多远 */
+const ROOM_TAG_DY = ROOM_R + 8;
 
 function standeeFor(
   p: BoardPlayer,
@@ -194,6 +211,8 @@ export function Board({
   onSurvivorClick,
   onPileClick,
   turnOrder = [],
+  remoteCursors = [],
+  onRoomHover,
 }: BoardProps) {
   const roomMap = new Map(map.rooms.map((r) => [r.id, r]));
   const you = players.find((p) => p.id === youId);
@@ -205,9 +224,21 @@ export function Board({
     (z) => zoneVisible(z, viewerFaction) && !OVERLAY_ZONE_IDS.has(z.id),
   );
   const previewRoomId = previewPath.length ? previewPath[previewPath.length - 1] : null;
+  /** 同队预选：把棋子 id 换成它在这局里的序号（决定颜色） */
+  const playerIndexOf = (playerId: string) => turnOrder.indexOf(playerId);
   const previewPts = previewPath
     .map((id) => roomMap.get(id))
     .filter((r): r is NonNullable<typeof r> => Boolean(r));
+  /** 被封堵的门所在的房间。必须按完整门号比较：门号是 "A|B"，
+   *  用 includes(room.id) 会让 R1 命中 "R11|R12" 这类门而误判。 */
+  const blockedDoorKeys = new Set(blockades);
+  const blockedRoomIds = new Set<string>();
+  for (const e of map.edges) {
+    if (!isDoorPath(e.pathType)) continue;
+    if (!blockedDoorKeys.has(doorKey(e.from, e.to))) continue;
+    blockedRoomIds.add(e.from);
+    if (e.bidirectional ?? true) blockedRoomIds.add(e.to);
+  }
 
   return (
     <div className="board-wrap">
@@ -414,7 +445,7 @@ export function Board({
           const colorHit = highlightRoomIds.includes(room.id);
           const noise = noises.includes(room.id);
           const firecrackerHere = firecrackerRoomId === room.id;
-          const blocked = blockades.some((id) => id.includes(room.id));
+          const blocked = blockedRoomIds.has(room.id);
           const here = you?.roomId === room.id && !previewRoomId;
           const previewHere = previewRoomId === room.id;
           const occupants = players.filter((p) => p.roomId === room.id && p.alive);
@@ -427,17 +458,35 @@ export function Board({
           const name = viewerFaction === 'killer' && room.nameKiller ? room.nameKiller : room.name;
           const label = name.startsWith(room.id) ? name : `${room.id}${name}`;
           return (
-            <g key={room.id} onClick={() => onRoomClick(room.id)}>
+            <g
+              key={room.id}
+              onClick={() => onRoomClick(room.id)}
+              onMouseEnter={onRoomHover ? () => onRoomHover(room.id) : undefined}
+              onMouseLeave={onRoomHover ? () => onRoomHover(null) : undefined}
+            >
+              {/* 同队幸存者的鼠标预选：同名棋子共用一个颜色，绕两圈更好认 */}
+              {remoteCursors
+                .filter((c) => c.roomId === room.id)
+                .map((c, i) => (
+                  <circle
+                    key={`${c.playerId}-${i}`}
+                    className="room-cursor"
+                    cx={room.x}
+                    cy={room.y}
+                    r={ROOM_R + 5 + i * 4}
+                    style={{ stroke: cursorColor(playerIndexOf(c.playerId)) }}
+                  />
+                ))}
               <circle
                 className={`room-node${legal ? ' legal' : ' clickable'}${colorHit ? ' sense-color' : ''}${noise ? ' noise' : ''}${blocked ? ' blocked' : ''}${here ? ' here' : ''}${previewHere ? ' preview' : ''}`}
                 cx={room.x}
                 cy={room.y}
-                r={18}
+                r={ROOM_R}
               />
               <text className="room-label" x={room.x} y={room.y + 4} textAnchor="middle">
                 {label}
               </text>
-              <text className="room-tag" x={room.x} y={room.y + 22} textAnchor="middle">
+              <text className="room-tag" x={room.x} y={room.y + ROOM_TAG_DY} textAnchor="middle">
                 {[
                   room.tags.includes('repairable') ? '⚙' : '',
                   room.tags.includes('searchable') ? '🔑' : '',
@@ -451,7 +500,8 @@ export function Board({
                 const gap = s.w * 0.62;
                 const cx = room.x + (idx - (n - 1) / 2) * gap;
                 const x = cx - s.w / 2;
-                const y = room.y - s.h + 12;
+                /** 立绘底边与地点圆心对齐（原来往下压了 12px） */
+                const y = room.y - s.h;
                 const pickable = pickableSurvivorIds.includes(s.p.id) && s.p.faction === 'survivor';
                 const acting = s.p.id === activePlayerId;
                 return (
@@ -675,7 +725,7 @@ function MapPileOverlays({
             type="button"
             className="map-skill-card"
             style={{ ...zoneBoxStyle(map, z), cursor: onSkillClick ? 'zoom-in' : 'default' }}
-            onClick={() => onSkillClick?.(src, `${p?.name ?? '求生者'}技能`)}
+            onClick={() => onSkillClick?.(src, `${p?.name ?? '幸存者'}技能`)}
           >
             <img src={encodeURI(src)} alt={`${p?.name ?? ''}技能`} draggable={false} />
           </button>

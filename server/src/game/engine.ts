@@ -9,6 +9,7 @@
  * 杀手牌一张张结算在 killerCards.ts。
  */
 import type { GameContent } from '../content/loader.js';
+import type { CardDef } from '../content/schema.js';
 import {
   addFear,
   applyDamage,
@@ -65,6 +66,20 @@ import {
   removableBlockades,
   parseDoor,
   maybeArmRescue,
+  announceRepairIfJustFinished,
+  personalItemBlockReason,
+  canonicalDoorId,
+  isDoorBlocked,
+  addRepairProgress,
+  addKeys,
+  isGeorge,
+  georgeInPlay,
+  isBookRoom,
+  georgeNoteDefs,
+  countGeorgeNotes,
+  georgeDefenseNoteBonus,
+  drawSearchCard,
+  drawDiscoveryCard,
   setOverFearHandler,
   setUpgradeHandler,
 } from './effects.js';
@@ -125,7 +140,8 @@ import type {
 /** 某些角色开局就自带东西：索菲亚有相机，马尔科有医药包 */
 function startingItemsFor(characterId: string, characterName: string): Record<string, number> {
   const hay = `${characterId} ${characterName}`;
-  if (/survivor4|索菲娅|索菲亚|sophia/i.test(hay)) return { sophia_camera: 1 };
+  // 旧写法「索菲娅」也认（历史存档、外部文案可能仍是旧名）
+  if (/survivor4|索菲亚|索菲娅|sophia/i.test(hay)) return { sophia_camera: 1 };
   if (/survivor3|马尔科|marco/i.test(hay)) return { marco_medkit: 1 };
   return {};
 }
@@ -211,7 +227,7 @@ function coopActionSummary(state: GameState, action: ClientAction, actor: Player
   const dest =
     'toRoomId' in action && action.toRoomId ? roomName(state, action.toRoomId) : '';
   if (action.type === 'move') return `${actor.name} 移动到「${dest}」`;
-  if (action.type === 'search') return `${actor.name} 搜索`;
+  if (action.type === 'search') return `${actor.name} 搜索物资`;
   if (action.type === 'repair') return `${actor.name} 修理无线电`;
   if (action.type === 'clearFear') return `${actor.name} 消除恐惧`;
   if (action.type === 'removeBlockade') return `${actor.name} 移除封堵`;
@@ -253,6 +269,7 @@ export function createLobby(
     round: 0,
     contentVersion: content.rules.id,
     map: content.maps.find((m) => m.id === mapId) ?? content.map,
+    maps: content.maps,
     rules: content.rules,
     characters: content.characters,
     cardById: content.cards.byId,
@@ -322,6 +339,12 @@ export function createLobby(
     killerPublicKeys: 0,
     killerRepairGuess: 0,
     pendingUnlockDiscard: false,
+    justUnlockedCards: [],
+    notesDeck: [],
+    pendingGeorgeNote: false,
+    pendingDice: null,
+    pendingExtraRerolls: 0,
+    replacementDeck: false,
     pendingPathDraft: null,
     pendingSenseColorPick: null,
     rematchReady: [],
@@ -408,13 +431,13 @@ export function addPlayer(state: GameState, id: string, name: string): void {
     throw new Error('单人模式只能房主一人，请先切换多人模式');
   }
   if (state.mode === 'duo' && Object.keys(state.players).length >= 2) {
-    throw new Error('1 对 1 只能 2 人：一人杀手、一人操控 3 名求生者');
+    throw new Error('1 对 1 只能 2 人：一人杀手、一人操控 3 名幸存者');
   }
   if (state.mode === 'vs2' && Object.keys(state.players).length >= 3) {
-    throw new Error('1VS2 只能 3 人：一人杀手、两人共控 3 名求生者');
+    throw new Error('1对2 只能 3 人：一人杀手、两人共控 3 名幸存者');
   }
   if (state.mode === 'multi' && Object.keys(state.players).length >= 1 + state.rules.maxSurvivors) {
-    throw new Error(`房间已满（1 名杀手 + ${state.rules.maxSurvivors} 名求生者）`);
+    throw new Error(`房间已满（1 名杀手 + ${state.rules.maxSurvivors} 名幸存者）`);
   }
   state.players[id] = createPlayer(id, name);
   log(state, `${name} 加入了房间。`);
@@ -440,7 +463,7 @@ export function removePlayer(state: GameState, id: string): void {
   if (any) log(state, `有人离开房间，座位保留。用房间码和原来的昵称即可回来。`);
 }
 
-/** 还活着的求生者里，行动顺序最靠前的那一个 */
+/** 还活着的幸存者里，行动顺序最靠前的那一个 */
 function firstAliveSurvivorId(state: GameState): string | null {
   for (const id of state.turnOrder) {
     const p = state.players[id];
@@ -452,7 +475,7 @@ function firstAliveSurvivorId(state: GameState): string | null {
   return any?.id ?? null;
 }
 
-/** 现在正在行动的那名求生者 */
+/** 现在正在行动的那名幸存者 */
 function activeSurvivorId(state: GameState): string | null {
   if (state.phase !== 'survivorMain') return null;
   if (state.pendingSurvivorPick) return null;
@@ -461,7 +484,7 @@ function activeSurvivorId(state: GameState): string | null {
   return order[state.activeSurvivorIndex] ?? null;
 }
 
-/** 遭遇里还没轮到防御的求生者 */
+/** 遭遇里还没轮到防御的幸存者 */
 function pendingDefenseSurvivorIds(state: GameState): string[] {
   const enc = state.encounter;
   if (!enc || enc.step !== 'defend' || !enc.targetId) return [];
@@ -469,13 +492,18 @@ function pendingDefenseSurvivorIds(state: GameState): string[] {
   return [enc.targetId];
 }
 
-/** 现在该谁点按钮：选角、求生者、杀手、遭遇里的某一步 */
+/** 现在该谁点按钮：选角、幸存者、杀手、遭遇里的某一步 */
 function activePlayerId(state: GameState): string | null {
   if (state.pendingAmulet) return state.pendingAmulet.playerId;
   if (state.pendingEvolutionAck) return state.killerId;
   if (state.pendingOverFearWound) return state.killerId;
   if (state.pendingWhizSearch) return state.killerId;
   if (state.pendingBlockadeJob) return state.killerId;
+  // 乔治在挑笔记：还是他的小回合，先挑完
+  if (state.pendingGeorgeNote) {
+    const g = Object.values(state.players).find((pl) => pl.faction === 'survivor' && isGeorge(state, pl.id));
+    if (g) return g.id;
+  }
   if (state.pendingItemDiscard && state.mode !== 'multi') return state.pendingItemDiscard.playerId;
   if (state.phase === 'survivorMain') return activeSurvivorId(state);
   if (state.phase === 'discovery') {
@@ -602,7 +630,7 @@ export function resolveActorId(
   return socketId;
 }
 
-/** 一名求生者开始自己的一段：还没做一般行动，移动力按规则重置 */
+/** 一名幸存者开始自己的一段：还没做一般行动，移动力按规则重置 */
 function beginSurvivorTurn(state: GameState, playerId: string) {
   const p = state.players[playerId];
   if (!p) return;
@@ -615,7 +643,7 @@ function beginSurvivorTurn(state: GameState, playerId: string) {
   p.repairedThisTurn = false;
   p.skillUsedThisTurn = new Set();
   p.quietSearch = false;
-  log(state, `${p.name} 的小回合（一般行动：移动 1–${range} / 搜索 / 修理 / 特殊 / 拆封堵 / 消恐惧）。`);
+  log(state, `${p.name} 的小回合（一般行动：移动 1–${range} / 搜索物资 / 修理 / 特殊 / 拆封堵 / 消恐惧）。`);
 }
 
 /** 杀手回合开头：先快速牌。如果在潜行，先重现并强制搜一次 */
@@ -650,7 +678,7 @@ function beginKillerTurn(state: GameState) {
   state.sealAllRoomId = null;
   log(
     state,
-    `${k.name} 的回合：先打任意张快速牌，再二选一（2 次移动/搜索，或 1 张特殊牌），无遭遇则进入慢速阶段。`,
+    `${k.name} 的回合：先打任意张快速牌，再二选一（2 次移动/搜索房间，或 1 张特殊牌），无遭遇则进入慢速阶段。`,
   );
   if (k.stealth) {
     forcedRevealAndSearch(state);
@@ -664,7 +692,7 @@ function beginKillerTurn(state: GameState) {
   }
 }
 
-/** 这一轮还没行动过、还活着的求生者 */
+/** 这一轮还没行动过、还活着的幸存者 */
 function unactedAliveSurvivorIds(state: GameState): string[] {
   return state.turnOrder.filter((id) => {
     const pl = state.players[id];
@@ -672,7 +700,7 @@ function unactedAliveSurvivorIds(state: GameState): string[] {
   });
 }
 
-/** 玩家选定“下一名行动的求生者”之后，正式开始他的回合 */
+/** 玩家选定“下一名行动的幸存者”之后，正式开始他的回合 */
 function startPickedSurvivorTurn(state: GameState, playerId: string) {
   const p = state.players[playerId];
   if (!p) return;
@@ -687,12 +715,12 @@ function startPickedSurvivorTurn(state: GameState, playerId: string) {
   beginSurvivorTurn(state, playerId);
 }
 
-/** 求生者大回合：做完一般行动的人不能再选；没做完的可以随时换 */
+/** 幸存者大回合：做完一般行动的人不能再选；没做完的可以随时换 */
 function promptOrAutoNextSurvivor(state: GameState) {
   const left = unactedAliveSurvivorIds(state);
   if (left.length === 0) {
     state.pendingSurvivorPick = false;
-    log(state, '所有求生者已完成一般行动。仍可交换物品或额外行动，然后点「求生者所有操作已结束」。');
+    log(state, '所有幸存者已完成一般行动。仍可交换物品或额外行动，然后点「幸存者所有操作已结束」。');
     return;
   }
   state.pendingSurvivorPick = true;
@@ -700,7 +728,7 @@ function promptOrAutoNextSurvivor(state: GameState) {
     state,
     state.mode === 'multi'
       ? '请点选自己的角色开始小回合。一般行动只能操作自己。'
-      : '点选一名求生者开始小回合。做一般行动前可反复换人。',
+      : '点选一名幸存者开始小回合。做一般行动前可反复换人。',
   );
 }
 
@@ -718,7 +746,7 @@ function placeFirecrackerMarker(state: GameState) {
   state.firecrackerRoomId = k.roomId;
 }
 
-/** 新的一轮：求生者大回合开始前清响声/爆竹、复位手提箱，再请第一名求生者行动 */
+/** 新的一轮：幸存者大回合开始前清响声/爆竹、复位手提箱，再请第一名幸存者行动 */
 function startRound(state: GameState) {
   state.round += 1;
   clearNoiseAndFirecrackerTokens(state);
@@ -763,7 +791,7 @@ function initPiece(state: GameState, content: GameContent, p: PlayerState): void
     p.items = { ...startItems };
     if (Object.keys(startItems).length) {
       const names: Record<string, string> = {
-        sophia_camera: '索菲娅的相机',
+        sophia_camera: '索菲亚的相机',
         marco_medkit: '马尔科的医药包',
       };
       log(state, `${p.name} 开局带上了 ${Object.keys(startItems).map((id) => names[id] ?? id).join('、')}。`);
@@ -776,7 +804,37 @@ function initPiece(state: GameState, content: GameContent, p: PlayerState): void
   applyPassiveBonuses(state, p.id);
 }
 
-/** 三种开局模式共用的收尾：洗牌、杀手起始手牌、求生者放进地图、开始第 1 轮 */
+/** 三种开局模式共用的收尾：洗牌、杀手起始手牌、幸存者放进地图、开始第 1 轮 */
+/** 「替换鸿运当骰等牌」用的三张替换牌 id */
+const REPLACEMENT_CARD_IDS = ['sk_lucky_dice', 'sk_lamp', 'sk_parcel'] as const;
+
+/**
+ * 【替换「鸿运当骰」等牌】：开启时搜索牌堆里的
+ * 1 个手斧 / 1 瓶威士忌酒瓶 / 1 张石灰粉 换成 鸿运当骰 / 煤油灯 / 神秘包裹。
+ * 关闭时这三张替换牌不进牌堆（钥匙不受影响）。
+ */
+function applyReplacementDeck(state: GameState, search: CardDef[]): CardDef[] {
+  const base = search.filter(
+    (c) => !(REPLACEMENT_CARD_IDS as readonly string[]).includes(c.id),
+  );
+  if (!state.replacementDeck) return base;
+  /** 按牌 id 替换（每 id 只换一张），换掉的牌不进搜索牌堆 */
+  const pairs: Array<[string, string]> = [
+    ['sk_axe', 'sk_lamp'],
+    ['sk_whiskey', 'sk_parcel'],
+    ['sk_lime', 'sk_lucky_dice'],
+  ];
+  const out = [...base];
+  for (const [fromId, toId] of pairs) {
+    const to = state.cardById[toId];
+    if (!to) continue;
+    const i = out.findIndex((c) => c.id === fromId);
+    if (i < 0) continue;
+    out[i] = to;
+  }
+  return out;
+}
+
 function finishStartCommon(state: GameState, content: GameContent) {
   state.keysCollected = 0;
   state.repairProgress = 0;
@@ -812,6 +870,8 @@ function finishStartCommon(state: GameState, content: GameContent) {
   state.killerPublicKeys = 0;
   state.killerRepairGuess = 0;
   state.pendingUnlockDiscard = false;
+  state.justUnlockedCards = [];
+  state.pendingGeorgeNote = false;
   state.pendingPathDraft = null;
   state.pendingSenseColorPick = null;
   state.rematchReady = [];
@@ -819,11 +879,14 @@ function finishStartCommon(state: GameState, content: GameContent) {
   const killerCh = content.characters.find((c) => c.id === state.players[state.killerId ?? '']?.characterId);
   state.killerPower = killerCh?.startingPower ?? state.rules.killerPowerStart;
 
-  state.searchDeck = buildSearchDeck(content.cards.search);
+  state.searchDeck = buildSearchDeck(applyReplacementDeck(state, content.cards.search));
   state.searchDiscard = [];
   state.discoveryDeck = shuffle(content.cards.discovery.map((c) => c.id));
   state.discoveryDiscard = [];
   state.survivorDiscard = [];
+  /** 乔治的笔记：3 张各 1 份，开局全部可用（没有乔治就空着） */
+  state.notesDeck = content.cards.note.map((c) => c.id);
+  state.pendingGeorgeNote = false;
   const kCharId = state.killerId ? state.players[state.killerId]?.characterId : null;
   const owned = content.cards.killerAction.filter((c) => {
     if (c.owner) return c.owner === kCharId || c.owner === killerCh?.name;
@@ -845,13 +908,13 @@ function finishStartCommon(state: GameState, content: GameContent) {
   startRound(state);
 }
 
-/** 单人热座：一个人操控 3 名求生者 + 1 名杀手 */
+/** 单人热座：一个人操控 3 名幸存者 + 1 名杀手 */
 function startSoloGame(state: GameState, content: GameContent, hostSocketId: string): void {
   const host = state.players[hostSocketId];
   if (!host) throw new Error('房主不在房间内');
   const needed = state.rules.maxSurvivors;
   if (!state.soloKillerCharacterId || state.soloSurvivorCharacterIds.length !== needed) {
-    throw new Error(`请先选好 1 名杀手和 ${needed} 名求生者`);
+    throw new Error(`请先选好 1 名杀手和 ${needed} 名幸存者`);
   }
   if (!host.ready) throw new Error('请先点击准备');
 
@@ -859,11 +922,11 @@ function startSoloGame(state: GameState, content: GameContent, hostSocketId: str
   if (!killerCh || killerCh.faction !== 'killer') throw new Error('杀手角色无效');
   const survChars = state.soloSurvivorCharacterIds.map((id) => {
     const ch = content.characters.find((c) => c.id === id);
-    if (!ch || ch.faction !== 'survivor') throw new Error('求生者角色无效');
+    if (!ch || ch.faction !== 'survivor') throw new Error('幸存者角色无效');
     return ch;
   });
   if (new Set(survChars.map((c) => c.id)).size !== survChars.length) {
-    throw new Error('求生者角色不能重复');
+    throw new Error('幸存者角色不能重复');
   }
 
   const killerId = `${hostSocketId}__killer`;
@@ -897,17 +960,17 @@ function startSoloGame(state: GameState, content: GameContent, hostSocketId: str
   log(state, `单人热座开始：依次操控 ${survivors.map((s) => s.name).join('、')}，再操控杀手。`);
 }
 
-/** 1 对 1：一人杀手，一人操控全部求生者 */
+/** 1 对 1：一人杀手，一人操控全部幸存者 */
 function startDuoGame(state: GameState, content: GameContent): void {
   const humans = Object.values(state.players);
   if (humans.length !== 2) throw new Error('1 对 1 需要恰好 2 名玩家');
   const killerHuman = humans.find((p) => p.faction === 'killer');
   const survHuman = humans.find((p) => p.faction === 'survivor');
-  if (!killerHuman || !survHuman) throw new Error('一人选杀手，一人选求生者');
+  if (!killerHuman || !survHuman) throw new Error('一人选杀手，一人选幸存者');
   if (!killerHuman.characterId) throw new Error(`${killerHuman.name} 尚未选择杀手角色`);
   const needed = state.rules.maxSurvivors;
   if (state.soloSurvivorCharacterIds.length !== needed) {
-    throw new Error(`${survHuman.name} 请先点选 ${needed} 名求生者`);
+    throw new Error(`${survHuman.name} 请先点选 ${needed} 名幸存者`);
   }
   if (!killerHuman.ready || !survHuman.ready) throw new Error('双方都需要准备');
 
@@ -915,11 +978,11 @@ function startDuoGame(state: GameState, content: GameContent): void {
   if (!killerCh || killerCh.faction !== 'killer') throw new Error('杀手角色无效');
   const survChars = state.soloSurvivorCharacterIds.map((id) => {
     const ch = content.characters.find((c) => c.id === id);
-    if (!ch || ch.faction !== 'survivor') throw new Error('求生者角色无效');
+    if (!ch || ch.faction !== 'survivor') throw new Error('幸存者角色无效');
     return ch;
   });
   if (new Set(survChars.map((c) => c.id)).size !== survChars.length) {
-    throw new Error('求生者角色不能重复');
+    throw new Error('幸存者角色不能重复');
   }
 
   const killerId = `${killerHuman.id}__killer`;
@@ -959,17 +1022,17 @@ function startDuoGame(state: GameState, content: GameContent): void {
   );
 }
 
-/** 1VS2：一人杀手，两人共控全部求生者 */
+/** 1对2：一人杀手，两人共控全部幸存者 */
 function startVs2Game(state: GameState, content: GameContent): void {
   const humans = Object.values(state.players);
-  if (humans.length !== 3) throw new Error('1VS2 需要恰好 3 名玩家');
+  if (humans.length !== 3) throw new Error('1对2 需要恰好 3 名玩家');
   const killerHuman = humans.find((p) => p.faction === 'killer');
   const survHumans = humans.filter((p) => p.faction === 'survivor');
-  if (!killerHuman || survHumans.length !== 2) throw new Error('一人选杀手，两人选求生者并共控 3 名角色');
+  if (!killerHuman || survHumans.length !== 2) throw new Error('一人选杀手，两人选幸存者并共控 3 名角色');
   if (!killerHuman.characterId) throw new Error(`${killerHuman.name} 尚未选择杀手角色`);
   const needed = state.rules.maxSurvivors;
   if (state.soloSurvivorCharacterIds.length !== needed) {
-    throw new Error(`请先点选 ${needed} 名求生者`);
+    throw new Error(`请先点选 ${needed} 名幸存者`);
   }
   if (!killerHuman.ready || survHumans.some((p) => !p.ready)) throw new Error('三人都需要准备');
 
@@ -977,11 +1040,11 @@ function startVs2Game(state: GameState, content: GameContent): void {
   if (!killerCh || killerCh.faction !== 'killer') throw new Error('杀手角色无效');
   const survChars = state.soloSurvivorCharacterIds.map((id) => {
     const ch = content.characters.find((c) => c.id === id);
-    if (!ch || ch.faction !== 'survivor') throw new Error('求生者角色无效');
+    if (!ch || ch.faction !== 'survivor') throw new Error('幸存者角色无效');
     return ch;
   });
   if (new Set(survChars.map((c) => c.id)).size !== survChars.length) {
-    throw new Error('求生者角色不能重复');
+    throw new Error('幸存者角色不能重复');
   }
 
   const killerId = `${killerHuman.id}__killer`;
@@ -1020,7 +1083,7 @@ function startVs2Game(state: GameState, content: GameContent): void {
   finishStartCommon(state, content);
   log(
     state,
-    `1VS2 开始：${killerHuman.name} 操控杀手「${killer.name}」，${survHumans.map((h) => h.name).join('、')} 共控 ${survivors.map((s) => s.name).join('、')}。一般行动和额外行动需另一人确认，交换物品不用。`,
+    `1对2 开始：${killerHuman.name} 操控杀手「${killer.name}」，${survHumans.map((h) => h.name).join('、')} 共控 ${survivors.map((s) => s.name).join('、')}。一般行动和额外行动需另一人确认，交换物品不用。`,
   );
 }
 
@@ -1032,10 +1095,10 @@ function startMultiGame(state: GameState, content: GameContent): void {
   const needed = state.rules.maxSurvivors;
   if (killers.length !== 1) throw new Error('必须恰好有 1 名杀手');
   if (survs.length !== needed) {
-    throw new Error(`必须恰好有 ${needed} 名求生者（当前 ${survs.length}）`);
+    throw new Error(`必须恰好有 ${needed} 名幸存者（当前 ${survs.length}）`);
   }
   if (players.length !== 1 + needed) {
-    throw new Error(`需要 ${1 + needed} 名玩家：1 杀手 + ${needed} 求生者`);
+    throw new Error(`需要 ${1 + needed} 名玩家：1 杀手 + ${needed} 幸存者`);
   }
   for (const p of players) {
     if (!p.characterId) throw new Error(`${p.name} 尚未选择角色`);
@@ -1049,7 +1112,7 @@ function startMultiGame(state: GameState, content: GameContent): void {
   finishStartCommon(state, content);
   log(
     state,
-    `1VS3 开始：${killers[0]!.name} 操控杀手，${survs.map((s) => `${s.controllerName || s.name}→${s.name}`).join('，')}。每人只操控自己的角色。`,
+    `1对3 开始：${killers[0]!.name} 操控杀手，${survs.map((s) => `${s.controllerName || s.name}→${s.name}`).join('，')}。每人只操控自己的角色。`,
   );
 }
 
@@ -1066,23 +1129,20 @@ export function startGame(state: GameState, content: GameContent, hostSocketId: 
   }
 }
 
-/** 再来一局：座位和阵营保留，棋盘重开 */
+/**
+ * 再来一局：保留座位与房间，退回大厅重新选地图 / 身份 / 角色。
+ * 所有人都点过「再来一局」后才会走到这里，此时把棋盘整盘重置。
+ */
 function restartMatch(state: GameState, content: GameContent) {
   const roomCode = state.roomCode;
   const hostId = state.hostId;
   const mode = state.mode;
+  /** 上一局的地图作为默认值带过去，房主可以在大厅里换 */
   const mapId = state.map.id;
   const hostName =
     Object.values(state.players).find((p) => p.controllerId === hostId)?.controllerName || '房主';
-  const soloKiller =
-    state.soloKillerCharacterId ??
-    (state.killerId ? state.players[state.killerId]?.characterId ?? null : null);
-  const soloSurvs = state.soloSurvivorCharacterIds.length
-    ? [...state.soloSurvivorCharacterIds]
-    : state.turnOrder
-        .map((id) => state.players[id]?.characterId)
-        .filter((x): x is string => Boolean(x));
 
+  /** 每个操控者留一个座位（杀手优先），用来重建大厅里的人 */
   const byCtrl = new Map<string, PlayerState>();
   for (const p of Object.values(state.players)) {
     const prev = byCtrl.get(p.controllerId);
@@ -1093,17 +1153,6 @@ function restartMatch(state: GameState, content: GameContent) {
     const h = createPlayer(cid, src.controllerName || src.name, cid);
     h.controllerName = src.controllerName || src.name;
     h.connected = Object.values(state.players).some((p) => p.controllerId === cid && p.connected);
-    if (mode === 'multi') {
-      h.faction = src.faction;
-      h.characterId = src.characterId;
-      h.ready = true;
-    } else if (mode === 'duo' || mode === 'vs2') {
-      h.faction = src.faction === 'killer' ? 'killer' : 'survivor';
-      if (h.faction === 'killer') h.characterId = src.characterId;
-      h.ready = true;
-    } else {
-      h.ready = true;
-    }
     humans[cid] = h;
   }
 
@@ -1114,20 +1163,31 @@ function restartMatch(state: GameState, content: GameContent) {
   state.players = humans;
   state.mode = mode;
   state.hostId = hostId;
-  state.soloKillerCharacterId = soloKiller;
-  state.soloSurvivorCharacterIds = soloSurvs;
-  startGame(state, content, hostId);
-  log(state, '再来一局，对局已重新开始。');
+  /**
+   * 「再来一局」不再直接开局：清掉身份与角色，退回大厅，
+   * 让房主重新选地图、所有人重新选身份和角色，再各自点准备开打。
+   * （历史战绩/棋盘状态都由上面的 createLobby 重置，地图保留上一局那张作为默认）
+   */
+  state.soloKillerCharacterId = null;
+  state.soloSurvivorCharacterIds = [];
+  state.survivorOperators = [];
+  state.phase = 'lobby';
+  for (const h of Object.values(state.players)) {
+    h.faction = null;
+    h.characterId = null;
+    h.ready = false;
+  }
+  log(state, '再来一局：请重新选择地图、身份与角色，全部准备后由房主开始。');
 }
 
-/** 求生者阶段结束，把本回合响声报给杀手看 */
+/** 幸存者阶段结束，把本回合响声报给杀手看 */
 function enterNoiseReport(state: GameState) {
   closeSurvivorBigRound(state);
   if (state.phase === 'gameOver') return;
   state.phase = 'noiseReport';
   log(
     state,
-    `噪音阶段：${
+    `响声阶段：${
       state.firecrackerThisRound
         ? '爆竹：所有地点发出响声（不额外放置响声标记）'
         : state.noises.length
@@ -1137,14 +1197,14 @@ function enterNoiseReport(state: GameState) {
   );
 }
 
-/** 进入发现阶段：摸最多 2 张留 1；只剩 1 张则直接拿；没牌且未修完则求生者败 */
+/** 进入发现阶段：摸最多 2 张留 1；只剩 1 张则直接拿；没牌且未修完则幸存者败 */
 function enterDiscovery(state: GameState) {
   if (state.pendingTrade) {
     log(state, '未确认的物品交换已取消。');
     state.pendingTrade = null;
   }
   if (state.pendingCoopAction) {
-    log(state, '未确认的求生者行动已取消。');
+    log(state, '未确认的幸存者行动已取消。');
     state.pendingCoopAction = null;
   }
   if (!state.rules.enableDiscovery) {
@@ -1168,7 +1228,7 @@ function enterDiscovery(state: GameState) {
     return;
   }
   state.pendingDiscoveryPick = true;
-  log(state, '发现阶段：先选择一名求生者翻发现牌（最多摸 2 留 1；只剩 1 张则直接拿）。');
+  log(state, '发现阶段：先选择一名幸存者翻发现牌（最多摸 2 留 1；只剩 1 张则直接拿）。');
 }
 
 function discoveryRepairDone(state: GameState): boolean {
@@ -1182,7 +1242,7 @@ function discoveryRepairDone(state: GameState): boolean {
 /** 指定的那个人从发现牌堆翻牌。不把弃牌洗回来：牌堆空就是空。 */
 function beginDiscoveryDraw(state: GameState, actorId: string) {
   const actor = state.players[actorId];
-  if (!actor?.alive || actor.faction !== 'survivor') throw new Error('无法选择该求生者');
+  if (!actor?.alive || actor.faction !== 'survivor') throw new Error('无法选择该幸存者');
   state.pendingDiscoveryPick = false;
   state.discoveryActorId = actorId;
   const left = state.discoveryDeck.length;
@@ -1261,7 +1321,7 @@ function keepSuitcaseDiscovery(state: GameState, actorId: string, cardId: string
 /** 留下这一张，另一张进弃牌堆。钥匙上架，物品进背包 */
 function resolveDiscoveryChoice(state: GameState, cardId: string) {
   if (state.phase !== 'discovery') throw new Error('当前不是发现阶段');
-  if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的求生者');
+  if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的幸存者');
   if (!state.discoveryOptions.includes(cardId)) throw new Error('这张不是本次摸到的牌');
   const actorId = state.discoveryActorId ?? firstAliveSurvivorId(state);
   const options = [...state.discoveryOptions];
@@ -1303,14 +1363,14 @@ function resolveDiscoveryChoice(state: GameState, cardId: string) {
   enterNoiseReport(state);
 }
 
-/** 求生者大回合结束：才放警车 / 才让警车往前开一格 */
+/** 幸存者大回合结束：才放警车 / 才让警车往前开一格 */
 function closeSurvivorBigRound(state: GameState) {
   if (state.pendingRescueArm && !state.rescueArmed) {
     state.rescueArmed = true;
     state.rescueCountdown = state.rules.rescueWaitRounds;
     state.pendingRescueArm = false;
     state.killerRepairGuess = state.rules.repairNeeded;
-    log(state, `警车放到救援板块 ${state.rescueCountdown}。之后每个求生者大回合结束开一格。`);
+    log(state, `警车放到救援板块 ${state.rescueCountdown}。之后每个幸存者大回合结束开一格。`);
   } else if (state.rescueArmed && state.rescueCountdown != null && state.rescueCountdown > 0) {
     state.rescueCountdown -= 1;
     if (state.rescueCountdown <= 0) log(state, '警车开到出口。');
@@ -1320,23 +1380,195 @@ function closeSurvivorBigRound(state: GameState) {
   checkSurvivorWin(state);
 }
 
-/** 一名求生者做完一般行动：立刻结束其小回合，不必再点结束 */
+/** 一名幸存者做完一般行动：立刻结束其小回合，不必再点结束 */
 function advanceAfterSurvivor(state: GameState, endedPlayerId: string) {
   const ended = state.players[endedPlayerId];
   if (ended) ended.actedThisRound = true;
   checkSurvivorWin(state);
   if (state.phase === 'gameOver') return;
+  /**
+   * 乔治「思维敏捷」：他自己的小回合结束（做完一般行动）后判定一次。
+   * 在杀手距离 1 内就让他挑一张笔记，挑完才轮到下一个人。
+   */
+  if (ended && maybeOfferGeorgeNote(state, ended)) return;
   promptOrAutoNextSurvivor(state);
 }
 
-/** 求生者阶段收工：进入发现。大回合的警车要等发现结束再推 */
+/**
+ * 乔治的「思维敏捷」判定：条件满足就停下来等他挑，返回 true 表示先别往下走。
+ * 杀手潜行时按「进入潜行的位置」算距离（本格 + 相邻格）。
+ */
+function maybeOfferGeorgeNote(state: GameState, george: PlayerState): boolean {
+  if (!isGeorge(state, george.id)) return false;
+  if (!george.alive || !george.roomId) return false;
+  if (state.notesDeck.length === 0) return false;
+  const k = state.killerId ? state.players[state.killerId] : null;
+  if (!k?.alive) return false;
+  const kRoom = k.stealth ? k.stealthOriginRoomId : k.roomId;
+  if (!kRoom) return false;
+  const near =
+    kRoom === george.roomId || generalAdjacentRooms(state.map, kRoom).includes(george.roomId);
+  if (!near) return false;
+  state.pendingGeorgeNote = true;
+  log(
+    state,
+    `${george.name}「思维敏捷」：小回合结束时在杀手距离 1 内，可以挑一张乔治的笔记。`,
+    'survivor',
+  );
+  return true;
+}
+
+/** 某个门号是否连到指定房间 */
+function doorTouchesRoom(door: string, roomId: string): boolean {
+  const pair = parseDoor(door);
+  return Boolean(pair && (pair[0] === roomId || pair[1] === roomId));
+}
+
+/**
+ * 乔治用一张笔记（额外行动，不占一般行动，做完还能继续做一般行动）。
+ * - 拆除封堵：移除他所在地点至多 2 块封堵
+ * - 响声：在任意一格产生真实响声
+ * - 防御：常驻效果，用物品防御时 +2，不在这里"使用"
+ */
+function useGeorgeNote(state: GameState, p: PlayerState, noteId: string, toRoomId?: string) {
+  if (!isGeorge(state, p.id)) throw new Error('乔治的笔记只能由乔治本人使用');
+  if ((p.items[noteId] ?? 0) < 1) throw new Error('你手里没有这张笔记');
+  if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可以使用笔记');
+
+  if (noteId === 'george_note_blockade') {
+    const roomId = p.roomId;
+    if (!roomId) throw new Error('不在地图上');
+    const here = state.blockades.filter((id) => doorTouchesRoom(id, roomId));
+    if (here.length === 0) throw new Error('你所在地点没有封堵可拆');
+    const take = here.slice(0, 2);
+    for (const door of take) removeBlockade(state, door);
+    takeItem(p, noteId, 1);
+    discardConsumedItem(state, noteId, 1);
+    log(state, `${p.name} 使用「乔治的笔记」拆除了 ${take.length} 块封堵。`);
+    return;
+  }
+
+  if (noteId === 'george_note_noise') {
+    if (!toRoomId) throw new Error('请选择要发出响声的地点');
+    if (!state.map.rooms.some((r) => r.id === toRoomId)) throw new Error('未知地点');
+    takeItem(p, noteId, 1);
+    discardConsumedItem(state, noteId, 1);
+    pushNoise(state, toRoomId);
+    log(state, `${p.name} 使用「乔治的笔记」，在「${roomName(state, toRoomId)}」发出响声。`);
+    return;
+  }
+
+  if (noteId === 'george_note_defense') {
+    throw new Error('这张笔记是常驻效果：用物品防御时自动 +2，不需要主动使用');
+  }
+  throw new Error('未知的笔记');
+}
+
+/**
+ * 乔治「聪明绝顶」的共用前置。两个分支都要满足：
+ * 自己的小回合、书本地标、同格没有杀手（潜行不算同格）、一回合一次。
+ */
+function georgeBrilliantPrecheck(state: GameState, p: PlayerState) {
+  if (!isGeorge(state, p.id)) throw new Error('只有乔治可以使用这个技能');
+  assertActive(state, p.id);
+  assertSurvivorMainAction(p);
+  if (p.skillUsedThisTurn.has('brilliant')) throw new Error('本回合已经用过「聪明绝顶」');
+  if (!p.roomId) throw new Error('不在地图上');
+  if (!isBookRoom(state, p.roomId)) throw new Error('「聪明绝顶」只能在有书本标记的地点使用');
+  if (killerInRoom(state, p.roomId)) throw new Error('与杀手同地不能使用「聪明绝顶」');
+}
+
+/** 聪明绝顶 A：弃掉一个工具箱，修理进度 +1（占全队本大回合那一次修理） */
+function georgeToolboxRepair(state: GameState, p: PlayerState) {
+  georgeBrilliantPrecheck(state, p);
+  if ((p.items.toolbox ?? 0) < 1) throw new Error('你没有工具箱可以弃置');
+  if (state.repairedThisPhase) throw new Error('本大回合已经有人修理过了');
+  if (state.repairProgress >= state.rules.repairNeeded) throw new Error('无线电已经修好');
+  const before = state.repairProgress;
+  takeItem(p, 'toolbox', 1);
+  discardConsumedItem(state, 'toolbox', 1);
+  p.skillUsedThisTurn.add('brilliant');
+  p.mainActionUsed = true;
+  p.moveLeft = 0;
+  state.repairedThisPhase = true;
+  addRepairProgress(state, 1);
+  log(
+    state,
+    `${p.name} 用「聪明绝顶」弃置工具箱，修理进度 +1（${state.repairProgress}/${state.rules.repairNeeded}）。`,
+  );
+  announceRepairIfJustFinished(state, before);
+  maybeArmRescue(state);
+  checkSurvivorWin(state);
+  advanceAfterSurvivor(state, p.id);
+}
+
+/**
+ * 聪明绝顶 B：从搜索牌库抽一张。等于「特殊搜索」：
+ * 同样的摸牌与响声规则，只是名字不同；响了就在乔治抽取的位置响（不是他后来的位置）。
+ */
+function georgeDraw(state: GameState, p: PlayerState) {
+  georgeBrilliantPrecheck(state, p);
+  p.skillUsedThisTurn.add('brilliant');
+  p.mainActionUsed = true;
+  p.moveLeft = 0;
+  const cardId = drawSearchCard(state);
+  if (!cardId) {
+    log(state, '搜索牌库已空，「聪明绝顶」没有抽到牌。');
+    advanceAfterSurvivor(state, p.id);
+    return;
+  }
+  const card = state.cardById[cardId];
+  log(state, `${p.name} 用「聪明绝顶」抽取：${card?.name ?? cardId}。`, 'survivor');
+  const makeNoise = Boolean(card?.makesNoise);
+  if (card && isKeyCard(card)) {
+    const added = addKeys(state, 1);
+    log(
+      state,
+      added > 0
+        ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
+        : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
+    );
+  } else if (card) {
+    const gains = card.effects.filter((e) => e.op === 'gainItem');
+    if (gains.length) runEffects({ state, actorId: p.id, effects: gains });
+    else {
+      runEffects({ state, actorId: p.id, effects: card.effects.filter((e) => e.op !== 'noise') });
+      discardUniqueCard(state, cardId, 'search');
+    }
+  }
+  if (makeNoise && p.roomId) pushNoise(state, p.roomId);
+  checkSurvivorWin(state);
+  advanceAfterSurvivor(state, p.id);
+}
+
+/** 乔治挑一张笔记（可以放弃）；挑完继续轮到下一个人 */
+function chooseGeorgeNote(state: GameState, p: PlayerState, noteId: string | null) {
+  if (!state.pendingGeorgeNote) throw new Error('现在不是挑笔记的时候');
+  if (!isGeorge(state, p.id)) throw new Error('只有乔治可以挑笔记');
+  if (!noteId) {
+    state.pendingGeorgeNote = false;
+    log(state, `${p.name} 放弃了这个时机挑笔记。`, 'survivor');
+    promptOrAutoNextSurvivor(state);
+    return;
+  }
+  if (!state.notesDeck.includes(noteId)) throw new Error('这张笔记已经不在牌堆里了');
+  const card = state.cardById[noteId];
+  state.notesDeck = state.notesDeck.filter((id) => id !== noteId);
+  p.items[noteId] = (p.items[noteId] ?? 0) + 1;
+  state.pendingGeorgeNote = false;
+  log(state, `${p.name} 获得笔记「${card?.name ?? noteId}」。`, 'survivor');
+  enforceInventory(state, p.id);
+  promptOrAutoNextSurvivor(state);
+}
+
+/** 幸存者阶段收工：进入发现。大回合的警车要等发现结束再推 */
 function finishSurvivorPhase(state: GameState) {
   if (state.pendingTrade) throw new Error('请先确认或取消物品交换');
-  if (state.pendingCoopAction) throw new Error('请先确认或取消求生者行动');
+  if (state.pendingCoopAction) throw new Error('请先确认或取消幸存者行动');
   const left = unactedAliveSurvivorIds(state);
   for (const id of left) {
     if (survivorHasGeneralAction(state, id)) {
-      throw new Error('还有求生者可以做一般行动，不能结束');
+      throw new Error('还有幸存者可以做一般行动，不能结束');
     }
     state.players[id]!.actedThisRound = true;
   }
@@ -1376,7 +1608,7 @@ function maybeFinishKillerMain(state: GameState) {
   }
 }
 
-/** 这场遭遇里还没挨打的求生者 */
+/** 这场遭遇里还没挨打的幸存者 */
 function remainingEncounterTargets(state: GameState): PlayerState[] {
   const enc = state.encounter;
   if (!enc) return [];
@@ -1391,7 +1623,7 @@ function discardEncounterAttackCards(state: GameState) {
   enc.attackOptions = [];
 }
 
-/** 遭遇战斗结束：被发现的求生者可移 1 格（杀手看不见），然后杀手摸牌结束回合 */
+/** 遭遇战斗结束：被发现的幸存者可移 1 格（杀手看不见），然后杀手摸牌结束回合 */
 function finishEncounter(state: GameState) {
   discardEncounterAttackCards(state);
   const enc = state.encounter;
@@ -1404,7 +1636,13 @@ function finishEncounter(state: GameState) {
     endKillerTurn(state);
     return;
   }
-  const queue = enc.discoveredIds.filter((id) => state.players[id]?.alive);
+  /**
+   * 撤离队列：遭遇结束时**还活着、还在这场遭遇所在地点**的幸存者，
+   * 每人在轮到自己的那一步可以走 1 格或留在原地 —— 一人只走一次。
+   * 不直接用 discoveredIds：它是开战那一刻的快照，
+   * 有人在开战效果里倒下、或中途被打倒后，会让队列缺人或顺序不对。
+   */
+  const queue = survivorsInRoom(state, enc.roomId).map((s) => s.id);
   if (queue.length === 0) {
     state.encounter = null;
     log(state, '遭遇结束，杀手摸牌后结束回合。');
@@ -1414,7 +1652,11 @@ function finishEncounter(state: GameState) {
   enc.fleeQueue = queue;
   enc.step = 'flee';
   enc.targetId = queue[0] ?? null;
-  log(state, '遭遇结束。被发现的求生者可移动 1 格或取消移动。', 'survivor');
+  log(
+    state,
+    `遭遇结束。${queue.length} 名幸存者依次选择移动 1 格或留在原地。`,
+    'survivor',
+  );
 }
 
 /** 打中一个人之后：同地还有人就再选，没有人了就结束遭遇 */
@@ -1431,7 +1673,7 @@ function continueEncounterAfterHit(state: GameState) {
   resetEncounterAttackChoice(state);
   const left = remainingEncounterTargets(state);
   if (left.length === 0) {
-    log(state, '这次遭遇里的求生者都已被伤害，遭遇结束。');
+    log(state, '这次遭遇里的幸存者都已被伤害，遭遇结束。');
     finishEncounter(state);
     return;
   }
@@ -1447,7 +1689,7 @@ function continueEncounterAfterHit(state: GameState) {
   enc.step = 'pick';
   log(
     state,
-    `伤害成功。请再选一名求生者继续遭遇（${left.map((s) => s.name).join('、')}）。每人攻击前都可选择是否加攻。`,
+    `伤害成功。请再选一名幸存者继续遭遇（${left.map((s) => s.name).join('、')}）。每人攻击前都可选择是否加攻。`,
   );
 }
 
@@ -1471,6 +1713,9 @@ function endKillerTurn(state: GameState) {
   if (state.phase === 'gameOver') return;
   state.pendingMoveRange = null;
   state.pendingCardSpeed = null;
+  // 回合收尾时把第三阶段的状态清干净（遭遇打断时可能还留着 1 次没用完的行动）
+  state.killerMainActionsLeft = 0;
+  state.killerMainChoice = null;
   drawKillerCards(state, state.rules.killerDrawOnTurnEnd);
   maybeCloseKillerUpkeep(state);
 }
@@ -1498,7 +1743,7 @@ function maybeCloseKillerUpkeep(state: GameState) {
   closeKillerTurn(state);
 }
 
-/** 杀手回合彻底结束，回到求生者阶段（响声/爆竹等到求生者大回合开始前再清） */
+/** 杀手回合彻底结束，回到幸存者阶段（响声/爆竹等到幸存者大回合开始前再清） */
 function closeKillerTurn(state: GameState) {
   state.killerTurnPowerBonus = 0;
   checkSurvivorWin(state);
@@ -1544,9 +1789,9 @@ function startEncounter(state: GameState, roomId: string) {
   state.pendingMoveRange = null;
   state.pendingCardSpeed = null;
   state.lastSearchFound = false;
-  log(state, `遭遇战爆发于「${roomName(state, roomId)}」！${alive.map((s) => s.name).join('、')} 被卷入。`);
+  log(state, `遭遇战爆发于「${roomName(state, roomId)}」！${alive.map((s) => s.name).join('、')} 被卷入。`, 'all', true);
   if (trapArmed) {
-    log(state, `「${roomName(state, roomId)}」有陷阱：本场遭遇中第一名被攻击的求生者必须获得防御 +2。`);
+    log(state, `「${roomName(state, roomId)}」有陷阱：本场遭遇中第一名被攻击的幸存者必须获得防御 +2。`);
   }
   applyEncounterOpenEffects(state);
 }
@@ -1566,8 +1811,9 @@ function maybeStartEncounter(state: GameState) {
   startEncounter(state, k.roomId);
 }
 
-/** 比大小：力量 + 永久加攻 + 本次卡牌加攻 vs 加防物品（+ 威廉坚韧） */
-function resolveEncounterCombat(state: GameState) {
+/** 比大小：力量 + 永久加攻 + 本次卡牌加攻 vs 加防物品（+ 威廉坚韧）
+ *  `diceValues` 有值就用它（「鸿运当骰」重掷后的点数），否则现掷。 */
+function resolveEncounterCombat(state: GameState, diceValues?: number[]) {
   const enc = state.encounter;
   if (!enc || !state.killerId) return;
   if (!state.players[state.killerId]) return;
@@ -1590,7 +1836,7 @@ function resolveEncounterCombat(state: GameState) {
     const cardName = enc.attackCardId ? state.cardById[enc.attackCardId]?.name : null;
     parts.push(cardName ? `「${cardName}」本次 +${tempBoost}` : `本次加攻 +${tempBoost}`);
   }
-  log(state, `遭遇攻击力：${totalAtk}（${parts.join(' + ')}）。`);
+  log(state, `遭遇攻击力：${totalAtk}（${parts.join(' + ')}）。`, 'all', true);
   const trapBonus = enc.trapArmed && !enc.trapApplied ? 2 : 0;
 
   let defenseValue = 0;
@@ -1602,6 +1848,16 @@ function resolveEncounterCombat(state: GameState) {
     if (itemBonus > 0) {
       defenseValue += itemBonus;
       otherDefenseBoost += itemBonus;
+      /**
+       * 乔治的笔记：用物品防御时额外 +2（加在物品加成之上，不消耗）。
+       * 只有真的用了防御物品才触发 —— 这颗棋子没有物品可用时它不生效。
+       */
+      const noteBonus = georgeDefenseNoteBonus(state, surv);
+      if (noteBonus > 0) {
+        defenseValue += noteBonus;
+        otherDefenseBoost += noteBonus;
+        log(state, `${surv.name}「乔治的笔记」：使用物品防御，额外 +${noteBonus}。`);
+      }
     }
   }
   if (trapBonus) {
@@ -1612,7 +1868,10 @@ function resolveEncounterCombat(state: GameState) {
   }
   const dieFaces = [1, 0, 1, 1, 0, 3];
   const nDice = Math.max(2, 4 - Math.min(surv.fear, 2));
-  const values = Array.from({ length: nDice }, () => dieFaces[Math.floor(Math.random() * dieFaces.length)]!);
+  const values =
+    diceValues && diceValues.length
+      ? [...diceValues]
+      : Array.from({ length: nDice }, () => dieFaces[Math.floor(Math.random() * dieFaces.length)]!);
   const diceTotal = values.reduce((a, b) => a + b, 0);
   defenseValue += diceTotal;
   if (hasTenacity(state, surv)) {
@@ -1631,10 +1890,10 @@ function resolveEncounterCombat(state: GameState) {
     success: defenseValue >= totalAtk,
     survivorName: surv.name,
   };
-  log(state, `${surv.name} 掷骰 ${values.join('+')}=${diceTotal}，防御合计 ${defenseValue}。`);
+  log(state, `${surv.name} 掷骰 ${values.join('+')}=${diceTotal}，防御合计 ${defenseValue}。`, 'all', true);
   const blocked = defenseValue >= totalAtk;
   if (blocked) {
-    log(state, `${surv.name} 完全挡住了攻击（防御 ${defenseValue} ≥ 攻击 ${totalAtk}）。`);
+    log(state, `${surv.name} 完全挡住了攻击（防御 ${defenseValue} ≥ 攻击 ${totalAtk}）。`, 'all', true);
     discardFromKillerDeck(state, 2);
     finishEncounter(state);
     return;
@@ -1642,6 +1901,81 @@ function resolveEncounterCombat(state: GameState) {
 
   applyDamage(state, survId, 1, state.killerId);
   continueEncounterAfterHit(state);
+}
+
+/** 手里有几张「鸿运当骰」（每张给 1 次重掷机会，一次可选任意颗骰子） */
+function luckyDiceCount(p: PlayerState): number {
+  return p.items.lucky_dice ?? 0;
+}
+
+/**
+ * 遭遇防御掷骰。掷完先给客户端看点数：
+ * 手里有「鸿运当骰」就停下来等他用不用重掷；没有就直接结算。
+ */
+function rollEncounterDefense(state: GameState) {
+  const enc = state.encounter;
+  if (!enc?.targetId) return;
+  const surv = state.players[enc.targetId];
+  if (!surv?.alive) return;
+  const dieFaces = [1, 0, 1, 1, 0, 3];
+  const nDice = Math.max(2, 4 - Math.min(surv.fear, 2));
+  const values = Array.from({ length: nDice }, () => dieFaces[Math.floor(Math.random() * dieFaces.length)]!);
+  const killer = state.killerId ? state.players[state.killerId] : null;
+  const totalAtk =
+    effectiveKillerPower(state) + (killer?.attackBonus ?? 0) + (state.encounterTailBonus ?? 0);
+  const extra = luckyDiceCount(surv);
+  if (extra <= 0) {
+    resolveEncounterCombat(state, values);
+    return;
+  }
+  state.pendingDice = { playerId: surv.id, values, attack: totalAtk, extra };
+  state.pendingExtraRerolls = extra;
+  log(
+    state,
+    `${surv.name} 掷骰 ${values.join('+')}。手里有「鸿运当骰」，可以先决定要不要重掷。`,
+    'survivor',
+  );
+}
+
+/**
+ * 「鸿运当骰」重掷：由掷骰的幸存者挑**任意几颗**骰子重掷（只重掷选中那些）。
+ * 它不算防御物品 —— 和加防物品互不影响，可以同时用（先选用不用加防物品，再决定重掷）。
+ * 每用一次消耗 1 张牌；重掷后的结果无论好坏都要接受。
+ */
+function rerollEncounterDice(state: GameState, p: PlayerState, diceIndexes: number[]) {
+  const pend = state.pendingDice;
+  if (!pend) throw new Error('现在没有待重掷的骰子');
+  if (pend.playerId !== p.id) throw new Error('不是你的骰子');
+  if (state.pendingExtraRerolls <= 0) throw new Error('本场已经用过重掷了');
+  const picked = [...new Set(diceIndexes)].filter((i) => i >= 0 && i < pend.values.length);
+  if (picked.length === 0) throw new Error('请先点选要重掷的骰子');
+  const card = Object.values(state.cardById).find((c) => c.effects.some((e) => e.op === 'luckyDice'))
+    ?? Object.values(state.cardById).find((c) => c.effects.some((e) => e.itemId === 'lucky_dice'));
+  const dieFaces = [1, 0, 1, 1, 0, 3];
+  const before = [...pend.values];
+  for (const i of picked) {
+    pend.values[i] = dieFaces[Math.floor(Math.random() * dieFaces.length)]!;
+  }
+  /** 用掉一张「鸿运当骰」（它进过装备栏，所以是消耗品） */
+  takeItem(p, 'lucky_dice', 1);
+  state.pendingExtraRerolls -= 1;
+  // 界面读的是 pendingDice.extra，一起同步
+  pend.extra = state.pendingExtraRerolls;
+  log(
+    state,
+    `${p.name} 使用「${card?.name ?? '鸿运当骰'}」重掷 ${picked.length} 颗骰子：` +
+      `${before.join('+')} → ${pend.values.join('+')}。`,
+  );
+}
+
+/** 重掷完（或者不重掷）就按当前点数结算 */
+function resolvePendingEncounterDice(state: GameState) {
+  const pend = state.pendingDice;
+  if (!pend) throw new Error('现在没有待结算的骰子');
+  const values = [...pend.values];
+  state.pendingDice = null;
+  state.pendingExtraRerolls = 0;
+  resolveEncounterCombat(state, values);
 }
 
 /** 对局已经结束，或者还没轮到你，就不许动手 */
@@ -1652,7 +1986,7 @@ function assertActive(state: GameState, playerId: string) {
 }
 
 function assertSurvivorMainAction(p: PlayerState) {
-  if (p.faction !== 'survivor') throw new Error('只有求生者可以执行');
+  if (p.faction !== 'survivor') throw new Error('只有幸存者可以执行');
   if (!p.alive) throw new Error('已倒下');
   if (p.mainActionUsed) throw new Error('本回合主要行动已使用');
 }
@@ -1664,7 +1998,11 @@ function survivorHasGeneralAction(state: GameState, playerId: string): boolean {
   if (p.roomId) return true;
   if (p.fear > 0 || p.overFear) return true;
   if (injuredAlliesHere(state, playerId).length > 0) {
-    if ((p.items.herb ?? 0) > 0 || (p.items.marco_medkit ?? 0) > 0) return true;
+    if ((p.items.herb ?? 0) > 0) return true;
+    // 医药包只有马尔科本人算「能做的一般行动」
+    if ((p.items.marco_medkit ?? 0) > 0 && !personalItemBlockReason(state, p.id, 'marco_medkit')) {
+      return true;
+    }
   }
   const ch = state.characters.find((c) => c.id === p.characterId);
   if (ch?.skills.some((s) => s.id === 'resourceful') && !p.skillUsedThisTurn.has('resourceful')) {
@@ -1802,7 +2140,7 @@ function expirePendingTrade(state: GameState): void {
 
 /**
  * 总开关：网页发来的每一种按钮，都在下面分岔。
- * 大厅选角 → 求生者走路/搜/修 → 杀手打牌 → 遭遇 → 发现/噪音。
+ * 大厅选角 → 幸存者走路/搜/修 → 杀手打牌 → 遭遇 → 发现/噪音。
  */
 export function handleAction(
   state: GameState,
@@ -1829,14 +2167,14 @@ export function handleAction(
     action.type !== 'skipOverFearWound' &&
     action.type !== 'confirmAmulet'
   ) {
-    throw new Error('请先决定是否弃牌伤害惊恐过度的求生者');
+    throw new Error('请先决定是否弃牌伤害惊恐过度的幸存者');
   }
   if (
     state.pendingWhizSearch &&
     action.type !== 'confirmWhizSearch' &&
     action.type !== 'skipWhizSearch'
   ) {
-    throw new Error('请先决定呼啸而过后是否弃牌搜索');
+    throw new Error('请先决定呼啸而过后是否弃牌搜索房间');
   }
   if (
     state.pendingBlockadeJob &&
@@ -1851,6 +2189,10 @@ export function handleAction(
       throw new Error('装备栏已满，请先弃置一件装备');
     }
   }
+  /** 乔治在挑笔记：先挑完（或放弃）才轮到下一个人 */
+  if (state.pendingGeorgeNote && action.type !== 'chooseGeorgeNote') {
+    throw new Error('请先选择要拿的笔记，或点「不拿」');
+  }
 
   if (action.type === 'respondCoopAction') {
     const offer = state.pendingCoopAction;
@@ -1864,7 +2206,7 @@ export function handleAction(
       state.pendingCoopAction = null;
       return;
     }
-    if (isProposer) throw new Error('只能由另一名求生者操控者确认');
+    if (isProposer) throw new Error('只能由另一名幸存者操控者确认');
     const saved = offer.action;
     const fromId = offer.fromControllerId;
     state.pendingCoopAction = null;
@@ -1905,6 +2247,35 @@ export function handleAction(
       }
       break;
     }
+    case 'setMap': {
+      if (socketId !== state.hostId) throw new Error('只有房主可以换地图');
+      if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
+        throw new Error('对局开始后无法换地图');
+      }
+      const next = content.maps.find((m) => m.id === action.mapId);
+      if (!next) throw new Error('没有这张地图');
+      if (!next.backgrounds?.survivor && !next.backgrounds?.killer) {
+        throw new Error('这张地图还没有画底图，不能用来对局');
+      }
+      if (next.id === state.map.id) break;
+      state.map = next;
+      log(state, `地图已切换为「${next.name}」。`);
+      break;
+    }
+    case 'setReplacementDeck': {
+      if (socketId !== state.hostId) throw new Error('只有房主可以改设置');
+      if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
+        throw new Error('对局开始后无法改设置');
+      }
+      state.replacementDeck = Boolean(action.on);
+      log(
+        state,
+        state.replacementDeck
+          ? '已开启【替换「鸿运当骰」等牌】：搜索牌堆里的 1 把钥匙、1 个手斧、1 瓶威士忌酒瓶会换成鸿运当骰、煤油灯、神秘包裹。'
+          : '已关闭【替换「鸿运当骰」等牌】。',
+      );
+      break;
+    }
     case 'setMode': {
       if (socketId !== state.hostId) throw new Error('只有房主可以切换模式');
       if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
@@ -1921,7 +2292,7 @@ export function handleAction(
         throw new Error('1 对 1 只能 2 人，请先让多余的人退出');
       }
       if (mode === 'vs2' && Object.keys(state.players).length > 3) {
-        throw new Error('1VS2 只能 3 人，请先让多余的人退出');
+        throw new Error('1对2 只能 3 人，请先让多余的人退出');
       }
       state.mode = mode;
       state.soloKillerCharacterId = null;
@@ -1939,10 +2310,10 @@ export function handleAction(
         mode === 'solo'
           ? '已切换为【单人热座】模式。'
           : mode === 'duo'
-            ? '已切换为【1 对 1】：一人杀手，一人操控 3 名求生者。'
+            ? '已切换为【1 对 1】：一人杀手，一人操控 3 名幸存者。'
             : mode === 'vs2'
-              ? '已切换为【1VS2】：一人杀手，两人共控 3 名求生者。一般行动和额外行动需另一人确认。'
-              : '已切换为【1VS3】模式。',
+              ? '已切换为【1对2】：一人杀手，两人共控 3 名幸存者。一般行动和额外行动需另一人确认。'
+              : '已切换为【1对3】模式。',
       );
       break;
     }
@@ -1955,7 +2326,7 @@ export function handleAction(
       const ch = content.characters.find((c) => c.id === action.characterId);
       if (!ch || ch.faction !== 'killer') throw new Error('请选择杀手角色');
       if (state.soloSurvivorCharacterIds.includes(action.characterId)) {
-        throw new Error('不能与求生者选同一角色');
+        throw new Error('不能与幸存者选同一角色');
       }
       state.soloKillerCharacterId = action.characterId;
       p.ready = false;
@@ -1964,17 +2335,17 @@ export function handleAction(
     }
     case 'setSoloSurvivor': {
       if (state.mode !== 'solo' && state.mode !== 'duo' && state.mode !== 'vs2') {
-        throw new Error('仅单人、1对1或1VS2可选多名求生者');
+        throw new Error('仅单人、1对1或1对2可选多名幸存者');
       }
       if (state.mode === 'solo' && socketId !== state.hostId) throw new Error('只有房主可以选角');
       if ((state.mode === 'duo' || state.mode === 'vs2') && p.faction !== 'survivor') {
-        throw new Error('请先选择求生者阵营，再点选 3 名求生者');
+        throw new Error('请先选择幸存者阵营，再点选 3 名幸存者');
       }
       if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
         throw new Error('当前无法选择角色');
       }
       const ch = content.characters.find((c) => c.id === action.characterId);
-      if (!ch || ch.faction !== 'survivor') throw new Error('请选择求生者角色');
+      if (!ch || ch.faction !== 'survivor') throw new Error('请选择幸存者角色');
       if (state.soloKillerCharacterId === action.characterId) {
         throw new Error('不能与杀手选同一角色');
       }
@@ -1983,7 +2354,7 @@ export function handleAction(
       const idx = ids.indexOf(action.characterId);
       if (idx >= 0) ids.splice(idx, 1);
       else if (ids.length >= needed) {
-        throw new Error(`求生者已选满 ${needed} 人，请先取消一名再换`);
+        throw new Error(`幸存者已选满 ${needed} 人，请先取消一名再换`);
       } else {
         ids.push(action.characterId);
       }
@@ -1993,7 +2364,7 @@ export function handleAction(
       break;
     }
     case 'setFaction': {
-      if (state.mode === 'solo') throw new Error('单人模式请直接选择杀手与求生者角色');
+      if (state.mode === 'solo') throw new Error('单人模式请直接选择杀手与幸存者角色');
       if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
         throw new Error('当前无法更换阵营');
       }
@@ -2011,10 +2382,10 @@ export function handleAction(
         if (count >= cap) {
           throw new Error(
             state.mode === 'duo'
-              ? '1 对 1 只能有一名玩家操控全部求生者'
+              ? '1 对 1 只能有一名玩家操控全部幸存者'
               : state.mode === 'vs2'
-                ? '1VS2 只能有两名玩家共控求生者'
-                : `求生者已满 ${cap} 人`,
+                ? '1对2 只能有两名玩家共控幸存者'
+                : `幸存者已满 ${cap} 人`,
           );
         }
       }
@@ -2035,9 +2406,9 @@ export function handleAction(
       break;
     }
     case 'selectCharacter': {
-      if (state.mode === 'solo') throw new Error('单人模式请用杀手/求生者选角按钮');
+      if (state.mode === 'solo') throw new Error('单人模式请用杀手/幸存者选角按钮');
       if ((state.mode === 'duo' || state.mode === 'vs2') && p.faction === 'survivor') {
-        throw new Error('求生者请点选 3 名求生者角色');
+        throw new Error('幸存者请点选 3 名幸存者角色');
       }
       if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
         throw new Error('当前无法选择角色');
@@ -2060,7 +2431,7 @@ export function handleAction(
           !state.soloKillerCharacterId ||
           state.soloSurvivorCharacterIds.length !== state.rules.maxSurvivors
         ) {
-          throw new Error(`请先选好 1 名杀手和 ${state.rules.maxSurvivors} 名求生者`);
+          throw new Error(`请先选好 1 名杀手和 ${state.rules.maxSurvivors} 名幸存者`);
         }
         p.ready = action.ready;
         break;
@@ -2070,7 +2441,7 @@ export function handleAction(
           if (!p.characterId) throw new Error('请先选择杀手角色');
         } else if (p.faction === 'survivor') {
           if (state.soloSurvivorCharacterIds.length !== state.rules.maxSurvivors) {
-            throw new Error(`请先点选 ${state.rules.maxSurvivors} 名求生者`);
+            throw new Error(`请先点选 ${state.rules.maxSurvivors} 名幸存者`);
           }
         } else {
           throw new Error('请先选择阵营');
@@ -2087,15 +2458,15 @@ export function handleAction(
       startGame(state, content, socketId);
       break;
     }
-    // —— 求生者阶段：选谁行动、走路、搜索、修理、恐惧、封堵、交换、技能、物品 ——
+    // —— 幸存者阶段：选谁行动、走路、搜索、修理、恐惧、封堵、交换、技能、物品 ——
     case 'pickSurvivorTurn': {
       if (state.phase === 'discovery' && state.pendingDiscoveryPick) {
         if (state.mode !== 'solo' && p.faction !== 'survivor') {
-          throw new Error('只有求生者可以选择翻牌的人');
+          throw new Error('只有幸存者可以选择翻牌的人');
         }
         const target = state.players[action.playerId];
         if (!target || target.faction !== 'survivor' || !target.alive) {
-          throw new Error('无法选择该求生者');
+          throw new Error('无法选择该幸存者');
         }
         beginDiscoveryDraw(state, target.id);
         break;
@@ -2104,21 +2475,21 @@ export function handleAction(
         throw new Error('现在不能选择行动顺序');
       }
       if (state.mode !== 'solo' && p.faction !== 'survivor') {
-        throw new Error('只有求生者可以选择行动顺序');
+        throw new Error('只有幸存者可以选择行动顺序');
       }
       const target = state.players[action.playerId];
       if (!target || target.faction !== 'survivor' || !target.alive) {
-        throw new Error('无法选择该求生者');
+        throw new Error('无法选择该幸存者');
       }
-      if (target.actedThisRound) throw new Error('该求生者本回合已经做过一般行动');
+      if (target.actedThisRound) throw new Error('该幸存者本回合已经做过一般行动');
       if (state.mode === 'multi') {
-        if (target.id !== p.id) throw new Error('1VS3 只能点选自己的角色开始小回合');
-        if (!state.pendingSurvivorPick) throw new Error('当前已有求生者在行动');
+        if (target.id !== p.id) throw new Error('1对3 只能点选自己的角色开始小回合');
+        if (!state.pendingSurvivorPick) throw new Error('当前已有幸存者在行动');
       } else if (!state.pendingSurvivorPick) {
         const curId = activeSurvivorId(state);
         const cur = curId ? state.players[curId] : null;
         if (cur?.mainActionUsed) {
-          throw new Error('当前求生者已开始一般行动，不能再换人');
+          throw new Error('当前幸存者已开始一般行动，不能再换人');
         }
       }
       startPickedSurvivorTurn(state, target.id);
@@ -2249,7 +2620,7 @@ export function handleAction(
         checkSurvivorWin(state);
         advanceAfterSurvivor(state, p.id);
       } else if (p.faction === 'killer') {
-        if (state.phase !== 'killerMain') throw new Error('当前无法搜索');
+        if (state.phase !== 'killerMain') throw new Error('当前无法搜索房间');
         if (hasPendingKillerChoice(state)) throw new Error('请先完成当前牌的选择');
         if (state.killerTurnStep !== 'main' || state.killerMainChoice !== 'actions') {
           throw new Error('请先结束快速阶段，并选择执行 2 个普通行动');
@@ -2263,14 +2634,14 @@ export function handleAction(
         const victims = survivorsInRoom(state, here);
         state.lastSearchFound = victims.length > 0;
         if (victims.length === 0) {
-          log(state, `${p.name} 搜查房间，没有发现人。`);
+          log(state, `${p.name} 搜索房间，没有发现人。`);
         } else {
-          log(state, `${p.name} 发现了 ${victims.length} 名求生者！`);
+          log(state, `${p.name} 发现了 ${victims.length} 名幸存者！`);
         }
         maybeStartEncounter(state);
         maybeFinishKillerMain(state);
       } else {
-        throw new Error('无法搜索');
+        throw new Error('无法搜索房间');
       }
       break;
     }
@@ -2282,6 +2653,38 @@ export function handleAction(
       p.moveLeft = 0;
       checkSurvivorWin(state);
       advanceAfterSurvivor(state, p.id);
+      break;
+    }
+    // —— 乔治：聪明绝顶两个分支 + 用笔记 + 挑笔记 ——
+    case 'georgeToolboxRepair': {
+      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
+      if (!actor) throw new Error('找不到乔治');
+      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
+      georgeToolboxRepair(state, actor);
+      break;
+    }
+    case 'georgeDraw': {
+      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
+      if (!actor) throw new Error('找不到乔治');
+      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
+      georgeDraw(state, actor);
+      break;
+    }
+    case 'useNote': {
+      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
+      if (!actor) throw new Error('找不到幸存者');
+      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
+      if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可以使用笔记');
+      useGeorgeNote(state, actor, action.noteId, action.toRoomId);
+      break;
+    }
+    case 'chooseGeorgeNote': {
+      const actor = Object.values(state.players).find(
+        (pl) => pl.faction === 'survivor' && isGeorge(state, pl.id),
+      );
+      if (!actor) throw new Error('本局没有乔治');
+      if (!controlsPiece(state, socketId, actor)) throw new Error('只有乔治可以挑笔记');
+      chooseGeorgeNote(state, actor, action.noteId);
       break;
     }
     case 'clearFear': {
@@ -2301,7 +2704,7 @@ export function handleAction(
       assertSurvivorMainAction(p);
       if (!state.rules.enableBlockades) throw new Error('本局未启用封堵');
       if (!p.roomId) throw new Error('不在地图上');
-      if (!doorsAt(state, p.roomId).some((d) => state.blockades.includes(d.id))) {
+      if (!doorsAt(state, p.roomId).some((d) => isDoorBlocked(state, d.id))) {
         throw new Error('当前地点没有可拆的门封堵');
       }
       removeBlockade(state, p.roomId);
@@ -2311,15 +2714,15 @@ export function handleAction(
       break;
     }
     case 'tradeItem': {
-      if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段（发现之前）可交易');
+      if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段（发现之前）可交易');
       const giverId = action.fromPlayerId ?? playerId;
       const giver = state.players[giverId];
       if (isSharedSurvivorMode(state)) {
         if (!controlsPiece(state, socketId, giver)) {
-          throw new Error('无权操作该求生者');
+          throw new Error('无权操作该幸存者');
         }
       } else {
-        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有求生者可交易');
+        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可交易');
         if (!giver || giver.controllerId !== socketId || giver.id !== p.id) {
           throw new Error('只能交出自己的物品');
         }
@@ -2351,7 +2754,7 @@ export function handleAction(
     case 'respondTrade': {
       const offer = state.pendingTrade;
       if (!offer) throw new Error('当前没有待确认的交换');
-      if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段可确认交换');
+      if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可确认交换');
       const isTarget = p.id === offer.targetPlayerId;
       const isGiver = p.id === offer.fromPlayerId;
       if (!isTarget && !isGiver) throw new Error('无权处理这笔交换');
@@ -2376,7 +2779,7 @@ export function handleAction(
     case 'discardItem': {
       const pending = state.pendingItemDiscard;
       if (!pending || pending.playerId !== playerId) throw new Error('当前不需要弃装备');
-      if (p.faction !== 'survivor') throw new Error('只有求生者可弃装备');
+      if (p.faction !== 'survivor') throw new Error('只有幸存者可弃装备');
       if (!takeItem(p, action.itemId, 1)) throw new Error('你没有这件装备');
       discardConsumedItem(state, action.itemId, 1);
       pending.count -= 1;
@@ -2398,8 +2801,8 @@ export function handleAction(
         throw new Error('本回合已使用过该技能');
       }
       if (skill.id === 'observant') {
-        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有求生者可使用');
-        if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段可使用');
+        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可使用');
+        if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可使用');
         if (!action.toRoomId) throw new Error('请选择秘密通道出口');
         const extra = (p.items.flashlight ?? 0) > 0;
         if (!extra) {
@@ -2408,7 +2811,7 @@ export function handleAction(
           p.mainActionUsed = true;
           p.moveLeft = 0;
         } else if (!controlsPiece(state, socketId, p)) {
-          throw new Error('无权操作该求生者');
+          throw new Error('无权操作该幸存者');
         }
         trySecretPassage(state, playerId, action.toRoomId);
         p.skillUsedThisTurn.add(skill.id);
@@ -2423,8 +2826,8 @@ export function handleAction(
         break;
       }
       if (skill.id === 'resourceful') {
-        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有求生者可使用');
-        if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段可使用');
+        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可使用');
+        if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可使用');
         const itemId = action.itemId;
         if (itemId !== 'adrenaline' && itemId !== 'sedative') throw new Error('请选择肾上腺素或镇静剂');
         if (!survivorDiscardHasItem(state, itemId)) throw new Error('弃牌堆里没有这张牌');
@@ -2441,8 +2844,8 @@ export function handleAction(
         break;
       }
       if (skill.id === 'sprint') {
-        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有求生者可使用');
-        if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段可使用');
+        if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可使用');
+        if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可使用');
         if (!action.toRoomId) throw new Error('请选择短跑目的地');
         const legal = legalMoveRooms(state, playerId, 3, 3);
         if (legal.length === 0) throw new Error('没有刚好 3 步可达的地点');
@@ -2497,8 +2900,8 @@ export function handleAction(
       break;
     }
     case 'useItem': {
-      if (p.faction !== 'survivor' || !p.alive) throw new Error('只有存活求生者可使用物品');
-      if (state.phase !== 'survivorMain') throw new Error('仅求生者阶段可使用物品');
+      if (p.faction !== 'survivor' || !p.alive) throw new Error('只有存活幸存者可使用物品');
+      if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可使用物品');
       const extraItems = new Set([
         'sophia_camera',
         'whiskey',
@@ -2506,16 +2909,22 @@ export function handleAction(
         'sedative',
         'firecracker',
         'axe',
+        // 替换牌：煤油灯走通道、神秘包裹抽发现牌，都是额外行动
+        'lamp',
+        'parcel',
       ]);
       if (!extraItems.has(action.itemId)) {
         assertActive(state, playerId);
       } else if (!controlsPiece(state, socketId, p)) {
-        throw new Error('无权操作该求生者');
+        throw new Error('无权操作该幸存者');
       }
       if ((p.items[action.itemId] ?? 0) < 1 && action.itemId !== 'sophia_camera') {
         throw new Error('你没有这件物品');
       }
       if (action.itemId === 'sophia_camera') {
+        // 本人限定：换给别人也用不了
+        const ownerBlock = personalItemBlockReason(state, playerId, 'sophia_camera');
+        if (ownerBlock) throw new Error(ownerBlock);
         if ((p.items.sophia_camera ?? 0) < 1) throw new Error('你没有索菲亚的相机');
         if (p.skillUsedThisTurn.has('sophia_camera')) throw new Error('本回合已使用过相机');
         if (!p.roomId) throw new Error('不在地图上');
@@ -2537,16 +2946,18 @@ export function handleAction(
         takeItem(p, 'toolbox', 1);
         discardConsumedItem(state, 'toolbox', 1);
         const amount = 2 + (isEngineeringExpert(state, playerId) ? 1 : 0);
+        const repairBefore = state.repairProgress;
         state.repairedThisPhase = true;
         p.repairedThisTurn = true;
         p.mainActionUsed = true;
         p.moveLeft = 0;
-        state.repairProgress += amount;
+        const repairAdded = addRepairProgress(state, amount);
         log(
           state,
-          `${p.name} 使用工具箱修理无线电 +${amount}（${state.repairProgress}/${state.rules.repairNeeded}）。`,
+          `${p.name} 使用工具箱修理无线电 +${repairAdded}（${state.repairProgress}/${state.rules.repairNeeded}）。`,
           'survivor',
         );
+        announceRepairIfJustFinished(state, repairBefore);
         maybeArmRescue(state);
         if (state.rules.repairMakesNoise && p.roomId) pushNoise(state, p.roomId);
         checkSurvivorWin(state);
@@ -2597,7 +3008,7 @@ export function handleAction(
       }
       if (action.itemId === 'axe' && action.toRoomId === undefined && !action.targetPlayerId) {
         if (!p.roomId) throw new Error('不在地图上');
-        if (!doorsAt(state, p.roomId).some((d) => state.blockades.includes(d.id))) {
+        if (!doorsAt(state, p.roomId).some((d) => isDoorBlocked(state, d.id))) {
           throw new Error('当前地点没有可拆的封堵');
         }
         takeItem(p, 'axe', 1);
@@ -2617,6 +3028,29 @@ export function handleAction(
         advanceAfterSurvivor(state, p.id);
         break;
       }
+      // 煤油灯：额外行动穿过秘密通道
+      if (action.itemId === 'lamp') {
+        if (!action.toRoomId) throw new Error('请选择秘密通道出口');
+        trySecretPassage(state, playerId, action.toRoomId);
+        log(state, `${p.name} 使用煤油灯穿过秘密通道。`);
+        checkSurvivorWin(state);
+        break;
+      }
+      // 神秘包裹：额外行动，从发现牌堆抽一张，并在自己所在格发出响声
+      if (action.itemId === 'parcel') {
+        if (!p.roomId) throw new Error('不在地图上');
+        const cardId = drawDiscoveryCard(state);
+        takeItem(p, 'parcel', 1);
+        discardConsumedItem(state, 'parcel', 1);
+        if (cardId) {
+          keepSuitcaseDiscovery(state, p.id, cardId);
+        } else {
+          log(state, '发现牌堆已空，神秘包裹没有抽到牌。');
+        }
+        pushNoise(state, p.roomId);
+        checkSurvivorWin(state);
+        break;
+      }
       if (action.itemId === 'trap') {
         assertSurvivorMainAction(p);
         if (!p.roomId) throw new Error('不在地图上');
@@ -2632,10 +3066,13 @@ export function handleAction(
       }
       const heal = healItemDef(action.itemId);
       if (!heal) throw new Error('该物品不能这样使用');
+      // 医药包只能马尔科本人用（换给别人也用不了）
+      const healOwnerBlock = personalItemBlockReason(state, playerId, action.itemId);
+      if (healOwnerBlock) throw new Error(healOwnerBlock);
       const targetId = action.targetPlayerId ?? playerId;
       assertHealSameRoom(state, playerId, targetId);
       const target = state.players[targetId]!;
-      if (injuredAlliesHere(state, playerId).length === 0) throw new Error('同一地点没有受伤的求生者，无法使用治疗');
+      if (injuredAlliesHere(state, playerId).length === 0) throw new Error('同一地点没有受伤的幸存者，无法使用治疗');
       assertSurvivorMainAction(p);
       if (heal.consume) {
         takeItem(p, action.itemId, 1);
@@ -2660,13 +3097,13 @@ export function handleAction(
       break;
     }
     case 'useSuitcase': {
-      if (p.faction !== 'survivor' || !p.alive) throw new Error('只有存活求生者可打开手提箱');
-      if (state.phase !== 'survivorMain') throw new Error('仅求生者大回合可打开手提箱');
-      if (!controlsPiece(state, socketId, p)) throw new Error('无权操作该求生者');
+      if (p.faction !== 'survivor' || !p.alive) throw new Error('只有存活幸存者可打开手提箱');
+      if (state.phase !== 'survivorMain') throw new Error('仅幸存者大回合可打开手提箱');
+      if (!controlsPiece(state, socketId, p)) throw new Error('无权操作该幸存者');
       const room = suitcaseRoomId(state);
       if (!room) throw new Error('当前地图没有手提箱');
-      if (p.roomId !== room) throw new Error(`只有位于「${roomName(state, room)}」的求生者可以打开手提箱`);
-      if (!state.suitcaseAvailable) throw new Error('手提箱本求生者大回合已经打开过了');
+      if (p.roomId !== room) throw new Error(`只有位于「${roomName(state, room)}」的幸存者可以打开手提箱`);
+      if (!state.suitcaseAvailable) throw new Error('手提箱本幸存者大回合已经打开过了');
       const cardId = state.discoveryDeck.shift();
       if (!cardId) throw new Error('发现牌堆已空');
       state.suitcaseAvailable = false;
@@ -2805,9 +3242,8 @@ export function handleAction(
         break;
       }
       if (state.killerTurnStep === 'main') {
-        assertKillerMainMayLeave(state);
-        enterKillerSlow(state);
-        break;
+        // 第三阶段必须行动：不能手动跳过。行动做完会自动进入慢速阶段。
+        throw new Error('第三阶段必须完成行动，做完后自动进入慢速阶段');
       }
       throw new Error('慢速阶段请结束回合');
     }
@@ -2821,16 +3257,20 @@ export function handleAction(
       state.killerMainChoice = 'actions';
       state.killerMainActionsLeft = 2;
       p.actionsLeft = 2;
-      log(state, '选择 2 个普通主要行动：每次可移动 1 或搜索。');
+      log(state, '选择 2 个普通主要行动：每次可移动 1 或搜索房间。');
       break;
     }
     case 'endTurn': {
       assertActive(state, playerId);
+      // 遭遇优先判断：单人热座下 playerId 会解析成当前幸存者，
+      // 否则在遭遇里点「结束回合」会收到一句牛头不对马嘴的幸存者提示。
+      if (state.phase === 'encounter') {
+        throw new Error('遭遇中无法主动结束回合，按遭遇提示操作');
+      }
       if (p.faction === 'survivor') {
-        throw new Error('求生者做完一般行动后小回合已结束，请用「求生者所有操作已结束」进入发现');
+        throw new Error('幸存者做完一般行动后小回合已结束，请用「幸存者所有操作已结束」进入发现');
       } else if (p.faction === 'killer') {
         if (hasPendingKillerChoice(state)) throw new Error('请先完成当前牌的选择');
-        if (state.phase === 'encounter') throw new Error('遭遇中无法主动结束回合');
         if (state.killerTurnStep === 'fast') {
           state.killerTurnStep = 'main';
           state.killerMainChoice = null;
@@ -2854,23 +3294,27 @@ export function handleAction(
       const idx = hand.indexOf(action.cardId);
       if (idx < 0) throw new Error('手牌中没有此卡');
       if (state.pendingKillerDiscards <= 0) throw new Error('当前不需要弃牌');
+      if ((state.justUnlockedCards ?? []).includes(action.cardId)) {
+        throw new Error('刚由进化入手的牌本次不能弃置，请弃另一张');
+      }
       hand.splice(idx, 1);
       state.killerDiscard.push(action.cardId);
       state.pendingKillerDiscards -= 1;
       log(state, `杀手弃置「${state.cardById[action.cardId]?.name ?? action.cardId}」。`);
       if (state.pendingKillerDiscards === 0) {
         state.pendingUnlockDiscard = false;
+        state.justUnlockedCards = [];
         if (state.phase === 'upkeep') maybeCloseKillerUpkeep(state);
       }
       break;
     }
     // —— 发现翻牌、确认噪音、遭遇攻防、感知颜色、护符 ——
     case 'chooseDiscovery': {
-      if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的求生者');
+      if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的幸存者');
       if (state.mode === 'multi') {
-        if (p.faction !== 'survivor') throw new Error('只有求生者可选择发现牌');
+        if (p.faction !== 'survivor') throw new Error('只有幸存者可选择发现牌');
         if (state.discoveryActorId && playerId !== state.discoveryActorId) {
-          throw new Error('只能由被选中翻牌的求生者选择');
+          throw new Error('只能由被选中翻牌的幸存者选择');
         }
       } else {
         const allowed =
@@ -2884,7 +3328,7 @@ export function handleAction(
     }
     case 'acknowledgeDiscovery': {
       if (state.phase !== 'discovery') throw new Error('当前不是发现阶段');
-      if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的求生者');
+      if (state.pendingDiscoveryPick) throw new Error('请先选择翻牌的幸存者');
       if (state.discoveryOptions.length > 0) throw new Error('请先选留一张发现牌');
       const allowed =
         state.mode === 'multi'
@@ -2897,7 +3341,7 @@ export function handleAction(
       break;
     }
     case 'acknowledgeNoise': {
-      if (state.phase !== 'noiseReport') throw new Error('当前不是噪音阶段');
+      if (state.phase !== 'noiseReport') throw new Error('当前不是响声阶段');
       if (playerId !== state.killerId) throw new Error('仅杀手可执行');
       enterKillerMain(state);
       break;
@@ -2946,7 +3390,23 @@ export function handleAction(
       if (!enc.defenseItems) enc.defenseItems = {};
       enc.defenseItems[playerId] = itemId;
       log(state, itemId ? `${p.name} 使用「${itemName(itemId)}」加防。` : `${p.name} 不使用防御物品。`);
-      resolveEncounterCombat(state);
+      rollEncounterDefense(state);
+      break;
+    }
+    case 'rerollEncounterDice': {
+      if (!state.pendingDice) throw new Error('现在没有待重掷的骰子');
+      const who = state.players[state.pendingDice.playerId];
+      if (!who) throw new Error('找不到掷骰的幸存者');
+      if (!controlsPiece(state, socketId, who)) throw new Error('无权操作该幸存者');
+      rerollEncounterDice(state, who, action.diceIndexes ?? []);
+      break;
+    }
+    case 'resolveEncounterDice': {
+      if (!state.pendingDice) throw new Error('现在没有待结算的骰子');
+      const who = state.players[state.pendingDice.playerId];
+      if (!who) throw new Error('找不到掷骰的幸存者');
+      if (!controlsPiece(state, socketId, who)) throw new Error('无权操作该幸存者');
+      resolvePendingEncounterDice(state);
       break;
     }
     case 'encounterFlee': {
@@ -3003,7 +3463,7 @@ export function handleAction(
     }
     case 'finishSurvivorPhase': {
       if (p.faction !== 'survivor' && !(isSharedSurvivorMode(state) && isSurvivorOperator(state, socketId))) {
-        throw new Error('仅求生者可结束本阶段');
+        throw new Error('仅幸存者可结束本阶段');
       }
       finishSurvivorPhase(state);
       break;
@@ -3055,9 +3515,9 @@ export function handleAction(
       const enc = state.encounter;
       const target = state.players[action.targetPlayerId];
       if (!target?.alive || target.faction !== 'survivor' || target.roomId !== enc.roomId) {
-        throw new Error('只能选择本次遭遇地点的求生者');
+        throw new Error('只能选择本次遭遇地点的幸存者');
       }
-      if (target.id in enc.defenses) throw new Error('该求生者已经在这次遭遇中受过伤害');
+      if (target.id in enc.defenses) throw new Error('该幸存者已经在这次遭遇中受过伤害');
       enc.targetId = target.id;
       enc.defenseOptions = { ...enc.defenseOptions, [target.id]: [] };
       resetEncounterAttackChoice(state);
@@ -3131,7 +3591,7 @@ export function handleAction(
     expirePendingTrade(state);
   }
   if (state.pendingCoopAction && state.phase !== 'survivorMain') {
-    log(state, '待确认的求生者行动已失效。');
+    log(state, '待确认的幸存者行动已失效。');
     state.pendingCoopAction = null;
   }
 }
@@ -3335,7 +3795,7 @@ function isControllerActive(state: GameState, controllerId: string): boolean {
   return false;
 }
 
-/** 给某个人做一份局面快照：求生者多看到修理和物品，杀手多看到手牌和潜行位置 */
+/** 给某个人做一份局面快照：幸存者多看到修理和物品，杀手多看到手牌和潜行位置 */
 export function buildSnapshot(state: GameState, controllerId: string): PublicSnapshot {
   const you = resolveYouForController(state, controllerId);
   if (!you) throw new Error('观察者不在对局中');
@@ -3399,7 +3859,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
       state.encounter?.step === 'flee' &&
       activeId === state.encounter.fleeQueue[0]
     ) {
-      legalMoves = legalMoveRooms(state, activeId, 1);
+      // minRange=1：原地要靠「留在原地」按钮单独表达，不把当前格算成可点的落点
+      legalMoves = legalMoveRooms(state, activeId, 1, 1);
     }
   }
 
@@ -3409,7 +3870,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
       : controllingActive && activeId
         ? state.players[activeId]!
         : you;
-  /** 杀手回合里求生者装备溢出：仍以杀手座位看雾与手牌，弃装数据走 pendingItemDiscard */
+  /** 杀手回合里幸存者装备溢出：仍以杀手座位看雾与手牌，弃装数据走 pendingItemDiscard */
   let viewPiece = viewPieceRaw;
   if (state.pendingItemDiscard) {
     const keepKiller =
@@ -3462,21 +3923,35 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     viewerFaction === 'killer' ? state.killerPublicKeys : state.keysCollected;
   const visibleRepair =
     viewerFaction === 'killer' ? state.killerRepairGuess : state.repairProgress;
+  /**
+   * 战报历史任何时候都在。杀手在幸存者大回合里只能看到「共通信息」那几条
+   * （响声 / 消除恐惧 / 治疗 / 钥匙 / 修理完成 / 封堵变动 / 阶段胜负 / 骰点 / 遭遇），
+   * 看不到幸存者的完整流程（搜索到什么、谁走到哪、用了什么、发现翻牌）。
+   * 幸存者侧本来就只看得到杀手的公开行动，潜行移动的日志是 vis='killer'。
+   */
   let visibleLogs = (
     viewerFaction === 'killer'
-      ? state.logs.filter((l) => l.vis !== 'survivor')
+      ? state.logs.filter((l) => l.vis !== 'survivor' || (l.needsCommon && killerFogPhase))
       : state.logs.filter((l) => l.vis !== 'killer')
-  ).slice(-40);
-  if (killerFogPhase) {
-    visibleLogs = [{ t: Date.now(), text: '求生者正在行动' }];
-  } else if (killerNoisePhase) {
-    visibleLogs = state.firecrackerThisRound
-      ? [{ t: Date.now(), text: '爆竹：所有地点发出响声。' }]
+  ).slice(-80);
+  if (killerNoisePhase) {
+    const noiseLines = state.firecrackerThisRound
+      ? ['爆竹：所有地点发出响声。']
       : state.noises.length
-        ? [{ t: Date.now(), text: `发出响声的位置：${state.noises.map((id) => roomName(state, id)).join('、')}。` }]
-        : [{ t: Date.now(), text: '没有地点发出响声。' }];
+        ? [`发出响声的位置：${state.noises.map((id) => roomName(state, id)).join('、')}。`]
+        : ['没有地点发出响声。'];
+    visibleLogs = [
+      ...visibleLogs,
+      ...noiseLines.map((text) => ({ t: Date.now(), text, vis: 'all' as const })),
+    ];
   }
 
+  /**
+   * 幸存者大回合（含发现）期间，杀手不许知道内部进度：
+   * 现在轮到谁、谁要翻发现牌、三个人是不是都行动完了 —— 一律抹掉。
+   * 幸存者自己看到的 activePlayerId 不受影响（这条只作用于杀手视角）。
+   */
+  const activeIdForViewer = killerFogPhase ? null : activeId;
   const killerPiece = state.killerId ? state.players[state.killerId] : undefined;
   const killerOwner = killerPiece
     ? state.characters.find((c) => c.id === killerPiece.characterId)
@@ -3507,6 +3982,10 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
       toPublicPlayer(state, p, viewerFaction, viewPiece.id),
     ),
     map: state.map,
+    /** 大厅换地图用：只列有底图的（没有底图的地图选进来会开不了局） */
+    playableMaps: state.maps
+      .filter((m) => m.backgrounds?.survivor || m.backgrounds?.killer)
+      .map((m) => ({ id: m.id, name: m.name, backgrounds: m.backgrounds })),
     rules: state.rules,
     characters: state.characters,
     noises: visibleNoises,
@@ -3514,7 +3993,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     repairProgress: visibleRepair,
     rescueCountdown: state.rescueCountdown,
     rescueArmed: state.rescueArmed,
-    blockades: [...state.blockades],
+    blockades: state.blockades.map((id) => canonicalDoorId(id)),
     killerPower: state.killerPower,
     killerTurnPowerBonus: state.killerTurnPowerBonus,
     killerPowerLabel: formatKillerPowerLabel(state),
@@ -3523,6 +4002,12 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     pendingWhizSearch: state.pendingWhizSearch,
     pendingOverFearWound: state.pendingOverFearWound ? { ...state.pendingOverFearWound } : null,
     pendingBlockadeJob: state.pendingBlockadeJob ? { ...state.pendingBlockadeJob } : null,
+    georgeNotes: viewerFaction === 'survivor'
+      ? state.notesDeck.map((id) => ({ id, name: state.cardById[id]?.name ?? id }))
+      : [],
+    allGeorgeNotes: georgeNoteDefs(state).map((c) => ({ id: c.id, name: c.name, text: c.text })),
+    pendingGeorgeNote: state.pendingGeorgeNote,
+    georgeInPlay: georgeInPlay(state),
     removableBoardBlockades: removableForJob(state).map((id) => {
       const pair = parseDoor(id);
       return { id, from: pair?.[0] ?? id, to: pair?.[1] ?? id };
@@ -3530,6 +4015,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     encounterOpenHold: state.encounterOpenHold,
     killerLevel: state.killerLevel,
     pendingKillerDiscards: state.pendingKillerDiscards,
+    /** 刚由进化入手、本次超员弃牌里不能弃的牌 */
+    justUnlockedCards: [...(state.justUnlockedCards ?? [])],
     pendingBlockade: state.pendingBlockade,
     pendingBlockadePlace: state.pendingBlockadePlace,
     relocatableBlockades: removableBlockades(state).map((id) => {
@@ -3552,10 +4039,14 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         return pl?.controllerName || pl?.name || id;
       }),
     )],
+    replacementDeck: state.replacementDeck,
+    pendingDice: state.pendingDice ? { ...state.pendingDice, values: [...state.pendingDice.values] } : null,
     youRematchReady: state.rematchReady.includes(controllerId),
     allKillerCards,
     survivorActionsDone:
-      state.phase === 'survivorMain' && unactedAliveSurvivorIds(state).length === 0,
+      !killerFogPhase &&
+      state.phase === 'survivorMain' &&
+      unactedAliveSurvivorIds(state).length === 0,
     senseHighlight: state.senseHighlight,
     pendingMoveRange: state.pendingMoveRange,
     pendingMoveMin: state.pendingMoveMin,
@@ -3573,9 +4064,9 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
       ? namedCardsNewestFirst(state, state.killerDiscard)
       : namedCardsNewestFirst(state, state.survivorDiscard)
     ),
-    pendingSurvivorPick: state.pendingSurvivorPick,
-    pendingDiscoveryPick: state.pendingDiscoveryPick,
-    discoveryActorId: state.discoveryActorId,
+    pendingSurvivorPick: killerFogPhase ? false : state.pendingSurvivorPick,
+    pendingDiscoveryPick: killerFogPhase ? false : state.pendingDiscoveryPick,
+    discoveryActorId: killerFogPhase ? null : state.discoveryActorId,
     pileCounts: {
       search: state.searchDeck.length,
       discovery: state.discoveryDeck.length,
@@ -3624,9 +4115,9 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
           const to = state.players[offer.targetPlayerId];
           return {
             fromPlayerId: offer.fromPlayerId,
-            fromName: from?.name ?? '求生者',
+            fromName: from?.name ?? '幸存者',
             targetPlayerId: offer.targetPlayerId,
-            targetName: to?.name ?? '求生者',
+            targetName: to?.name ?? '幸存者',
             itemId: offer.itemId,
             itemName: itemName(offer.itemId),
             amount: offer.amount,
@@ -3674,13 +4165,19 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     winner: state.winner,
     winReason: state.winReason,
     logs: visibleLogs,
-    activePlayerId: activeId,
+    activePlayerId: activeIdForViewer,
     legalMoves,
     cardById: state.cardById,
     trapRoomIds: viewerFaction === 'survivor' ? [...state.trapRoomIds] : [],
+    /**
+     * 潜行起点（幸存者用来判断「杀手是不是可能在我这格」）。
+     * 这是幸存者侧情报：杀手自己拿到没用，旁观/观战也不该顺着它找杀手。
+     */
     stealthOriginRoomId:
-      Object.values(state.players).find((pl) => pl.faction === 'killer' && pl.stealth)
-        ?.stealthOriginRoomId ?? null,
+      viewerFaction === 'survivor'
+        ? (Object.values(state.players).find((pl) => pl.faction === 'killer' && pl.stealth)
+            ?.stealthOriginRoomId ?? null)
+        : null,
     turnOrder: [...state.turnOrder],
   };
 }
