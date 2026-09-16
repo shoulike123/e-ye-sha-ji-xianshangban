@@ -26,10 +26,6 @@ export const ITEM_CARD: Record<string, string> = {
   trap: '/Image/Discovery/32_陷阱零件.png',
   sophia_camera: '/Image/UI/索菲亚的相机.png',
   marco_medkit: '/Image/UI/马尔科的医疗包.png',
-  // 乔治的笔记
-  george_note_blockade: '/Image/Notes/笔记_拆除封堵.png',
-  george_note_noise: '/Image/Notes/笔记_响声.png',
-  george_note_defense: '/Image/Notes/笔记_防御.png',
   // 替换牌（开启「替换鸿运当骰等牌」后进搜索牌堆）
   lamp: '/Image/Search/煤油灯.png',
   parcel: '/Image/Search/神秘包裹.png',

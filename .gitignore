@@ -7,3 +7,6 @@ server/dist/
 .DS_Store
 .env
 .env.*
+
+# 本地推送辅助脚本（不发布到 GitHub）
+推送1.0到GitHub.bat

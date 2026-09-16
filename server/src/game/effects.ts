@@ -3,7 +3,7 @@
  * 裁判（engine.ts）说“走一步 / 搜一下 / 封一扇门”，真正动手的是这里。
  * 卡牌 JSON 里的 effects 也会走到 runEffects / applyOne。
  */
-import type { CardDef, EffectDef, MapDef } from '../content/schema.js';
+import type { EffectDef, MapDef } from '../content/schema.js';
 import type { EffectContext, GameState, LogVis, PlayerState } from './types.js';
 
 /** 往战报本上写一行。vis='survivor' 的字杀手看不见 */
@@ -132,49 +132,6 @@ export function isMarco(state: GameState, playerId: string): boolean {
   if (!p) return false;
   const ch = state.characters.find((c) => c.id === p.characterId);
   return /survivor3|马尔科|marco/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
-}
-
-/** 乔治·卡朋特（教授，笔记的主人） */
-export function isGeorge(state: GameState, playerId: string): boolean {
-  const p = state.players[playerId];
-  if (!p) return false;
-  const ch = state.characters.find((c) => c.id === p.characterId);
-  return /survivor6|乔治|george/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
-}
-
-/** 局中是否有乔治在场 */
-export function georgeInPlay(state: GameState): boolean {
-  return Object.values(state.players).some(
-    (p) => p.faction === 'survivor' && p.alive && isGeorge(state, p.id),
-  );
-}
-
-/** 这格是不是「有书本标记」的地点（乔治的特殊行动只能在这里做） */
-export function isBookRoom(state: GameState, roomId: string | null | undefined): boolean {
-  if (!roomId) return false;
-  const room = state.map.rooms.find((r) => r.id === roomId);
-  return Boolean(room?.tags.includes('special-book'));
-}
-
-/** 乔治的 3 张笔记定义 */
-export function georgeNoteDefs(state: GameState): CardDef[] {
-  return Object.values(state.cardById).filter((c) => c.type === 'note');
-}
-
-/** 乔治手里的这类笔记有几张 */
-export function countGeorgeNotes(p: PlayerState): number {
-  return Object.entries(p.items)
-    .filter(([id]) => id.startsWith('george_note_'))
-    .reduce((sum, [, n]) => sum + n, 0);
-}
-
-/**
- * 乔治是否持有「用物品防御 +2」那张笔记。
- * 只有真正使用了防御物品时才生效（由调用方判断），并且和其他加成叠加。
- */
-export function georgeDefenseNoteBonus(state: GameState, p: PlayerState): number {
-  if (!isGeorge(state, p.id)) return 0;
-  return (p.items.george_note_defense ?? 0) > 0 ? 2 : 0;
 }
 
 /** 只能本人使用的物品（索菲亚的相机 / 马尔科的医药包）；不是本人就返回一句提示 */

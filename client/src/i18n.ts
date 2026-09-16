@@ -48,10 +48,6 @@ export const ITEM_LABEL: Record<string, string> = {
   flashlight: '手电筒',
   adrenaline: '肾上腺素',
   trap: '陷阱零件',
-  // 乔治的笔记
-  george_note_blockade: '乔治的笔记·拆除封堵',
-  george_note_noise: '乔治的笔记·响声',
-  george_note_defense: '乔治的笔记·防御',
   // 替换牌
   lamp: '煤油灯',
   parcel: '神秘包裹',

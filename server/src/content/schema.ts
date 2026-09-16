@@ -90,8 +90,6 @@ export const CardSchema = z.object({
     'killerAction',
     'upgrade',
     'item',
-    // 乔治的笔记：拿到手才有效，只有乔治本人能用
-    'note',
   ]),
   speed: z.enum(['fast', 'slow', 'special']).optional(),
   text: z.string(),

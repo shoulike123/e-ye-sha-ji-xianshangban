@@ -72,12 +72,6 @@ import {
   isDoorBlocked,
   addRepairProgress,
   addKeys,
-  isGeorge,
-  georgeInPlay,
-  isBookRoom,
-  georgeNoteDefs,
-  countGeorgeNotes,
-  georgeDefenseNoteBonus,
   drawSearchCard,
   drawDiscoveryCard,
   setOverFearHandler,
@@ -340,8 +334,6 @@ export function createLobby(
     killerRepairGuess: 0,
     pendingUnlockDiscard: false,
     justUnlockedCards: [],
-    notesDeck: [],
-    pendingGeorgeNote: false,
     pendingDice: null,
     pendingExtraRerolls: 0,
     replacementDeck: false,
@@ -499,11 +491,6 @@ function activePlayerId(state: GameState): string | null {
   if (state.pendingOverFearWound) return state.killerId;
   if (state.pendingWhizSearch) return state.killerId;
   if (state.pendingBlockadeJob) return state.killerId;
-  // 乔治在挑笔记：还是他的小回合，先挑完
-  if (state.pendingGeorgeNote) {
-    const g = Object.values(state.players).find((pl) => pl.faction === 'survivor' && isGeorge(state, pl.id));
-    if (g) return g.id;
-  }
   if (state.pendingItemDiscard && state.mode !== 'multi') return state.pendingItemDiscard.playerId;
   if (state.phase === 'survivorMain') return activeSurvivorId(state);
   if (state.phase === 'discovery') {
@@ -871,7 +858,6 @@ function finishStartCommon(state: GameState, content: GameContent) {
   state.killerRepairGuess = 0;
   state.pendingUnlockDiscard = false;
   state.justUnlockedCards = [];
-  state.pendingGeorgeNote = false;
   state.pendingPathDraft = null;
   state.pendingSenseColorPick = null;
   state.rematchReady = [];
@@ -884,9 +870,6 @@ function finishStartCommon(state: GameState, content: GameContent) {
   state.discoveryDeck = shuffle(content.cards.discovery.map((c) => c.id));
   state.discoveryDiscard = [];
   state.survivorDiscard = [];
-  /** 乔治的笔记：3 张各 1 份，开局全部可用（没有乔治就空着） */
-  state.notesDeck = content.cards.note.map((c) => c.id);
-  state.pendingGeorgeNote = false;
   const kCharId = state.killerId ? state.players[state.killerId]?.characterId : null;
   const owned = content.cards.killerAction.filter((c) => {
     if (c.owner) return c.owner === kCharId || c.owner === killerCh?.name;
@@ -1386,178 +1369,6 @@ function advanceAfterSurvivor(state: GameState, endedPlayerId: string) {
   if (ended) ended.actedThisRound = true;
   checkSurvivorWin(state);
   if (state.phase === 'gameOver') return;
-  /**
-   * 乔治「思维敏捷」：他自己的小回合结束（做完一般行动）后判定一次。
-   * 在杀手距离 1 内就让他挑一张笔记，挑完才轮到下一个人。
-   */
-  if (ended && maybeOfferGeorgeNote(state, ended)) return;
-  promptOrAutoNextSurvivor(state);
-}
-
-/**
- * 乔治的「思维敏捷」判定：条件满足就停下来等他挑，返回 true 表示先别往下走。
- * 杀手潜行时按「进入潜行的位置」算距离（本格 + 相邻格）。
- */
-function maybeOfferGeorgeNote(state: GameState, george: PlayerState): boolean {
-  if (!isGeorge(state, george.id)) return false;
-  if (!george.alive || !george.roomId) return false;
-  if (state.notesDeck.length === 0) return false;
-  const k = state.killerId ? state.players[state.killerId] : null;
-  if (!k?.alive) return false;
-  const kRoom = k.stealth ? k.stealthOriginRoomId : k.roomId;
-  if (!kRoom) return false;
-  const near =
-    kRoom === george.roomId || generalAdjacentRooms(state.map, kRoom).includes(george.roomId);
-  if (!near) return false;
-  state.pendingGeorgeNote = true;
-  log(
-    state,
-    `${george.name}「思维敏捷」：小回合结束时在杀手距离 1 内，可以挑一张乔治的笔记。`,
-    'survivor',
-  );
-  return true;
-}
-
-/** 某个门号是否连到指定房间 */
-function doorTouchesRoom(door: string, roomId: string): boolean {
-  const pair = parseDoor(door);
-  return Boolean(pair && (pair[0] === roomId || pair[1] === roomId));
-}
-
-/**
- * 乔治用一张笔记（额外行动，不占一般行动，做完还能继续做一般行动）。
- * - 拆除封堵：移除他所在地点至多 2 块封堵
- * - 响声：在任意一格产生真实响声
- * - 防御：常驻效果，用物品防御时 +2，不在这里"使用"
- */
-function useGeorgeNote(state: GameState, p: PlayerState, noteId: string, toRoomId?: string) {
-  if (!isGeorge(state, p.id)) throw new Error('乔治的笔记只能由乔治本人使用');
-  if ((p.items[noteId] ?? 0) < 1) throw new Error('你手里没有这张笔记');
-  if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可以使用笔记');
-
-  if (noteId === 'george_note_blockade') {
-    const roomId = p.roomId;
-    if (!roomId) throw new Error('不在地图上');
-    const here = state.blockades.filter((id) => doorTouchesRoom(id, roomId));
-    if (here.length === 0) throw new Error('你所在地点没有封堵可拆');
-    const take = here.slice(0, 2);
-    for (const door of take) removeBlockade(state, door);
-    takeItem(p, noteId, 1);
-    discardConsumedItem(state, noteId, 1);
-    log(state, `${p.name} 使用「乔治的笔记」拆除了 ${take.length} 块封堵。`);
-    return;
-  }
-
-  if (noteId === 'george_note_noise') {
-    if (!toRoomId) throw new Error('请选择要发出响声的地点');
-    if (!state.map.rooms.some((r) => r.id === toRoomId)) throw new Error('未知地点');
-    takeItem(p, noteId, 1);
-    discardConsumedItem(state, noteId, 1);
-    pushNoise(state, toRoomId);
-    log(state, `${p.name} 使用「乔治的笔记」，在「${roomName(state, toRoomId)}」发出响声。`);
-    return;
-  }
-
-  if (noteId === 'george_note_defense') {
-    throw new Error('这张笔记是常驻效果：用物品防御时自动 +2，不需要主动使用');
-  }
-  throw new Error('未知的笔记');
-}
-
-/**
- * 乔治「聪明绝顶」的共用前置。两个分支都要满足：
- * 自己的小回合、书本地标、同格没有杀手（潜行不算同格）、一回合一次。
- */
-function georgeBrilliantPrecheck(state: GameState, p: PlayerState) {
-  if (!isGeorge(state, p.id)) throw new Error('只有乔治可以使用这个技能');
-  assertActive(state, p.id);
-  assertSurvivorMainAction(p);
-  if (p.skillUsedThisTurn.has('brilliant')) throw new Error('本回合已经用过「聪明绝顶」');
-  if (!p.roomId) throw new Error('不在地图上');
-  if (!isBookRoom(state, p.roomId)) throw new Error('「聪明绝顶」只能在有书本标记的地点使用');
-  if (killerInRoom(state, p.roomId)) throw new Error('与杀手同地不能使用「聪明绝顶」');
-}
-
-/** 聪明绝顶 A：弃掉一个工具箱，修理进度 +1（占全队本大回合那一次修理） */
-function georgeToolboxRepair(state: GameState, p: PlayerState) {
-  georgeBrilliantPrecheck(state, p);
-  if ((p.items.toolbox ?? 0) < 1) throw new Error('你没有工具箱可以弃置');
-  if (state.repairedThisPhase) throw new Error('本大回合已经有人修理过了');
-  if (state.repairProgress >= state.rules.repairNeeded) throw new Error('无线电已经修好');
-  const before = state.repairProgress;
-  takeItem(p, 'toolbox', 1);
-  discardConsumedItem(state, 'toolbox', 1);
-  p.skillUsedThisTurn.add('brilliant');
-  p.mainActionUsed = true;
-  p.moveLeft = 0;
-  state.repairedThisPhase = true;
-  addRepairProgress(state, 1);
-  log(
-    state,
-    `${p.name} 用「聪明绝顶」弃置工具箱，修理进度 +1（${state.repairProgress}/${state.rules.repairNeeded}）。`,
-  );
-  announceRepairIfJustFinished(state, before);
-  maybeArmRescue(state);
-  checkSurvivorWin(state);
-  advanceAfterSurvivor(state, p.id);
-}
-
-/**
- * 聪明绝顶 B：从搜索牌库抽一张。等于「特殊搜索」：
- * 同样的摸牌与响声规则，只是名字不同；响了就在乔治抽取的位置响（不是他后来的位置）。
- */
-function georgeDraw(state: GameState, p: PlayerState) {
-  georgeBrilliantPrecheck(state, p);
-  p.skillUsedThisTurn.add('brilliant');
-  p.mainActionUsed = true;
-  p.moveLeft = 0;
-  const cardId = drawSearchCard(state);
-  if (!cardId) {
-    log(state, '搜索牌库已空，「聪明绝顶」没有抽到牌。');
-    advanceAfterSurvivor(state, p.id);
-    return;
-  }
-  const card = state.cardById[cardId];
-  log(state, `${p.name} 用「聪明绝顶」抽取：${card?.name ?? cardId}。`, 'survivor');
-  const makeNoise = Boolean(card?.makesNoise);
-  if (card && isKeyCard(card)) {
-    const added = addKeys(state, 1);
-    log(
-      state,
-      added > 0
-        ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
-        : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
-    );
-  } else if (card) {
-    const gains = card.effects.filter((e) => e.op === 'gainItem');
-    if (gains.length) runEffects({ state, actorId: p.id, effects: gains });
-    else {
-      runEffects({ state, actorId: p.id, effects: card.effects.filter((e) => e.op !== 'noise') });
-      discardUniqueCard(state, cardId, 'search');
-    }
-  }
-  if (makeNoise && p.roomId) pushNoise(state, p.roomId);
-  checkSurvivorWin(state);
-  advanceAfterSurvivor(state, p.id);
-}
-
-/** 乔治挑一张笔记（可以放弃）；挑完继续轮到下一个人 */
-function chooseGeorgeNote(state: GameState, p: PlayerState, noteId: string | null) {
-  if (!state.pendingGeorgeNote) throw new Error('现在不是挑笔记的时候');
-  if (!isGeorge(state, p.id)) throw new Error('只有乔治可以挑笔记');
-  if (!noteId) {
-    state.pendingGeorgeNote = false;
-    log(state, `${p.name} 放弃了这个时机挑笔记。`, 'survivor');
-    promptOrAutoNextSurvivor(state);
-    return;
-  }
-  if (!state.notesDeck.includes(noteId)) throw new Error('这张笔记已经不在牌堆里了');
-  const card = state.cardById[noteId];
-  state.notesDeck = state.notesDeck.filter((id) => id !== noteId);
-  p.items[noteId] = (p.items[noteId] ?? 0) + 1;
-  state.pendingGeorgeNote = false;
-  log(state, `${p.name} 获得笔记「${card?.name ?? noteId}」。`, 'survivor');
-  enforceInventory(state, p.id);
   promptOrAutoNextSurvivor(state);
 }
 
@@ -1848,16 +1659,6 @@ function resolveEncounterCombat(state: GameState, diceValues?: number[]) {
     if (itemBonus > 0) {
       defenseValue += itemBonus;
       otherDefenseBoost += itemBonus;
-      /**
-       * 乔治的笔记：用物品防御时额外 +2（加在物品加成之上，不消耗）。
-       * 只有真的用了防御物品才触发 —— 这颗棋子没有物品可用时它不生效。
-       */
-      const noteBonus = georgeDefenseNoteBonus(state, surv);
-      if (noteBonus > 0) {
-        defenseValue += noteBonus;
-        otherDefenseBoost += noteBonus;
-        log(state, `${surv.name}「乔治的笔记」：使用物品防御，额外 +${noteBonus}。`);
-      }
     }
   }
   if (trapBonus) {
@@ -2188,10 +1989,6 @@ export function handleAction(
     if (state.mode !== 'multi' || playerId === state.pendingItemDiscard.playerId) {
       throw new Error('装备栏已满，请先弃置一件装备');
     }
-  }
-  /** 乔治在挑笔记：先挑完（或放弃）才轮到下一个人 */
-  if (state.pendingGeorgeNote && action.type !== 'chooseGeorgeNote') {
-    throw new Error('请先选择要拿的笔记，或点「不拿」');
   }
 
   if (action.type === 'respondCoopAction') {
@@ -2653,38 +2450,6 @@ export function handleAction(
       p.moveLeft = 0;
       checkSurvivorWin(state);
       advanceAfterSurvivor(state, p.id);
-      break;
-    }
-    // —— 乔治：聪明绝顶两个分支 + 用笔记 + 挑笔记 ——
-    case 'georgeToolboxRepair': {
-      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
-      if (!actor) throw new Error('找不到乔治');
-      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
-      georgeToolboxRepair(state, actor);
-      break;
-    }
-    case 'georgeDraw': {
-      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
-      if (!actor) throw new Error('找不到乔治');
-      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
-      georgeDraw(state, actor);
-      break;
-    }
-    case 'useNote': {
-      const actor = action.actorPlayerId ? state.players[action.actorPlayerId] : p;
-      if (!actor) throw new Error('找不到幸存者');
-      if (!controlsPiece(state, socketId, actor)) throw new Error('无权操作该幸存者');
-      if (state.phase !== 'survivorMain') throw new Error('仅幸存者阶段可以使用笔记');
-      useGeorgeNote(state, actor, action.noteId, action.toRoomId);
-      break;
-    }
-    case 'chooseGeorgeNote': {
-      const actor = Object.values(state.players).find(
-        (pl) => pl.faction === 'survivor' && isGeorge(state, pl.id),
-      );
-      if (!actor) throw new Error('本局没有乔治');
-      if (!controlsPiece(state, socketId, actor)) throw new Error('只有乔治可以挑笔记');
-      chooseGeorgeNote(state, actor, action.noteId);
       break;
     }
     case 'clearFear': {
@@ -4002,12 +3767,6 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     pendingWhizSearch: state.pendingWhizSearch,
     pendingOverFearWound: state.pendingOverFearWound ? { ...state.pendingOverFearWound } : null,
     pendingBlockadeJob: state.pendingBlockadeJob ? { ...state.pendingBlockadeJob } : null,
-    georgeNotes: viewerFaction === 'survivor'
-      ? state.notesDeck.map((id) => ({ id, name: state.cardById[id]?.name ?? id }))
-      : [],
-    allGeorgeNotes: georgeNoteDefs(state).map((c) => ({ id: c.id, name: c.name, text: c.text })),
-    pendingGeorgeNote: state.pendingGeorgeNote,
-    georgeInPlay: georgeInPlay(state),
     removableBoardBlockades: removableForJob(state).map((id) => {
       const pair = parseDoor(id);
       return { id, from: pair?.[0] ?? id, to: pair?.[1] ?? id };

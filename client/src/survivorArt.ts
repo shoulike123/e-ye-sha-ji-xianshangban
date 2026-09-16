@@ -39,7 +39,6 @@ const ARTS: SurvivorArt[] = [
   artOf('幸存者三_马尔科_医生', '马尔科', '医生', 3),
   artOf('幸存者四_索菲亚_侦探', '索菲亚', '侦探', 3),
   artOf('幸存者五_威廉_运动员', '威廉', '运动员', 3),
-  artOf('幸存者六_乔治_教授', '乔治', '教授', 3),
 ];
 
 const ID_ALIAS: Record<string, string> = {
@@ -48,7 +47,6 @@ const ID_ALIAS: Record<string, string> = {
   survivor3: '马尔科',
   survivor4: '索菲亚',
   survivor5: '威廉',
-  survivor6: '乔治',
 };
 
 /** 用角色编号或中文名找到那个人的画（旧写法「索菲娅」也认） */

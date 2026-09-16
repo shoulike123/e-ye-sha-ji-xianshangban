@@ -234,14 +234,6 @@ export interface PublicSnapshot {
     secondRoomId?: string | null;
   } | null;
   removableBoardBlockades?: Array<{ id: string; from: string; to: string }>;
-  /** 乔治还没被拿走的笔记（杀手视角为空） */
-  georgeNotes?: Array<{ id: string; name: string }>;
-  /** 3 张笔记的定义（图鉴用） */
-  allGeorgeNotes?: Array<{ id: string; name: string; text: string }>;
-  /** 等乔治挑笔记 */
-  pendingGeorgeNote?: boolean;
-  /** 局中是否有乔治 */
-  georgeInPlay?: boolean;
   encounterOpenHold?: boolean;
   killerLevel: number;
   pendingKillerDiscards: number;
@@ -375,14 +367,6 @@ export type ClientAction =
   | { type: 'move'; toRoomId: string }
   | { type: 'search' }
   | { type: 'repair' }
-  /** 乔治·聪明绝顶：弃工具箱换 +1 修理进度 */
-  | { type: 'georgeToolboxRepair'; actorPlayerId?: string }
-  /** 乔治·聪明绝顶：从搜索牌库抽一张 */
-  | { type: 'georgeDraw'; actorPlayerId?: string }
-  /** 用一张笔记（额外行动）：响声那张要带 toRoomId */
-  | { type: 'useNote'; noteId: string; toRoomId?: string; actorPlayerId?: string }
-  /** 思维敏捷：挑一张笔记（null = 放弃） */
-  | { type: 'chooseGeorgeNote'; noteId: string | null }
   /** 遭遇防御：用「鸿运当骰」重掷选中的骰子 / 接受当前结果 */
   | { type: 'rerollEncounterDice'; diceIndexes: number[] }
   | { type: 'resolveEncounterDice' }

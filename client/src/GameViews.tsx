@@ -535,13 +535,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const [inspectCardId, setInspectCardId] = useState<string | null>(null);
   const [evoPayIds, setEvoPayIds] = useState<string[]>([]);
   const [extraPick, setExtraPick] = useState<{
-    kind: 'whiskey' | 'adrenaline' | 'sprint' | 'noteNoise';
+    kind: 'whiskey' | 'adrenaline' | 'sprint';
     rooms: string[];
     actorPlayerId?: string;
     noteId?: string;
   } | null>(null);
-  /** 乔治的笔记图鉴 / 挑笔记弹窗 */
-  const [georgePanelOpen, setGeorgePanelOpen] = useState(false);
   /** 鸿运当骰：选中的骰子下标 */
   const [diceSelect, setDiceSelect] = useState<number[]>([]);
   const placeKey = `nh_place_${state.roomCode}_killer`;
@@ -802,7 +800,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         ? [senseFirst, state.pendingSensePair.secondRoomId]
         : [senseFirst]
       : extraDest && extraPick
-        ? extraPick.kind === 'whiskey' || extraPick.kind === 'noteNoise'
+        ? extraPick.kind === 'whiskey'
           ? [extraDest]
           : startRoom
             ? (shortestPath(state.map, startRoom, extraDest, pathOpts) ?? [startRoom, extraDest])
@@ -851,11 +849,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const isMarcoPiece = (p: { id: string; characterId: string | null; name: string }) => {
     const c = state.characters.find((x) => x.id === p.characterId);
     return /survivor3|马尔科|marco/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
-  };
-  /** 乔治·卡朋特（笔记的主人） */
-  const isGeorgePiece = (p: { id: string; characterId: string | null; name: string }) => {
-    const c = state.characters.find((x) => x.id === p.characterId);
-    return /survivor6|乔治|george/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
   };
   const canUseOwnPersonalItem = (itemId: string) =>
     itemId === 'sophia_camera'
@@ -984,16 +977,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         toRoomId: extraDest,
         actorPlayerId: extraPick.actorPlayerId,
       });
-    } else if (extraPick.kind === 'noteNoise') {
-      void runSurvivor(
-        `用乔治的笔记在${roomDisplayName(state.map, extraDest, viewerFaction)}发出响声`,
-        {
-          type: 'useNote',
-          noteId: extraPick.noteId ?? 'george_note_noise',
-          toRoomId: extraDest,
-          actorPlayerId: extraPick.actorPlayerId,
-        },
-      );
     } else {
       void runSurvivor(
         extraPick.kind === 'whiskey'
@@ -1242,12 +1225,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         <button type="button" className="ghost-btn" onClick={() => setRulesOpen(true)}>
           行动规则
         </button>
-        {/* 双方都能看：乔治的 3 张笔记图鉴 */}
-        {state.georgeInPlay && (
-          <button type="button" className="ghost-btn" onClick={() => setGeorgePanelOpen(true)}>
-            乔治的笔记
-          </button>
-        )}
         <a className="ghost-btn" href="/ui-layout/" target="_blank">
           界面校准
         </a>
@@ -2167,113 +2144,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     </button>
                   )}
                 </div>
-
-                {/* —— 乔治专属：聪明绝顶 + 笔记 —— */}
-                {(() => {
-                  const george = state.you;
-                  const isGeo = /survivor6|乔治|george/i.test(
-                    `${george.characterId ?? ''} ${
-                      state.characters.find((c) => c.id === george.characterId)?.name ?? ''
-                    } ${george.name}`,
-                  );
-                  if (!isGeo) return null;
-                  const bookHere = Boolean(youRoom?.tags.includes('special-book'));
-                  const brilliantLeft = !state.you.skillUsedThisTurn.includes('brilliant');
-                  const canBrilliant =
-                    bookHere && !killerHere && brilliantLeft && !state.you.mainActionUsed && !moveDest;
-                  const noteIds = Object.keys(state.you.items).filter((id) =>
-                    id.startsWith('george_note_'),
-                  );
-                  return (
-                    <div className="stack" style={{ marginTop: '0.4rem' }}>
-                      <span className="muted">乔治·聪明绝顶（书本地点 · 同地无杀手 · 每回合 1 次）</span>
-                      <div className="row">
-                        <button
-                          type="button"
-                          className="primary"
-                          disabled={!canBrilliant}
-                          title={
-                            !bookHere
-                              ? '只能在有书本标记的地点使用'
-                              : killerHere
-                                ? '与杀手同地不能使用'
-                                : !brilliantLeft
-                                  ? '本回合已经用过'
-                                  : undefined
-                          }
-                          onClick={() =>
-                            void runSurvivor('聪明绝顶：弃工具箱 +1 修理', {
-                              type: 'georgeToolboxRepair',
-                            })
-                          }
-                        >
-                          弃工具箱 +1 修理（{state.you.items.toolbox ?? 0}）
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canBrilliant}
-                          onClick={() =>
-                            void runSurvivor('聪明绝顶：抽一张搜索牌', { type: 'georgeDraw' })
-                          }
-                        >
-                          抽一张搜索牌
-                        </button>
-                      </div>
-                      {noteIds.length > 0 && (
-                        <>
-                          <span className="muted">乔治的笔记（额外行动）</span>
-                          <div className="row">
-                            {noteIds.map((nid) => {
-                              if (nid === 'george_note_blockade') {
-                                const cnt = state.blockades.filter(
-                                  (b) => b.split('|')[0] === state.you.roomId || b.split('|')[1] === state.you.roomId,
-                                ).length;
-                                return (
-                                  <button
-                                    key={nid}
-                                    type="button"
-                                    disabled={cnt === 0}
-                                    title={cnt === 0 ? '你所在地点没有封堵可拆' : `将拆除 ${Math.min(2, cnt)} 块`}
-                                    onClick={() =>
-                                      void runSurvivor('用笔记拆除封堵', {
-                                        type: 'useNote',
-                                        noteId: nid,
-                                      })
-                                    }
-                                  >
-                                    拆封堵（{Math.min(2, cnt)}）
-                                  </button>
-                                );
-                              }
-                              if (nid === 'george_note_noise') {
-                                return (
-                                  <button
-                                    key={nid}
-                                    type="button"
-                                    onClick={() =>
-                                      setExtraPick({
-                                        kind: 'noteNoise',
-                                        noteId: nid,
-                                        rooms: state.map.rooms.map((r) => r.id),
-                                      })
-                                    }
-                                  >
-                                    响声（任意一格）
-                                  </button>
-                                );
-                              }
-                              return (
-                                <span key={nid} className="muted">
-                                  防御笔记：用物品防御时 +2（常驻）
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
               </div>
             )}
 
@@ -3232,39 +3102,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     }),
                   );
                 }
-                // —— 乔治的笔记（额外行动，只有乔治本人能用）——
-                if (isGeorgePiece(p) && (p.items.george_note_blockade ?? 0) > 0) {
-                  const onHere = p.roomId
-                    ? state.blockades.filter((b) => {
-                        const pair = b.split('|');
-                        return pair[0] === p.roomId || pair[1] === p.roomId;
-                      }).length
-                    : 0;
-                  add(
-                    'noteBlock',
-                    onHere > 0
-                      ? `笔记·拆除封堵（本格 ${Math.min(2, onHere)} 块）`
-                      : '笔记·拆除封堵（本格没有封堵）',
-                    () => {
-                      if (onHere === 0) return;
-                      void runSurvivor(`${p.name}用笔记拆除封堵`, {
-                        type: 'useNote',
-                        noteId: 'george_note_blockade',
-                        actorPlayerId: p.id,
-                      });
-                    },
-                  );
-                }
-                if (isGeorgePiece(p) && (p.items.george_note_noise ?? 0) > 0) {
-                  add('noteNoise', '笔记·响声（任意一格）', () => {
-                    setExtraPick({
-                      kind: 'noteNoise',
-                      noteId: 'george_note_noise',
-                      rooms: state.map.rooms.map((r) => r.id),
-                      actorPlayerId: p.id,
-                    });
-                  });
-                }
                 if ((p.items.whiskey ?? 0) > 0) {
                   add('whiskey', '威士忌酒瓶（点相邻地点）', () => {
                     const rooms = p.roomId ? generalNeighbors(state.map, p.roomId) : [];
@@ -3462,117 +3299,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 </div>
               );
             })()}
-          </div>
-        </div>
-      )}
-      {/* —— 乔治的笔记：图鉴（双方都能开）—— */}
-      {georgePanelOpen && (
-        <div className="hud-overlay" onClick={() => setGeorgePanelOpen(false)} role="presentation">
-          <div
-            className="hud-overlay-card"
-            role="dialog"
-            aria-label="乔治的笔记"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '900px' }}
-          >
-            <div className="hud-overlay-head">
-              <h3>乔治的笔记</h3>
-              <button type="button" className="ghost-btn" onClick={() => setGeorgePanelOpen(false)}>
-                关闭
-              </button>
-            </div>
-            <p className="muted">点击可放大查看。每张笔记各 1 份，只有乔治本人能使用。</p>
-            <div className="row" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
-              {(state.allGeorgeNotes ?? []).map((n) => {
-                const takenByGeorge =
-                  isSurvivorView && Object.keys(state.you.items).includes(n.id);
-                const left = (state.georgeNotes ?? []).some((g) => g.id === n.id);
-                const src = cardArtSrc(state.cardById[n.id], n.id);
-                return (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="card"
-                    style={{ width: '190px' }}
-                    onClick={() =>
-                      src && setArtZoom({ src, caption: n.name })
-                    }
-                  >
-                    {src ? (
-                      <img className="inline-card-art" src={encodeURI(src)} alt="" />
-                    ) : null}
-                    <h4>{n.name}</h4>
-                    <div className="muted">{n.text}</div>
-                    <div className="muted">
-                      {isSurvivorView
-                        ? left
-                          ? '还在牌堆里'
-                          : takenByGeorge
-                            ? '乔治已持有'
-                            : '已被拿走'
-                        : '（乔治是否持有对杀手隐藏）'}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* —— 思维敏捷：等乔治挑一张笔记 —— */}
-      {state.pendingGeorgeNote &&
-        isSurvivorView &&
-        (() => {
-          // 只有乔治本人在场时才弹（单人热座/共控下由操控者代点）
-          const geo = state.players.find(
-            (pl) =>
-              pl.faction === 'survivor' &&
-              /survivor6|乔治|george/i.test(
-                `${pl.characterId ?? ''} ${
-                  state.characters.find((c) => c.id === pl.characterId)?.name ?? ''
-                } ${pl.name}`,
-              ),
-          );
-          return geo && state.activePlayerId === geo.id;
-        })() && (
-        <div className="hud-overlay">
-          <div className="hud-overlay-card" role="dialog" aria-label="挑选乔治的笔记">
-            <h3>思维敏捷：挑一张笔记</h3>
-            <p className="muted">
-              小回合结束时你在杀手距离 1 内，可以从剩下的笔记里挑一张（拿走就没了，占装备栏）。
-            </p>
-            <div className="row" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
-              {(state.georgeNotes ?? []).map((n) => {
-                const src = cardArtSrc(state.cardById[n.id], n.id);
-                return (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="card"
-                    style={{ width: '190px' }}
-                    onClick={() => {
-                      if (state.mode !== 'vs2' && !confirmAct(`拿走笔记「${n.name}」`)) return;
-                      void onAction({ type: 'chooseGeorgeNote', noteId: n.id });
-                    }}
-                  >
-                    {src ? (
-                      <img className="inline-card-art" src={encodeURI(src)} alt="" />
-                    ) : null}
-                    <h4>{n.name}</h4>
-                    <div className="muted">{state.cardById[n.id]?.text}</div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                onClick={() => void onAction({ type: 'chooseGeorgeNote', noteId: null })}
-              >
-                不拿
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -293,13 +293,6 @@ export interface GameState {
   /** 升到谋杀者 4 级后，确认进化再立刻选 4 扇门 */
   pendingEvoFourBlockade: boolean;
   /**
-   * 乔治的笔记：每张只有 1 份，被拿走就从这里移除（拿走 = 进乔治装备栏）。
-   * 用掉的进 survivorDiscard。
-   */
-  notesDeck: string[];
-  /** 乔治刚做完一般行动、满足「思维敏捷」条件，等他挑一张笔记（可以点放弃） */
-  pendingGeorgeNote: boolean;
-  /**
    * 封堵：先算要放几块；槽位不够就先一块块移除场上封堵，再放置。
    * 不再把旧封堵“挪”到新门。
    */
@@ -337,17 +330,6 @@ export type ClientAction =
   | { type: 'move'; toRoomId: string }
   | { type: 'search' }
   | { type: 'repair' }
-  /** 乔治·聪明绝顶：弃工具箱换 +1 修理进度 */
-  | { type: 'georgeToolboxRepair'; actorPlayerId?: string }
-  /** 乔治·聪明绝顶：从搜索牌库抽一张 */
-  | { type: 'georgeDraw'; actorPlayerId?: string }
-  /**
-   * 用一张笔记（额外行动）。
-   * 拆除封堵：不需要额外参数；响声：带 toRoomId 指定任意一格。
-   */
-  | { type: 'useNote'; noteId: string; toRoomId?: string; actorPlayerId?: string }
-  /** 思维敏捷：挑一张笔记（noteId 为空 = 放弃） */
-  | { type: 'chooseGeorgeNote'; noteId: string | null }
   /** 遭遇防御：用「鸿运当骰」重掷选中的骰子，或接受当前结果 */
   | { type: 'rerollEncounterDice'; diceIndexes: number[] }
   | { type: 'resolveEncounterDice' }
@@ -421,14 +403,6 @@ export interface PublicSnapshot {
   pendingOverFearWound?: { targetId: string } | null;
   pendingBlockadeJob?: BlockadeJob | null;
   removableBoardBlockades?: Array<{ id: string; from: string; to: string }>;
-  /** 乔治还没被拿走的笔记（杀手看不到内容） */
-  georgeNotes?: Array<{ id: string; name: string }>;
-  /** 乔治全部 3 张笔记的定义（双方都看得到，用于「乔治的笔记」图鉴） */
-  allGeorgeNotes?: Array<{ id: string; name: string; text: string }>;
-  /** 「思维敏捷」等乔治挑笔记 */
-  pendingGeorgeNote?: boolean;
-  /** 局中是否有乔治（决定要不要显示「乔治的笔记」按钮） */
-  georgeInPlay?: boolean;
   encounterOpenHold?: boolean;
   killerLevel: number;
   pendingKillerDiscards: number;

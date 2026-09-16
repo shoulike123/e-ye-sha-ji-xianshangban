@@ -31,8 +31,6 @@ export interface GameContent {
     search: CardDef[];
     discovery: CardDef[];
     killerAction: CardDef[];
-    /** 乔治的笔记 */
-    note: CardDef[];
     byId: Record<string, CardDef>;
   };
 }
@@ -67,13 +65,12 @@ function loadCharacters(): CharacterDef[] {
   return list;
 }
 
-/** 读取搜索牌、发现牌、杀手行动牌、乔治的笔记，并做成“按编号查找”的字典 */
+/** 读取搜索牌、发现牌、杀手行动牌，并做成“按编号查找”的字典 */
 function loadCards(): GameContent['cards'] {
   const dir = path.join(CONTENT_ROOT, 'cards');
   const search: CardDef[] = [];
   const discovery: CardDef[] = [];
   const killerAction: CardDef[] = [];
-  const note: CardDef[] = [];
   const byId: Record<string, CardDef> = {};
 
   const push = (list: CardDef[], raw: unknown) => {
@@ -89,15 +86,13 @@ function loadCards(): GameContent['cards'] {
         search?: unknown[];
         discovery?: unknown[];
         killerAction?: unknown[];
-        note?: unknown[];
       };
     };
     for (const c of data.decks?.search ?? []) push(search, c);
     for (const c of data.decks?.discovery ?? []) push(discovery, c);
     for (const c of data.decks?.killerAction ?? []) push(killerAction, c);
-    for (const c of data.decks?.note ?? []) push(note, c);
   }
-  return { search, discovery, killerAction, note, byId };
+  return { search, discovery, killerAction, byId };
 }
 
 /** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 */
