@@ -141,7 +141,7 @@
           "id": "well_prepared",
           "name": "万全准备",
           "trigger": "passive",
-          "text": "游戏开始时拥有马尔科的医药包",
+          "text": "游戏开始时拥有马尔科的医药包（个人物品：只有马尔科本人能用）",
           "effects": []
         },
         {
