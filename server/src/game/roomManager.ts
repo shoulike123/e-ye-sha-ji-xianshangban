@@ -78,14 +78,33 @@ export class RoomManager {
     };
   }
 
-  /** 把玩家点的按钮交给规则引擎，再给桌上每个人各做一份能看的局面 */
-  action(socketId: string, action: ClientAction): PublicSnapshot[] {
+  /**
+   * 把玩家点的按钮交给规则引擎，再给桌上每个人各做一份能看的局面。
+   *
+   * 【解散房间】：所有人都确认之后 `state.disbanded` 会被置上 —— 这时要
+   * **先把每个人的快照做出来**（里面带着 `disbanded: true`，客户端据此回主界面），
+   * 再把这一桌从服务器上彻底删掉，并把这几个网线的"坐在哪一桌"一并清掉。
+   */
+  action(socketId: string, action: ClientAction): {
+    snapshots: Array<{ socketId: string; snapshot: PublicSnapshot }>;
+    disbanded: boolean;
+    roomCode: string;
+  } {
     const roomCode = this.socketToRoom.get(socketId);
     if (!roomCode) throw new Error('你不在任何房间中');
     const state = this.rooms.get(roomCode);
     if (!state) throw new Error('房间已失效');
     handleAction(state, socketId, action, this.content);
-    return listControllerIds(state).map((id) => buildSnapshot(state, id));
+    const snapshots = listControllerIds(state).map((id) => ({
+      socketId: id,
+      snapshot: buildSnapshot(state, id),
+    }));
+    if (!state.disbanded)
+      return { snapshots, disbanded: false, roomCode };
+    for (const { socketId: id } of snapshots) this.socketToRoom.delete(id);
+    this.socketToRoom.delete(socketId);
+    this.rooms.delete(roomCode);
+    return { snapshots, disbanded: true, roomCode };
   }
 
   /** 只给这个人看他该看的信息 */
@@ -111,5 +130,10 @@ export class RoomManager {
     const state = this.rooms.get(roomCode);
     if (!state) return [];
     return listControllerIds(state);
+  }
+
+  /** 这一桌的原始棋盘（只有服务器自己用；别发给客户端） */
+  stateOf(roomCode: string): GameState | undefined {
+    return this.rooms.get(roomCode);
   }
 }

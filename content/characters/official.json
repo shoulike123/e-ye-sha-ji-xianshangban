@@ -6,7 +6,7 @@
       "faction": "killer",
       "maxHp": 99,
       "startingPower": 5,
-      "description": "起始力量 5。等级 3 解锁「残酷暴怒」。牌组：追逐×3、感知×2、疯狂×1、留下!!!!×1、设障×3、链锯轰鸣×2。",
+      "description": "起始力量 5。牌组：追逐×3、感知×2、疯狂×1、留下!!!!×1、设障×3、链锯轰鸣×2、残酷暴怒×1（锁定）。",
       "skills": []
     },
     {
@@ -15,7 +15,7 @@
       "faction": "killer",
       "maxHp": 99,
       "startingPower": 2,
-      "description": "起始力量 2。等级 4 解锁「生命吸取」。牌组：追逐×2、消失×2、尖叫×2、感知×3、惊吓之迹×1、呼啸而过×2。",
+      "description": "起始力量 2。牌组：追逐×2、消失×2、尖叫×2、感知×3、惊吓之迹×1、呼啸而过×2、生命汲取×1（锁定）。",
       "skills": []
     },
     {
@@ -24,7 +24,61 @@
       "faction": "killer",
       "maxHp": 99,
       "startingPower": 4,
-      "description": "起始力量 4。等级 3 解锁「死亡盛放」。牌组：追逐×4、尾随×3、谋杀预告×1、感知×1、潜藏威胁×1、逻辑推理×2。",
+      "description": "起始力量 4。牌组：追逐×4、尾随×3、谋杀预告×1、感知×1、潜藏威胁×1、逻辑推理×2、死亡盛放×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer4",
+      "name": "女猎手",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 3,
+      "description": "起始力量 3。牌组：追逐×3、感知×2、擲斧×1、追蹤×3、屏息×1、猎手本能×2、陷阱重置×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer5",
+      "name": "狼人",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 6,
+      "description": "起始力量 6。牌组：追逐×4、感知×2、嚎叫×2、狂野撕咬×2、鲜血追猎×1、领地意识×1、超听觉×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer6",
+      "name": "雕像",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 5,
+      "description": "起始力量 5。牌组：感知×2、巡邏×3、處決×1、重整旗鼓×2、釋放×1、召唤石碑×3、圍困×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer7",
+      "name": "未命名",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 2,
+      "description": "起始力量 2。牌组：爬行×3、变形×1、伏擊×2、红外探测×2、恐诡管道×3、戰鬥適應×1、刺耳噪声×1（锁定）、酸液喷吐×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer8",
+      "name": "扼杀者",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 4,
+      "description": "起始力量 4。牌组：荊棘纏繞×2、茂盛×2、扼殺×1、枝條生長×4、傳送聚合×3、狂亂枝條×1（锁定）。",
+      "skills": []
+    },
+    {
+      "id": "killer9",
+      "name": "女王",
+      "faction": "killer",
+      "maxHp": 99,
+      "startingPower": 2,
+      "description": "起始力量 2。牌组：感知×2、抓住他們×2、召喚亡者×2、毒液之觸×2、屍群來了×2、屍體爆炸×1、汽化×1、君臨天下×1（锁定）。",
       "skills": []
     },
     {
@@ -33,7 +87,7 @@
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 3,
-      "description": "学生。低调行事：对【感知】隐形。小心谨慎：搜索物品不会发出响声（钥匙与翻手提箱仍可能响）。",
+      "description": "学生。低调行事：对【感知】隐形。小心谨慎：搜索物品不会发出响声。",
       "skills": [
         {
           "id": "low_profile",
@@ -46,7 +100,7 @@
           "id": "cautious",
           "name": "小心谨慎",
           "trigger": "passive",
-          "text": "你搜索物品时不会发出响声。翻手提箱仍按牌面响声标记结算。",
+          "text": "你搜索物品时不会发出响声。",
           "effects": []
         }
       ]
@@ -57,7 +111,7 @@
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 6,
-      "description": "工程师。大号背包：物品栏最多 6 格。工程专家：用工具箱修理时额外 +1 进度。",
+      "description": "工程师。大号背包：物品栏最多 6 格。工程专家：用工具箱修理无线电时额外 +1 进度。",
       "skills": [
         {
           "id": "large_backpack",
@@ -81,7 +135,7 @@
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 3,
-      "description": "医生。万全准备：开局拥有马尔科的医药包。足智多谋：可从弃牌堆取肾上腺素或镇静剂。",
+      "description": "医生。万全准备：开局拥有马尔科的医药包。足智多谋：特殊行动：从弃牌堆获得一张肾上腺素或镇静剂。",
       "skills": [
         {
           "id": "well_prepared",
@@ -102,17 +156,17 @@
     },
     {
       "id": "survivor4",
-      "name": "索菲娅·斯科特",
+      "name": "索菲亚·斯科特",
       "faction": "survivor",
       "maxHp": 2,
       "inventorySlots": 3,
-      "description": "侦探。机敏灵巧：开局拥有索菲娅的相机。观察入微：可走秘密通道。",
+      "description": "侦探。机敏灵巧：开局拥有索菲亚的相机。观察入微：特殊行动：移动通过秘密通道（如果你拥有手电筒，则本行动变为额外行动）",
       "skills": [
         {
           "id": "nimble",
           "name": "机敏灵巧",
           "trigger": "passive",
-          "text": "游戏开始时拥有索菲娅的相机",
+          "text": "游戏开始时拥有索菲亚的相机",
           "effects": []
         },
         {
@@ -145,8 +199,105 @@
           "name": "短跑冲刺",
           "trigger": "activated",
           "oncePerTurn": true,
-          "text": "特殊行动：【移动】X3（在目的地触发警报）",
+          "text": "特殊行动：【移动】X3（在目的地发出响声）",
           "effects": [{ "op": "move", "value": 3 }, { "op": "noise" }]
+        }
+      ]
+    },
+    {
+      "id": "survivor6",
+      "name": "乔治·卡朋特",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "教授。聪明绝顶：在书本标记地点可特殊行动：弃掉一个工具箱来 +1 修理进度，或从搜索牌库抽取一张卡牌。思维敏捷：回合结束时，如果你在杀手距离 1 内，获得一张乔治的笔记。",
+      "skills": [
+        {
+          "id": "brilliant",
+          "name": "聪明绝顶",
+          "trigger": "activated",
+          "oncePerTurn": true,
+          "text": "（在书本标记地点）特殊行动：弃掉一个工具箱来 +1 修理进度，或从搜索牌库抽取一张卡牌",
+          "effects": []
+        },
+        {
+          "id": "quick_thinking",
+          "name": "思维敏捷",
+          "trigger": "passive",
+          "text": "回合结束时，如果你在杀手距离 1 内，获得一张乔治的笔记",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor7",
+      "name": "欧菲莉亚·罗梅罗",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "记者。言语鼓励：特殊行动 —— 移除任意 1 名幸存者的所有恐惧，并在目标上放置一个鼓励标记（取消增加1个恐惧 或 +1 防御值）。第六感：你搜索时，可以抽取 2 张卡牌，将其中 1 张返回搜索牌库顶（返回的卡牌不会触发警报）。",
+      "skills": [
+        {
+          "id": "encourage",
+          "name": "言语鼓励",
+          "trigger": "activated",
+          "text": "特殊行动：移除任意 1 名幸存者的所有恐惧，并在目标上放置一个鼓励标记（取消增加1个恐惧 或 +1 防御值）",
+          "effects": []
+        },
+        {
+          "id": "sixth_sense",
+          "name": "第六感",
+          "trigger": "passive",
+          "text": "你搜索时，可以抽取 2 张卡牌，将其中 1 张返回搜索牌库顶（返回的卡牌不会触发警报）",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor8",
+      "name": "凯莱布·皮尔",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "制片人。幸运币：开局拥有凯莱布的幸运币。神秘狂热粉：你可以在螺旋地点搜索。",
+      "skills": [
+        {
+          "id": "lucky_coin",
+          "name": "幸运币",
+          "trigger": "activated",
+          "text": "开始游戏时拥有凯莱布的幸运币。",
+          "effects": []
+        },
+        {
+          "id": "cult_fanatic",
+          "name": "神秘狂热粉",
+          "trigger": "passive",
+          "text": "你可以在螺旋地点搜索",
+          "effects": []
+        }
+      ]
+    },
+    {
+      "id": "survivor9",
+      "name": "迪伦·温",
+      "faction": "survivor",
+      "maxHp": 2,
+      "inventorySlots": 3,
+      "description": "摄影师。坚毅：开始游戏时拥有一个坚毅标记，移除该标记来防止第一次伤害。机械知识：（在锤子标记的地点）额外行动：从弃牌堆获得一张工具箱。",
+      "skills": [
+        {
+          "id": "resilient",
+          "name": "坚毅",
+          "trigger": "passive",
+          "text": "开始游戏时拥有一个坚毅标记。移除该标记来防止第一次伤害",
+          "effects": []
+        },
+        {
+          "id": "mechanical_knack",
+          "name": "机械知识",
+          "trigger": "activated",
+          "text": "（在锤子标记的地点）额外行动：从弃牌堆获得一张工具箱",
+          "effects": []
         }
       ]
     }

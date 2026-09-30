@@ -11,11 +11,13 @@ import {
   MapSchema,
   RulesSchema,
   SurvivorLayoutSchema,
+  TraitSchema,
   type CardDef,
   type CharacterDef,
   type MapDef,
   type RulesDef,
   type SurvivorLayout,
+  type TraitDef,
 } from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,8 +33,18 @@ export interface GameContent {
     search: CardDef[];
     discovery: CardDef[];
     killerAction: CardDef[];
+    /** 乔治的笔记 */
+    note: CardDef[];
+    /** 宝藏牌堆（狼人）：3 张银质匕首 + 1 张银质子弹 */
+    treasure: CardDef[];
+    /** 遗物牌堆（墓穴 R6 遺物室） */
+    relic: CardDef[];
+    /** 未命名的进化卡牌（等级 2 / 4 二选一） */
+    evolutionCard: CardDef[];
     byId: Record<string, CardDef>;
   };
+  /** 【变体1】特性卡（幸存者 20 + 杀手 20） */
+  traits: TraitDef[];
 }
 
 /** 把一个 JSON 文件读成电脑能懂的数据 */
@@ -50,7 +62,12 @@ function loadMaps(): MapDef[] {
     .map((f) => MapSchema.parse(readJson(path.join(dir, f))));
 }
 
-/** 读取角色（杀手、求生者），跳过 demo 练习档 */
+/**
+ * 读取角色（杀手、幸存者），跳过 demo 练习档。
+ * 结果按角色编号排序（killer1..9、survivor1..6），
+ * 不依赖文件名/文件系统顺序 —— 否则 george.json 会排在 official.json 前面，
+ * 导致选择界面的幸存者顺序错乱。
+ */
 function loadCharacters(): CharacterDef[] {
   const dir = path.join(CONTENT_ROOT, 'characters');
   const list: CharacterDef[] = [];
@@ -62,15 +79,33 @@ function loadCharacters(): CharacterDef[] {
       list.push(CharacterSchema.parse(c));
     }
   }
-  return list;
+  return list.sort((a, b) => characterOrder(a.id) - characterOrder(b.id));
 }
 
-/** 读取搜索牌、发现牌、杀手行动牌，并做成“按编号查找”的字典 */
+/**
+ * 显示顺序：**杀手在前、幸存者在后**，各自按编号排；认不出的排最后。
+ *
+ * ⚠ 必须把阵营也算进 key —— 只返回编号的话 `killer1` 和 `survivor1` 会得到同一个值，
+ * 排序结果就取决于原数组顺序（角色合并到同一个文件后表现为两个阵营交错）。
+ */
+function characterOrder(id: string): number {
+  const m = /^(killer|survivor)(\d+)$/.exec(id ?? '');
+  if (!m) return 9999;
+  return (m[1] === 'killer' ? 0 : 1000) + Number(m[2]);
+}
+
+/** 读取搜索牌、发现牌、杀手行动牌、乔治的笔记，并做成“按编号查找”的字典 */
 function loadCards(): GameContent['cards'] {
   const dir = path.join(CONTENT_ROOT, 'cards');
   const search: CardDef[] = [];
   const discovery: CardDef[] = [];
   const killerAction: CardDef[] = [];
+  const note: CardDef[] = [];
+  const treasure: CardDef[] = [];
+  /** 遗物牌堆（墓穴 R6 遺物室） */
+  const relic: CardDef[] = [];
+  /** 未命名的进化卡牌（等级 2 / 4 二选一） */
+  const evolutionCard: CardDef[] = [];
   const byId: Record<string, CardDef> = {};
 
   const push = (list: CardDef[], raw: unknown) => {
@@ -86,16 +121,40 @@ function loadCards(): GameContent['cards'] {
         search?: unknown[];
         discovery?: unknown[];
         killerAction?: unknown[];
+        note?: unknown[];
+        treasure?: unknown[];
+        relic?: unknown[];
+        evolutionCard?: unknown[];
       };
     };
     for (const c of data.decks?.search ?? []) push(search, c);
     for (const c of data.decks?.discovery ?? []) push(discovery, c);
     for (const c of data.decks?.killerAction ?? []) push(killerAction, c);
+    for (const c of data.decks?.note ?? []) push(note, c);
+    for (const c of data.decks?.treasure ?? []) push(treasure, c);
+    for (const c of data.decks?.relic ?? []) push(relic, c);
+    for (const c of data.decks?.evolutionCard ?? []) push(evolutionCard, c);
   }
-  return { search, discovery, killerAction, byId };
+  return { search, discovery, killerAction, note, treasure, relic, evolutionCard, byId };
 }
 
-/** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 */
+/**
+ * 【变体1】读取特性卡（`content/traits.json` 的 `traits` 数组）。
+ *
+ * 幸存者排前面、杀手排后面，各自按 index —— 抽牌池顺序要稳定。
+ */
+function loadTraits(): TraitDef[] {
+  const file = path.join(CONTENT_ROOT, 'traits.json');
+  if (!fs.existsSync(file)) return [];
+  const data = readJson(file) as { traits?: unknown[] };
+  const list = (data.traits ?? []).map((t) => TraitSchema.parse(t));
+  return list.sort((a, b) => {
+    if (a.faction !== b.faction) return a.faction === 'survivor' ? -1 : 1;
+    return a.index - b.index;
+  });
+}
+
+/** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 + 特性卡 */
 export function loadContent(): GameContent {
   const rulesPath = path.join(CONTENT_ROOT, 'rules.json');
   const rules = RulesSchema.parse(readJson(rulesPath));
@@ -109,7 +168,8 @@ export function loadContent(): GameContent {
     throw new Error('No characters found in content/characters');
   }
   const cards = loadCards();
-  return { rules, map, maps, characters, cards };
+  const traits = loadTraits();
+  return { rules, map, maps, characters, cards, traits };
 }
 
 /** 根据地图编号找到它存在硬盘上的哪个文件 */
@@ -136,12 +196,12 @@ export function saveMap(map: MapDef): MapDef {
   return parsed;
 }
 
-/** 求生者界面按钮/立绘该摆在哪，记在这个文件里 */
+/** 幸存者界面按钮/立绘该摆在哪，记在这个文件里 */
 export function survivorLayoutPath() {
   return path.join(CONTENT_ROOT, 'ui', 'survivor-layout.json');
 }
 
-/** 读出求生者界面摆放 */
+/** 读出幸存者界面摆放 */
 export function loadSurvivorLayout(): SurvivorLayout {
   const file = survivorLayoutPath();
   if (!fs.existsSync(file)) {
@@ -150,7 +210,7 @@ export function loadSurvivorLayout(): SurvivorLayout {
   return SurvivorLayoutSchema.parse(readJson(file));
 }
 
-/** 校准页保存求生者界面摆放 */
+/** 校准页保存幸存者界面摆放 */
 export function saveSurvivorLayout(data: unknown): SurvivorLayout {
   const parsed = SurvivorLayoutSchema.parse(data);
   const file = survivorLayoutPath();
@@ -193,19 +253,3 @@ export function roomsWithin(map: MapDef, from: string, maxSteps: number): Set<st
   return reachable;
 }
 
-/** 两间房最短要走几步；走不到就返回无穷大 */
-export function shortestPathLength(map: MapDef, from: string, to: string): number {
-  if (from === to) return 0;
-  const q: Array<{ id: string; d: number }> = [{ id: from, d: 0 }];
-  const seen = new Set<string>([from]);
-  while (q.length) {
-    const cur = q.shift()!;
-    for (const n of getNeighbors(map, cur.id)) {
-      if (seen.has(n)) continue;
-      if (n === to) return cur.d + 1;
-      seen.add(n);
-      q.push({ id: n, d: cur.d + 1 });
-    }
-  }
-  return Infinity;
-}

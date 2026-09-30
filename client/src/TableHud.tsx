@@ -92,7 +92,12 @@ export function KeyRack({
         return (
           <div key={i} className="key-slot-abs" style={boxStyle(box)}>
             {i < keysCollected && (
-              <img src={encodeURI(ITEM_ICON.key)} alt={`钥匙 ${i + 1}`} draggable={false} />
+              <img
+                className="pop-in"
+                src={encodeURI(ITEM_ICON.key)}
+                alt={`钥匙 ${i + 1}`}
+                draggable={false}
+              />
             )}
           </div>
         );
@@ -209,7 +214,7 @@ export function TrackOverlay({
         {panel === 'repair' && (
           <div className="repair-detail">
             <p className="muted">
-              无线电 {repairProgress}/{repairNeeded}
+              修理进度 {repairProgress}/{repairNeeded}
               {rescueArmed ? ` · 救援倒计时 ${rescueCountdown}` : ''}
             </p>
             <div className="repair-pips">
@@ -235,7 +240,7 @@ export function TrackOverlay({
         {panel === 'fear' && (
           <div className="fear-detail">
             {survivors.length === 0 ? (
-              <p className="muted">场上没有求生者</p>
+              <p className="muted">场上没有幸存者</p>
             ) : (
               survivors.map((p) => <FearRow key={p.id} p={p} />)
             )}

@@ -42,6 +42,7 @@
   </div>
   <div class="log" id="log"></div>
 
+  <script src="/shared/util.js"></script>
   <script>
     (async function boot() {
       const q = new URLSearchParams(location.search);
@@ -83,7 +84,7 @@
             : { ...z, x: z.x / w, y: z.y / h, w: (z.w || 40) / w, h: (z.h || 40) / h },
         );
       const start = side === 'killer' ? map.killerStartRoomId : map.survivorStartRoomId;
-      document.getElementById('title').textContent = `${map.name} · ${side === 'killer' ? '杀手' : '求生者'}`;
+      document.getElementById('title').textContent = `${map.name} · ${side === 'killer' ? '杀手' : '幸存者'}`;
       document.getElementById('overlay').setAttribute('viewBox', `0 0 ${w} ${h}`);
       window.MAP_CONFIG = {
         factionLabel: map.name,

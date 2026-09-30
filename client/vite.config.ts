@@ -54,6 +54,63 @@ function serveFolder(urlPrefix: string, dir: string): Plugin {
   };
 }
 
+/**
+ * 构建时把仓库根目录的 `Image/` 放进 `dist/Image`。
+ *
+ * 为什么需要：`serveFolder('/Image', ...)` 只在 **dev** 生效，
+ * 构建产物 `client/dist` 里原本**没有**任何图片 ——
+ * 直接拿 dist 部署会满屏破图，必须另外想办法提供 `Image/`。
+ * 这里让构建产物自带一份，dist 就是完整可部署的。
+ *
+ * 优先用**硬链接**（同在项目盘符上时瞬间完成，且不额外占磁盘）；
+ * 跨盘或权限不允许时回退到普通复制。
+ */
+function copyImagesToDist(): Plugin {
+  const src = path.join(projectRoot, 'Image');
+  let outDir = 'dist';
+  return {
+    name: 'copy-images-to-dist',
+    apply: 'build',
+    configResolved(cfg) {
+      outDir = cfg.build.outDir;
+    },
+    closeBundle() {
+      if (!fs.existsSync(src)) return;
+      const dest = path.resolve(__dirname, outDir, 'Image');
+      let linked = 0;
+      let copied = 0;
+
+      const walk = (from: string, to: string) => {
+        fs.mkdirSync(to, { recursive: true });
+        for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+          const f = path.join(from, entry.name);
+          const t = path.join(to, entry.name);
+          if (entry.isDirectory()) {
+            walk(f, t);
+            continue;
+          }
+          if (!entry.isFile()) continue;
+          try {
+            fs.rmSync(t, { force: true });
+          } catch {
+            /* 目标不存在就不用删 */
+          }
+          try {
+            fs.linkSync(f, t);
+            linked++;
+          } catch {
+            fs.copyFileSync(f, t);
+            copied++;
+          }
+        }
+      };
+
+      walk(src, dest);
+      this.info?.(`Image/ → ${path.relative(projectRoot, dest)}（硬链接 ${linked}、复制 ${copied}）`);
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -62,6 +119,8 @@ export default defineConfig({
     serveFolder('/map-calibrate', path.join(projectRoot, 'tools/map-calibrate')),
     serveFolder('/ui-debug', path.join(projectRoot, 'tools/ui-debug')),
     serveFolder('/ui-layout', path.join(projectRoot, 'tools/ui-layout')),
+    serveFolder('/shared', path.join(projectRoot, 'tools/shared')),
+    copyImagesToDist(),
   ],
   server: {
     host: true,

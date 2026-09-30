@@ -1,0 +1,33 @@
+{
+  "id": "killer8",
+  "name": "扼杀者",
+  "nameEn": "Strangler",
+  "folder": "杀手八_扼杀者",
+  "startingPower": 4,
+  "portrait": "立绘.png",
+  "back": "牌背.png",
+  "intro": "人物介绍.png",
+  "cards": [
+    "卡牌/01_荊棘纏繞.png",
+    "卡牌/02_荊棘纏繞.png",
+    "卡牌/03_茂盛.png",
+    "卡牌/04_茂盛.png",
+    "卡牌/05_扼殺.png",
+    "卡牌/06_枝條生長.png",
+    "卡牌/07_枝條生長.png",
+    "卡牌/08_枝條生長.png",
+    "卡牌/09_枝條生長.png",
+    "卡牌/10_傳送聚合.png",
+    "卡牌/11_傳送聚合.png",
+    "卡牌/12_傳送聚合.png",
+    "卡牌/13_狂亂枝條.png"
+  ],
+  "specialRule": "特殊规则.png",
+  "specialRules": [
+    "特殊规则.png"
+  ],
+  "lockedCards": [
+    "13_狂亂枝條.png"
+  ],
+  "lockedUnlockLevel": 3
+}

@@ -1,0 +1,24 @@
+{
+  "id": "survivor6",
+  "name": "乔治·卡朋特",
+  "nameEn": "George Carpenter",
+  "role": "教授",
+  "folder": "幸存者六_乔治_教授",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "brilliant",
+      "name": "聪明绝顶",
+      "text": "（在有书本标记的地点）特殊行动：弃掉一个工具箱来 +1 修理进度，或从搜索牌库抽取一张卡牌"
+    },
+    {
+      "id": "quick_thinking",
+      "name": "思维敏捷",
+      "text": "你的小回合结束时，如果你在杀手距离 1 内，你可以获得任意一张乔治的笔记"
+    }
+  ]
+}

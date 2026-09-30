@@ -1,47 +1,2085 @@
 {
   "decks": {
     "killerAction": [
-      { "id": "butcher_sense_1", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "butcher_sense_2", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "butcher_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "butcher_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "butcher_chase_3", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer1", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "butcher_block_1", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
-      { "id": "butcher_block_2", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
-      { "id": "butcher_block_3", "name": "设障", "type": "killerAction", "speed": "slow", "owner": "killer1", "text": "慢速：在你地点的一扇门上封堵。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockade" }] },
-      { "id": "butcher_saw_1", "name": "链锯轰鸣", "type": "killerAction", "speed": "special", "owner": "killer1", "handCost": 2, "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。等级 4 变为快速。", "effects": [{ "op": "addFearRange", "value": 1 }, { "op": "move", "value": 1, "min": 0 }, { "op": "damageHere" }] },
-      { "id": "butcher_saw_2", "name": "链锯轰鸣", "type": "killerAction", "speed": "special", "owner": "killer1", "handCost": 2, "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。等级 4 变为快速。", "effects": [{ "op": "addFearRange", "value": 1 }, { "op": "move", "value": 1, "min": 0 }, { "op": "damageHere" }] },
-      { "id": "butcher_mad", "name": "疯狂", "type": "killerAction", "speed": "fast", "owner": "killer1", "handCost": 2, "text": "快速（费用 2）：在你地点封堵 1 扇门，本回合 +2 力量。没有可封的门时仍可打出，只 +2 力量。", "effects": [{ "op": "placeBlockade" }, { "op": "modifyPower", "value": 2 }] },
-      { "id": "butcher_stay", "name": "留下!!!!", "type": "killerAction", "speed": "slow", "owner": "killer1", "handCost": 4, "text": "慢速（费用 4）：封堵你地点的所有门。没有可封的门时仍可打出，跳过封堵。", "effects": [{ "op": "placeBlockadeAll" }] },
-      { "id": "butcher_rage", "name": "残酷暴怒", "type": "killerAction", "speed": "special", "owner": "killer1", "locked": true, "unlockLevel": 3, "handCost": 1, "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索。若没找到人且拆掉了封堵，则重复。", "effects": [{ "op": "move", "value": 2, "min": 1 }, { "op": "rageSearch" }] },
-
-      { "id": "spectre_sense_1", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "spectre_sense_2", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "spectre_sense_3", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "spectre_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "spectre_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "spectre_scream_1", "name": "尖叫", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：惊吓距离 1 内所有幸存者。", "effects": [{ "op": "addFearRange", "value": 1 }] },
-      { "id": "spectre_scream_2", "name": "尖叫", "type": "killerAction", "speed": "fast", "owner": "killer2", "text": "快速：惊吓距离 1 内所有幸存者。", "effects": [{ "op": "addFearRange", "value": 1 }] },
-      { "id": "spectre_whiz_1", "name": "呼啸而过", "type": "killerAction", "speed": "special", "owner": "killer2", "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。", "effects": [{ "op": "move", "value": 4, "min": 1 }, { "op": "addFearPath" }] },
-      { "id": "spectre_whiz_2", "name": "呼啸而过", "type": "killerAction", "speed": "special", "owner": "killer2", "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。", "effects": [{ "op": "move", "value": 4, "min": 1 }, { "op": "addFearPath" }] },
-      { "id": "spectre_vanish_1", "name": "消失", "type": "killerAction", "speed": "slow", "owner": "killer2", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "vanishScare" }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "spectre_vanish_2", "name": "消失", "type": "killerAction", "speed": "slow", "owner": "killer2", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "vanishScare" }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "spectre_trace", "name": "惊吓之迹", "type": "killerAction", "speed": "fast", "owner": "killer2", "handCost": 1, "text": "快速（费用 1）：所有至少 1 枚恐惧的幸存者必须揭示地点。", "effects": [{ "op": "exposeFeared" }] },
-      { "id": "spectre_drain", "name": "生命吸取", "type": "killerAction", "speed": "special", "owner": "killer2", "locked": true, "unlockLevel": 4, "handCost": 2, "text": "锁定。等级 4 入手。特殊（费用 2）：伤害所有至少拥有 1 枚恐惧的幸存者。", "effects": [{ "op": "damageFeared", "value": 1 }] },
-
-      { "id": "murder_sense", "name": "感知", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：感知一个颜色区域。", "effects": [{ "op": "senseColor" }] },
-      { "id": "murder_chase_1", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "murder_chase_2", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "murder_chase_3", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "murder_chase_4", "name": "追逐", "type": "killerAction", "speed": "fast", "owner": "killer3", "text": "快速：移动 1。", "effects": [{ "op": "move", "value": 1, "min": 1 }] },
-      { "id": "murder_tail_1", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "murder_tail_2", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "murder_tail_3", "name": "尾随", "type": "killerAction", "speed": "slow", "owner": "killer3", "text": "遭遇中打出：本次攻击 +1。慢速阶段打出：潜行 0–2。", "effects": [{ "op": "stealth", "value": true }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "murder_logic_1", "name": "逻辑推理", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：感知任意 2 个相连地点（这两处彼此相邻即可，不必与你相邻）。", "effects": [{ "op": "senseAdjacentPair" }] },
-      { "id": "murder_logic_2", "name": "逻辑推理", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：感知任意 2 个相连地点（这两处彼此相邻即可，不必与你相邻）。", "effects": [{ "op": "senseAdjacentPair" }] },
-      { "id": "murder_omen", "name": "谋杀预告", "type": "killerAction", "speed": "fast", "owner": "killer3", "handCost": 1, "text": "快速（费用 1）：惊吓所有幸存者。", "effects": [{ "op": "addFear", "value": 1 }] },
-      { "id": "murder_lurk", "name": "潜藏威胁", "type": "killerAction", "speed": "slow", "owner": "killer3", "handCost": 1, "text": "慢速（费用 1）：潜行 0–2。重现时惊吓任意 1 名幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "lurkPick" }, { "op": "move", "value": 2, "min": 0 }] },
-      { "id": "murder_bloom", "name": "死亡盛放", "type": "killerAction", "speed": "slow", "owner": "killer3", "locked": true, "unlockLevel": 3, "handCost": 2, "text": "锁定。等级 3 入手。慢速（费用 2）：潜行 0–2。重现时消灭距离 1 以内的所有幸存者。", "effects": [{ "op": "stealth", "value": true }, { "op": "onReveal", "value": "bloomKill" }, { "op": "move", "value": 2, "min": 0 }] }
+      {
+        "id": "butcher_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "butcher_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "butcher_chase_1",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "butcher_chase_2",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "butcher_chase_3",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "butcher_block_1",
+        "name": "设障",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer1",
+        "text": "慢速：在你地点的一扇门上封堵。",
+        "effects": [
+          {
+            "op": "placeBlockade"
+          }
+        ]
+      },
+      {
+        "id": "butcher_block_2",
+        "name": "设障",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer1",
+        "text": "慢速：在你地点的一扇门上封堵。",
+        "effects": [
+          {
+            "op": "placeBlockade"
+          }
+        ]
+      },
+      {
+        "id": "butcher_block_3",
+        "name": "设障",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer1",
+        "text": "慢速：在你地点的一扇门上封堵。",
+        "effects": [
+          {
+            "op": "placeBlockade"
+          }
+        ]
+      },
+      {
+        "id": "butcher_saw_1",
+        "name": "链锯轰鸣",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer1",
+        "handCost": 2,
+        "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 1
+          },
+          {
+            "op": "move",
+            "value": 1,
+            "min": 0
+          },
+          {
+            "op": "damageHere"
+          }
+        ]
+      },
+      {
+        "id": "butcher_saw_2",
+        "name": "链锯轰鸣",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer1",
+        "handCost": 2,
+        "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 1
+          },
+          {
+            "op": "move",
+            "value": 1,
+            "min": 0
+          },
+          {
+            "op": "damageHere"
+          }
+        ]
+      },
+      {
+        "id": "butcher_mad",
+        "name": "疯狂",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer1",
+        "handCost": 2,
+        "text": "快速（费用 2）：在你地点封堵 1 扇门，本回合 +2 力量。",
+        "effects": [
+          {
+            "op": "placeBlockade"
+          },
+          {
+            "op": "modifyPower",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "id": "butcher_stay",
+        "name": "留下!!!!",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer1",
+        "handCost": 4,
+        "text": "慢速（费用 4）：封堵你地点的所有门。",
+        "effects": [
+          {
+            "op": "placeBlockadeAll"
+          }
+        ]
+      },
+      {
+        "id": "butcher_rage",
+        "name": "残酷暴怒",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer1",
+        "locked": true,
+        "unlockLevel": 3,
+        "handCost": 1,
+        "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索房间。若没找到人且拆掉了封堵，则重复。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 2,
+            "min": 1
+          },
+          {
+            "op": "rageSearch"
+          }
+        ]
+      },
+      {
+        "id": "spectre_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "spectre_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "spectre_sense_3",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "spectre_chase_1",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "spectre_chase_2",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "spectre_scream_1",
+        "name": "尖叫",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：惊吓距离 1 内所有幸存者。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "spectre_scream_2",
+        "name": "尖叫",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "text": "快速：惊吓距离 1 内所有幸存者。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "spectre_whiz_1",
+        "name": "呼啸而过",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer2",
+        "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 4,
+            "min": 1
+          },
+          {
+            "op": "addFearPath"
+          }
+        ]
+      },
+      {
+        "id": "spectre_whiz_2",
+        "name": "呼啸而过",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer2",
+        "text": "特殊：移动 1–4，惊吓路径（含起点）上的所有幸存者。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 4,
+            "min": 1
+          },
+          {
+            "op": "addFearPath"
+          }
+        ]
+      },
+      {
+        "id": "spectre_vanish_1",
+        "name": "消失",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer2",
+        "handCost": 1,
+        "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。",
+        "effects": [
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "onReveal",
+            "value": "vanishScare"
+          },
+          {
+            "op": "move",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "spectre_vanish_2",
+        "name": "消失",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer2",
+        "handCost": 1,
+        "text": "慢速（费用 1）：潜行 0–2。重现时惊吓距离 1 内所有幸存者。",
+        "effects": [
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "onReveal",
+            "value": "vanishScare"
+          },
+          {
+            "op": "move",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "spectre_trace",
+        "name": "惊吓之迹",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer2",
+        "handCost": 1,
+        "text": "快速（费用 1）：所有至少 1 枚恐惧的幸存者必须揭示地点。",
+        "effects": [
+          {
+            "op": "exposeFeared"
+          }
+        ]
+      },
+      {
+        "id": "spectre_drain",
+        "name": "生命吸取",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer2",
+        "locked": true,
+        "unlockLevel": 4,
+        "handCost": 2,
+        "text": "锁定。等级 4 入手。特殊（费用 2）：伤害所有至少拥有 1 枚恐惧的幸存者。",
+        "effects": [
+          {
+            "op": "damageFeared",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_sense",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "murder_chase_1",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_chase_2",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_chase_3",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_chase_4",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "text": "快速：移动 1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_tail_1",
+        "name": "尾随",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer3",
+        "text": "攻击：本次攻击中 +1 力量。慢速：〔潛行〕×0-2。",
+        "effects": [],
+        "timings": [
+          "attack",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "attackValue",
+              "value": 1
+            }
+          ],
+          [
+            {
+              "op": "stealth",
+              "value": true
+            },
+            {
+              "op": "move",
+              "value": 2,
+              "min": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "murder_tail_2",
+        "name": "尾随",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer3",
+        "text": "攻击：本次攻击中 +1 力量。慢速：〔潛行〕×0-2。",
+        "effects": [],
+        "timings": [
+          "attack",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "attackValue",
+              "value": 1
+            }
+          ],
+          [
+            {
+              "op": "stealth",
+              "value": true
+            },
+            {
+              "op": "move",
+              "value": 2,
+              "min": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "murder_tail_3",
+        "name": "尾随",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer3",
+        "text": "攻击：本次攻击中 +1 力量。慢速：〔潛行〕×0-2。",
+        "effects": [],
+        "timings": [
+          "attack",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "attackValue",
+              "value": 1
+            }
+          ],
+          [
+            {
+              "op": "stealth",
+              "value": true
+            },
+            {
+              "op": "move",
+              "value": 2,
+              "min": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "murder_logic_1",
+        "name": "逻辑推理",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "handCost": 1,
+        "text": "快速（费用 1）：感知任意 2 个相邻地点。",
+        "effects": [
+          {
+            "op": "senseAdjacentPair"
+          }
+        ]
+      },
+      {
+        "id": "murder_logic_2",
+        "name": "逻辑推理",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "handCost": 1,
+        "text": "快速（费用 1）：感知任意 2 个相邻地点。",
+        "effects": [
+          {
+            "op": "senseAdjacentPair"
+          }
+        ]
+      },
+      {
+        "id": "murder_omen",
+        "name": "谋杀预告",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer3",
+        "handCost": 1,
+        "text": "快速（费用 1）：惊吓所有幸存者。",
+        "effects": [
+          {
+            "op": "addFear",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "murder_lurk",
+        "name": "潜藏威胁",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer3",
+        "handCost": 1,
+        "text": "慢速（费用 1）：潜行 0–2。重现时惊吓任意 1 名幸存者。",
+        "effects": [
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "onReveal",
+            "value": "lurkPick"
+          },
+          {
+            "op": "move",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "murder_bloom",
+        "name": "死亡盛放",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer3",
+        "locked": true,
+        "unlockLevel": 3,
+        "handCost": 2,
+        "text": "锁定。等级 3 入手。慢速（费用 2）：潜行 0–2。重现时消灭距离 1 以内的所有幸存者。",
+        "effects": [
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "onReveal",
+            "value": "bloomKill"
+          },
+          {
+            "op": "move",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "statue_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer6",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "statue_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer6",
+        "text": "快速：感知一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "statue_patrol_1",
+        "name": "巡邏",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "特殊（费用 1）：抽取一张卡牌。所有雕像〔移动〕×0-1。",
+        "effects": [
+          {
+            "op": "statueMove",
+            "scope": "all",
+            "value": 1,
+            "min": 0
+          },
+          {
+            "op": "statueDraw"
+          }
+        ]
+      },
+      {
+        "id": "statue_patrol_2",
+        "name": "巡邏",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "特殊（费用 1）：抽取一张卡牌。所有雕像〔移动〕×0-1。",
+        "effects": [
+          {
+            "op": "statueMove",
+            "scope": "all",
+            "value": 1,
+            "min": 0
+          },
+          {
+            "op": "statueDraw"
+          }
+        ]
+      },
+      {
+        "id": "statue_patrol_3",
+        "name": "巡邏",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "特殊（费用 1）：抽取一张卡牌。所有雕像〔移动〕×0-1。",
+        "effects": [
+          {
+            "op": "statueMove",
+            "scope": "all",
+            "value": 1,
+            "min": 0
+          },
+          {
+            "op": "statueDraw"
+          }
+        ]
+      },
+      {
+        "id": "statue_execute",
+        "name": "處決",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "攻击（费用 1）：如果你的力量高于目标防御 3 点或更多，消灭目标。",
+        "effects": [
+          {
+            "op": "statueExecute"
+          }
+        ],
+        "timings": [
+          "attack"
+        ]
+      },
+      {
+        "id": "statue_rally_1",
+        "name": "重整旗鼓",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer6",
+        "handCost": 2,
+        "text": "慢速（费用 2）：抽取一张卡牌。你可以转换主雕像并改变一个封堵标记的位置。",
+        "effects": [
+          {
+            "op": "statueRally"
+          }
+        ]
+      },
+      {
+        "id": "statue_rally_2",
+        "name": "重整旗鼓",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer6",
+        "handCost": 2,
+        "text": "慢速（费用 2）：抽取一张卡牌。你可以转换主雕像并改变一个封堵标记的位置。",
+        "effects": [
+          {
+            "op": "statueRally"
+          }
+        ]
+      },
+      {
+        "id": "statue_release",
+        "name": "釋放",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer6",
+        "handCost": 2,
+        "text": "特殊（费用 2）：〔惊吓〕所有位于主雕像颜色区域的幸存者。主雕像〔移动〕×0-2，然后〔搜索〕。",
+        "effects": [
+          {
+            "op": "statueRelease"
+          }
+        ]
+      },
+      {
+        "id": "statue_seal_1",
+        "name": "召唤石碑",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "慢速（费用 1）：在任意一扇门〔封堵〕×1。〔惊吓〕所有位于带有该封堵标记地点的幸存者。",
+        "effects": [
+          {
+            "op": "statueSummonSeal"
+          }
+        ]
+      },
+      {
+        "id": "statue_seal_2",
+        "name": "召唤石碑",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "慢速（费用 1）：在任意一扇门〔封堵〕×1。〔惊吓〕所有位于带有该封堵标记地点的幸存者。",
+        "effects": [
+          {
+            "op": "statueSummonSeal"
+          }
+        ]
+      },
+      {
+        "id": "statue_seal_3",
+        "name": "召唤石碑",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer6",
+        "handCost": 1,
+        "text": "慢速（费用 1）：在任意一扇门〔封堵〕×1。〔惊吓〕所有位于带有该封堵标记地点的幸存者。",
+        "effects": [
+          {
+            "op": "statueSummonSeal"
+          }
+        ]
+      },
+      {
+        "id": "statue_siege",
+        "name": "圍困",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer6",
+        "locked": true,
+        "unlockLevel": 3,
+        "handCost": 1,
+        "text": "锁定。等级 3 入手。特殊（费用 1）：所有雕像〔移动〕×0-2。所有雕像以任意顺序〔搜索〕。",
+        "effects": [
+          {
+            "op": "statueSiege"
+          }
+        ]
+      },
+      {
+        "id": "huntress_chase_1",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "huntress_chase_2",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "huntress_chase_3",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "huntress_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "huntress_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "huntress_axe",
+        "name": "擲斧",
+        "type": "killerAction",
+        "owner": "killer4",
+        "text": "攻击（费用 1）：本次攻击中 +4 力量。",
+        "effects": [
+          {
+            "op": "attackValue",
+            "value": 4
+          }
+        ],
+        "handCost": 1,
+        "speed": "attack",
+        "timings": [
+          "attack"
+        ]
+      },
+      {
+        "id": "huntress_track_1",
+        "name": "追蹤",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔搜索〕。展示一名幸存者与你之间的距离。",
+        "effects": [
+          {
+            "op": "searchTrackerDistance"
+          }
+        ]
+      },
+      {
+        "id": "huntress_track_2",
+        "name": "追蹤",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔搜索〕。展示一名幸存者与你之间的距离。",
+        "effects": [
+          {
+            "op": "searchTrackerDistance"
+          }
+        ]
+      },
+      {
+        "id": "huntress_track_3",
+        "name": "追蹤",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔搜索〕。展示一名幸存者与你之间的距离。",
+        "effects": [
+          {
+            "op": "searchTrackerDistance"
+          }
+        ]
+      },
+      {
+        "id": "huntress_breathe",
+        "name": "屏息",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer4",
+        "handCost": 2,
+        "text": "特殊（费用 2）：抽取一张卡牌。〔潜行〕×0-2。直到你的下回合结束，+3 力量。",
+        "effects": [
+          {
+            "op": "draw",
+            "value": 1
+          },
+          {
+            "op": "modifyPowerUntilNextTurn",
+            "value": 3
+          },
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "move",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "huntress_instinct_1",
+        "name": "猎手本能",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔感知〕任意一个地点。",
+        "effects": [
+          {
+            "op": "senseRoom"
+          }
+        ]
+      },
+      {
+        "id": "huntress_instinct_2",
+        "name": "猎手本能",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer4",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔感知〕任意一个地点。",
+        "effects": [
+          {
+            "op": "senseRoom"
+          }
+        ]
+      },
+      {
+        "id": "huntress_trapreset",
+        "name": "陷阱重置",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer4",
+        "locked": true,
+        "unlockLevel": 2,
+        "handCost": 3,
+        "text": "锁定。等级 2 入手。特殊（费用 3）：〔潜行〕到任意地点。重置任意个地点上的所有陷阱。",
+        "effects": [
+          {
+            "op": "stealth",
+            "value": true
+          },
+          {
+            "op": "move",
+            "value": 99,
+            "min": 0
+          },
+          {
+            "op": "stealthResetTraps"
+          }
+        ]
+      },
+      {
+        "id": "wolf_chase_1",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_chase_2",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_chase_3",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_chase_4",
+        "name": "追逐",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔移动〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "wolf_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "wolf_howl_1",
+        "name": "嚎叫",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "handCost": 2,
+        "text": "快速（费用 2）：〔惊吓〕距离 2 内的所有幸存者。〔移动〕×1。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 2
+          },
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_howl_2",
+        "name": "嚎叫",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "handCost": 2,
+        "text": "快速（费用 2）：〔惊吓〕距离 2 内的所有幸存者。〔移动〕×1。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 2
+          },
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "wolf_bite_1",
+        "name": "狂野撕咬",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer5",
+        "text": "攻击：本次攻击中 +2 力量。",
+        "effects": [
+          {
+            "op": "attackValue",
+            "value": 2
+          }
+        ],
+        "timings": [
+          "attack"
+        ]
+      },
+      {
+        "id": "wolf_bite_2",
+        "name": "狂野撕咬",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer5",
+        "text": "攻击：本次攻击中 +2 力量。",
+        "effects": [
+          {
+            "op": "attackValue",
+            "value": 2
+          }
+        ],
+        "timings": [
+          "attack"
+        ]
+      },
+      {
+        "id": "wolf_bloodhunt",
+        "name": "鲜血追猎",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "requires": "injuredSurvivor",
+        "text": "快速：只有场上有受伤的幸存者时才能使用。〔移动〕×2。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 2,
+            "min": 2,
+            "requires": "injuredSurvivor"
+          }
+        ]
+      },
+      {
+        "id": "wolf_territory",
+        "name": "领地意识",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "text": "快速：〔感知〕所有可搜索的位置。慢速：〔潛行〕×0-3。",
+        "effects": [],
+        "timings": [
+          "fast",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "senseAllNoise"
+            }
+          ],
+          [
+            {
+              "op": "stealth",
+              "value": true
+            },
+            {
+              "op": "move",
+              "value": 3,
+              "min": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "wolf_hearing",
+        "name": "超听觉",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer5",
+        "locked": true,
+        "unlockLevel": 2,
+        "handCost": 3,
+        "text": "锁定。等级 2 入手。快速（费用 3）：〔移动〕×0-6 前往最近的带有响声的地点，然后〔搜索〕。",
+        "effects": [
+          {
+            "op": "moveNearestNoiseSearch"
+          }
+        ]
+      },
+      {
+        "id": "un_crawl_1",
+        "name": "爬行",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔移動〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "un_crawl_2",
+        "name": "爬行",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔移動〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "un_crawl_3",
+        "name": "爬行",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "快速（费用 1）：〔移動〕×1。",
+        "effects": [
+          {
+            "op": "move",
+            "value": 1,
+            "min": 1
+          }
+        ]
+      },
+      {
+        "id": "un_transform",
+        "name": "變形",
+        "type": "killerAction",
+        "speed": "special",
+        "owner": "killer7",
+        "handCost": 3,
+        "text": "特殊（费用 3）：永久从弃牌堆中移除 2 张卡牌；永久 +2 力量。",
+        "effects": [
+          {
+            "op": "removeFromDiscardPermanent",
+            "value": 2
+          },
+          {
+            "op": "permanentPower",
+            "value": 2
+          },
+          {
+            "op": "transformBonus"
+          }
+        ]
+      },
+      {
+        "id": "un_ambush_1",
+        "name": "伏擊",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer7",
+        "timings": [
+          "attack"
+        ],
+        "requires": "reappearedOrSecretPassage",
+        "text": "攻击：仅在你重现或本回合移动通过了秘密通道时可用。本次攻击中 +3 力量。",
+        "effects": [
+          {
+            "op": "attackValue",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "id": "un_ambush_2",
+        "name": "伏擊",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer7",
+        "timings": [
+          "attack"
+        ],
+        "requires": "reappearedOrSecretPassage",
+        "text": "攻击：仅在你重现或本回合移动通过了秘密通道时可用。本次攻击中 +3 力量。",
+        "effects": [
+          {
+            "op": "attackValue",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "id": "un_infrared_1",
+        "name": "红外探測",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "text": "快速：〔感知〕一个颜色区域；或〔感知〕距离 1 内的所有地点。",
+        "effects": [
+          {
+            "op": "senseColor",
+            "alternatives": [
+              {
+                "op": "senseRange",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "un_infrared_2",
+        "name": "红外探測",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "text": "快速：〔感知〕一个颜色区域；或〔感知〕距离 1 内的所有地点。",
+        "effects": [
+          {
+            "op": "senseColor",
+            "alternatives": [
+              {
+                "op": "senseRange",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "un_pipe_1",
+        "name": "恐詭管道",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "慢速（费用 1）：〔潛行〕×0-1；或〔潛行〕到任意一个带有秘密通道的地点。",
+        "effects": [
+          {
+            "op": "stealthAndMove",
+            "value": 1,
+            "min": 0,
+            "alternatives": [
+              {
+                "op": "stealthToPassage"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "un_pipe_2",
+        "name": "恐詭管道",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "慢速（费用 1）：〔潛行〕×0-1；或〔潛行〕到任意一个带有秘密通道的地点。",
+        "effects": [
+          {
+            "op": "stealthAndMove",
+            "value": 1,
+            "min": 0,
+            "alternatives": [
+              {
+                "op": "stealthToPassage"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "un_pipe_3",
+        "name": "恐詭管道",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer7",
+        "handCost": 1,
+        "text": "慢速（费用 1）：〔潛行〕×0-1；或〔潛行〕到任意一个带有秘密通道的地点。",
+        "effects": [
+          {
+            "op": "stealthAndMove",
+            "value": 1,
+            "min": 0,
+            "alternatives": [
+              {
+                "op": "stealthToPassage"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "un_adapt",
+        "name": "戰鬥適應",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer7",
+        "handCost": 2,
+        "text": "攻击（费用 2）：永久从弃牌堆中移除 1 张卡牌；永久 +1 力量。",
+        "timings": [
+          "attack"
+        ],
+        "effects": [
+          {
+            "op": "removeFromDiscardPermanent",
+            "value": 1
+          },
+          {
+            "op": "permanentPower",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "un_noise",
+        "name": "刺耳噪声",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer7",
+        "locked": true,
+        "text": "锁定。等级 3 入手。快速：〔驚嚇〕距离 3 内的所有幸存者；你可以将本卡牌放到你的牌库顶。",
+        "effects": [
+          {
+            "op": "addFearRange",
+            "value": 3
+          },
+          {
+            "op": "returnToDeckTop",
+            "optional": true
+          }
+        ],
+        "unlockChoice": "un_lv3",
+        "unlockAtLevel": 3
+      },
+      {
+        "id": "un_acid",
+        "name": "酸液喷吐",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer7",
+        "handCost": 1,
+        "locked": true,
+        "text": "锁定。等级 3 入手。慢速（费用 1）：伤害你的地点和一个相邻地点的所有幸存者；然后〔封堵〕这两个地点之间的门。",
+        "effects": [
+          {
+            "op": "acidSpray"
+          }
+        ],
+        "unlockChoice": "un_lv3",
+        "unlockAtLevel": 3
+      },
+      {
+        "id": "st_thorn_1",
+        "name": "荊棘纏繞",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "timings": [
+          "attack",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "attackBlockItems"
+            }
+          ],
+          [
+            {
+              "op": "searchSurvivors"
+            }
+          ]
+        ],
+        "text": "攻击：本次攻击中目标不能使用任何物品。慢速：〔搜索〕。",
+        "effects": []
+      },
+      {
+        "id": "st_thorn_2",
+        "name": "荊棘纏繞",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "timings": [
+          "attack",
+          "slow"
+        ],
+        "effectsByTiming": [
+          [
+            {
+              "op": "attackBlockItems"
+            }
+          ],
+          [
+            {
+              "op": "searchSurvivors"
+            }
+          ]
+        ],
+        "text": "攻击：本次攻击中目标不能使用任何物品。慢速：〔搜索〕。",
+        "effects": []
+      },
+      {
+        "id": "st_bloom_1",
+        "name": "茂盛",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "handCost": 2,
+        "text": "慢速（费用 2）：在你的地点放置一个核心标记；在你的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeCore"
+          },
+          {
+            "op": "blockadeHereAuto",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "st_bloom_2",
+        "name": "茂盛",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "handCost": 2,
+        "text": "慢速（费用 2）：在你的地点放置一个核心标记；在你的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeCore"
+          },
+          {
+            "op": "blockadeHereAuto",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "st_choke",
+        "name": "扼殺",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer8",
+        "handCost": 2,
+        "timings": [
+          "attack"
+        ],
+        "text": "攻击（费用 2）：本次攻击 +x 力量（x = 地图上核心标记的数量）。",
+        "effects": [
+          {
+            "op": "attackValuePerCore"
+          }
+        ]
+      },
+      {
+        "id": "st_branch_1",
+        "name": "枝條生長",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：在带有任意核心标记的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeBlockadeAtCore"
+          }
+        ]
+      },
+      {
+        "id": "st_branch_2",
+        "name": "枝條生長",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：在带有任意核心标记的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeBlockadeAtCore"
+          }
+        ]
+      },
+      {
+        "id": "st_branch_3",
+        "name": "枝條生長",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：在带有任意核心标记的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeBlockadeAtCore"
+          }
+        ]
+      },
+      {
+        "id": "st_branch_4",
+        "name": "枝條生長",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：在带有任意核心标记的地点〔封堵〕×1。",
+        "effects": [
+          {
+            "op": "placeBlockadeAtCore"
+          }
+        ]
+      },
+      {
+        "id": "st_teleport_1",
+        "name": "傳送聚合",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：传送到一个带有任意核心标记或封堵标记的地点；或移动任意一个核心标记到一个相邻地点。",
+        "effects": [
+          {
+            "op": "teleportToCore",
+            "alternatives": [
+              {
+                "op": "moveCoreToAdjacent"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "st_teleport_2",
+        "name": "傳送聚合",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：传送到一个带有任意核心标记或封堵标记的地点；或移动任意一个核心标记到一个相邻地点。",
+        "effects": [
+          {
+            "op": "teleportToCore",
+            "alternatives": [
+              {
+                "op": "moveCoreToAdjacent"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "st_teleport_3",
+        "name": "傳送聚合",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "text": "慢速：传送到一个带有任意核心标记或封堵标记的地点；或移动任意一个核心标记到一个相邻地点。",
+        "effects": [
+          {
+            "op": "teleportToCore",
+            "alternatives": [
+              {
+                "op": "moveCoreToAdjacent"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "st_rampage",
+        "name": "狂亂枝條",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer8",
+        "handCost": 1,
+        "locked": true,
+        "unlockLevel": 3,
+        "text": "锁定。等级 3 入手。慢速（费用 1）：〔驚嚇〕所有幸存者；伤害所在地点带有任意核心标记或秘密通道的所有幸存者。",
+        "effects": [
+          {
+            "op": "addFear",
+            "value": 1
+          },
+          {
+            "op": "damageCoreOrPassageRooms"
+          }
+        ]
+      },
+      {
+        "id": "q_sense_1",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "q_sense_2",
+        "name": "感知",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "text": "快速：〔感知〕一个颜色区域。",
+        "effects": [
+          {
+            "op": "senseColor"
+          }
+        ]
+      },
+      {
+        "id": "q_grab_1",
+        "name": "抓住他們！",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "text": "快速：选择 1 个僵尸〔搜索〕。",
+        "effects": [
+          {
+            "op": "zombieSearch"
+          }
+        ]
+      },
+      {
+        "id": "q_grab_2",
+        "name": "抓住他們！",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "text": "快速：选择 1 个僵尸〔搜索〕。",
+        "effects": [
+          {
+            "op": "zombieSearch"
+          }
+        ]
+      },
+      {
+        "id": "q_summon_1",
+        "name": "召喚亡者",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer9",
+        "handCost": 1,
+        "text": "慢速（费用 1）：在你的地点生成 1 个僵尸；抽取一张卡牌。",
+        "effects": [
+          {
+            "op": "spawnZombie"
+          },
+          {
+            "op": "draw",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "q_summon_2",
+        "name": "召喚亡者",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer9",
+        "handCost": 1,
+        "text": "慢速（费用 1）：在你的地点生成 1 个僵尸；抽取一张卡牌。",
+        "effects": [
+          {
+            "op": "spawnZombie"
+          },
+          {
+            "op": "draw",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "q_venom_1",
+        "name": "毒液之觸",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer9",
+        "handCost": 1,
+        "timings": [
+          "attack"
+        ],
+        "text": "攻击（费用 1）：仅当女王参与本次攻击才能使用；使目标〔中毒〕。",
+        "effects": [
+          {
+            "op": "poisonTarget"
+          }
+        ]
+      },
+      {
+        "id": "q_venom_2",
+        "name": "毒液之觸",
+        "type": "killerAction",
+        "speed": "attack",
+        "owner": "killer9",
+        "handCost": 1,
+        "timings": [
+          "attack"
+        ],
+        "text": "攻击（费用 1）：仅当女王参与本次攻击才能使用；使目标〔中毒〕。",
+        "effects": [
+          {
+            "op": "poisonTarget"
+          }
+        ]
+      },
+      {
+        "id": "q_horde_1",
+        "name": "屍群來了",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "handCost": 1,
+        "text": "快速（费用 1）：任意一个地点中的所有僵尸朝同一个目的地〔移動〕×1。",
+        "effects": [
+          {
+            "op": "zombieHordeMove",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "q_horde_2",
+        "name": "屍群來了",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "handCost": 1,
+        "text": "快速（费用 1）：任意一个地点中的所有僵尸朝同一个目的地〔移動〕×1。",
+        "effects": [
+          {
+            "op": "zombieHordeMove",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "q_boom",
+        "name": "屍體爆炸",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "handCost": 1,
+        "text": "快速（费用 1）：献祭 1 个僵尸，并使距离 1 内的所有幸存者〔中毒〕。",
+        "effects": [
+          {
+            "op": "sacrificeZombiePoisonRange",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "id": "q_vapor",
+        "name": "汽化",
+        "type": "killerAction",
+        "speed": "slow",
+        "owner": "killer9",
+        "handCost": 2,
+        "text": "慢速（费用 2）：〔潛行〕×0-3。",
+        "effects": [
+          {
+            "op": "stealthAndMove",
+            "value": 3,
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": "q_reign",
+        "name": "君臨天下",
+        "type": "killerAction",
+        "speed": "fast",
+        "owner": "killer9",
+        "handCost": 1,
+        "locked": true,
+        "unlockLevel": 3,
+        "text": "锁定。等级 3 入手。快速（费用 1）：〔感知〕一个地点；如果你目击了任何幸存者，〔移動〕其中一个 ×0-2。",
+        "effects": [
+          {
+            "op": "senseThenMoveSurvivor",
+            "value": 2,
+            "min": 0
+          }
+        ]
+      }
+    ],
+    "evolutionCard": [
+      {
+        "id": "evo_un_camouflage",
+        "name": "保護色",
+        "type": "evolutionCard",
+        "owner": "killer7",
+        "text": "「恐詭管道」效果變為「〔潛行〕到任何地點」。重現時+3力量。當你移動通過秘密通道時，直到回合結束+3力量。",
+        "effects": [
+          {
+            "op": "passageBecomesAnyStealth"
+          },
+          {
+            "op": "nextAttackPower",
+            "value": 3
+          },
+          {
+            "op": "powerUntilTurnEndOnPassage",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "id": "evo_un_crawl",
+        "name": "爬蟲爬行",
+        "type": "evolutionCard",
+        "owner": "killer7",
+        "text": "「爬行」的效果變為「〔移動〕×1-3」。",
+        "effects": [
+          {
+            "op": "crawlBecomesOneToThree",
+            "value": 1,
+            "min": 3
+          }
+        ]
+      },
+      {
+        "id": "evo_un_sonar",
+        "name": "音波感知",
+        "type": "evolutionCard",
+        "owner": "killer7",
+        "text": "如果在你的回合開始時沒有⚠，則距離1內的所有倖存者必須揭示其地點。如果在你的回合開始時有⚠，所有位於帶有⚠地點的倖存者必須揭示其地點。",
+        "effects": [
+          {
+            "op": "sonarReveal"
+          }
+        ]
+      },
+      {
+        "id": "evo_un_slime",
+        "name": "粘液腺體",
+        "type": "evolutionCard",
+        "owner": "killer7",
+        "text": "你的回合結束時，如果你不在〔潛行〕，在你的地點〔封堵〕×1。在使用「變形」後，抽取一張卡牌並在你的地點〔封堵〕×2。",
+        "effects": [
+          {
+            "op": "slimeGland"
+          }
+        ]
+      }
     ]
   }
 }

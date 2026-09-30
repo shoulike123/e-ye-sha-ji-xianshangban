@@ -16,12 +16,16 @@
     drag: null,
     dirty: false,
     assets: [],
-    show: { rooms: true, zones: true, tokens: true, edges: true, blockades: true },
+    show: { rooms: true, zones: true, tokens: true, edges: true, blockades: true, collapseMarks: true },
     linkMode: false,
     linkFrom: null,
   };
 
   const BLOCKADE_SRC = '/Image/UI/封堵.png';
+  /** 【城堡】机关大门：和封堵一样贴在门上，但位置/大小是**全图共用一份**的 */
+  const LEVER_GATE_SRC = '/Image/UI/机关大门.png';
+  /** 机关大门只在城堡用 */
+  const isCastle = () => state.map?.id === 'castle';
 
   function setStatus(text, kind = '') {
     statusEl.textContent = text;
@@ -39,23 +43,14 @@
     return s === state.side;
   }
 
+  /** 鼠标位置 → 地图像素坐标（换算逻辑与其它工具共用 ToolUtil） */
   function clientToMap(clientX, clientY) {
-    const rect = overlay.getBoundingClientRect();
-    const w = state.map.width;
-    const h = state.map.height;
-    return {
-      x: ((clientX - rect.left) / rect.width) * w,
-      y: ((clientY - rect.top) / rect.height) * h,
-    };
+    return ToolUtil.clientToBox(overlay, clientX, clientY, state.map.width, state.map.height);
   }
 
-  function clamp(n, a, b) {
-    return Math.min(b, Math.max(a, n));
-  }
+  const clamp = (...a) => ToolUtil.clamp(...a);
 
-  function round1(n) {
-    return Math.round(n * 10) / 10;
-  }
+  const round1 = (n) => ToolUtil.round1(n);
 
   function escapeHtml(s) {
     return String(s ?? '')
@@ -64,11 +59,7 @@
       .replaceAll('"', '&quot;');
   }
 
-  function hexToRgba(hex, alpha) {
-    const h = String(hex || '#ffffff').replace('#', '');
-    const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
-  }
+  const hexToRgba = (hex, alpha) => ToolUtil.hexToRgba(hex, alpha);
 
   function findRoom(id) {
     return state.map.rooms.find((r) => r.id === id);
@@ -78,6 +69,33 @@
   }
   function findToken(id) {
     return (state.map.tokens ?? []).find((t) => t.id === id);
+  }
+  /**
+   * 【墓穴】坍塌板块。按 `roomId` 找（每个可坍塌地点一块）。
+   * 位置存的是**旋转前**的矩形；旋转只允许 0/90/180/270，
+   * 这样拖拽和命中判定都能用简单的坐标变换处理，不会出错。
+   */
+  function findCollapseMark(roomId) {
+    return (state.map.collapsedMarks ?? []).find((m) => m.roomId === roomId);
+  }
+
+  /**
+   * 把"旋转 90/180/270 度"换算成外接框（+ 中心）。
+   * 旋转后外接框会**转置**：`w/h` 互换 —— 命中判定和手柄都用这个。
+   */
+  function markBox(m) {
+    const rot = ((Math.round((m.rotation ?? 0) / 90) * 90) % 360 + 360) % 360;
+    const cx = m.x + m.w / 2;
+    const cy = m.y + m.h / 2;
+    const bw = rot === 90 || rot === 270 ? m.h : m.w;
+    const bh = rot === 90 || rot === 270 ? m.w : m.h;
+    return { cx, cy, rot, bw, bh, x: cx - bw / 2, y: cy - bh / 2 };
+  }
+
+  /** 点在某个旋转后的矩形里吗 */
+  function insideMark(m, x, y) {
+    const b = markBox(m);
+    return x >= b.x && x <= b.x + b.bw && y >= b.y && y <= b.y + b.bh;
   }
 
   function sameEdge(e, a, b) {
@@ -185,7 +203,7 @@
           h: 16,
           rotation: 0,
           side,
-          label: `警车${step}（${side === 'killer' ? '杀手' : '求生者'}）`,
+          label: `警车${step}（${side === 'killer' ? '杀手' : '幸存者'}）`,
         });
         added += 1;
       }
@@ -197,6 +215,44 @@
     const e = (state.map.edges ?? [])[index];
     if (!e) return null;
     return e.blockade?.[side || state.side] ?? null;
+  }
+
+  /* ---------------------------------------------- 机关大门（城堡） ---- */
+  /**
+   * 【城堡】机关大门：**和封堵共用同一个位置**（用户要求）。
+   *
+   * 也就是说大门的位置、大小、角度全都读该扇门的 `blockade[side]`
+   * —— 在这里拖封堵，就等于调好了机关大门；保存时也只存封堵那一份数据。
+   * 所以这个工具里机关大门只是**只读预览**（换一张图看看贴上去什么样），
+   * 不能单独拖它。
+   */
+  function gatePreviewDoor() {
+    if (!isCastle()) return null;
+    const edges = state.map.edges ?? [];
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      if (!isDoorEdge(e.pathType)) continue;
+      const a = findRoom(e.from);
+      const b = findRoom(e.to);
+      const m = e.blockade?.[state.side];
+      if (a && b && m) return { index: i, a, b, m };
+    }
+    return null;
+  }
+
+  /** 画预览用：中心点 + 尺寸 + 门的角度（全部来自那扇门的封堵标记） */
+  function gateMarkAbs() {
+    const d = gatePreviewDoor();
+    if (!d) return null;
+    return {
+      cx: round1(d.m.x + d.m.w / 2),
+      cy: round1(d.m.y + d.m.h / 2),
+      w: d.m.w,
+      h: d.m.h,
+      angle: round1(
+        d.m.rotation ?? (Math.atan2(d.b.y - d.a.y, d.b.x - d.a.x) * 180) / Math.PI,
+      ),
+    };
   }
 
   function selectedObj() {
@@ -216,10 +272,19 @@
       }
       return e.blockade[side];
     }
+    if (state.selected.type === 'collapseMark') return findCollapseMark(state.selected.id) ?? null;
     return findToken(state.selected.id);
   }
 
   function hitTest(x, y) {
+    /** 【墓穴】坍塌板块画在最上层，所以也最先命中 */
+    if (state.show.collapseMarks !== false) {
+      const marks = [...(state.map.collapsedMarks ?? [])].reverse();
+      for (const m of marks) {
+        if (!visibleSide(m.side)) continue;
+        if (insideMark(m, x, y)) return { type: 'collapseMark', id: m.roomId };
+      }
+    }
     if (state.show.blockades) {
       const edges = state.map.edges ?? [];
       for (let i = edges.length - 1; i >= 0; i--) {
@@ -229,6 +294,24 @@
         if (!m) continue;
         if (x >= m.x && x <= m.x + m.w && y >= m.y && y <= m.y + m.h) {
           return { type: 'blockade', index: i, side: state.side };
+        }
+      }
+    }
+    /**
+     * 【城堡】机关大门预览：它**和封堵共用位置**，所以这里按那扇门的
+     * 封堵标记来画（只读，不能拖 —— 要调就调封堵）。
+     * 把鼠标点转进门的局部坐标再判，斜门上的命中也不会歪。
+     */
+    if (state.show.gates !== false) {
+      const g = gateMarkAbs();
+      if (g) {
+        const rad = (-g.angle * Math.PI) / 180;
+        const dx = x - g.cx;
+        const dy = y - g.cy;
+        const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+        const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+        if (Math.abs(lx) <= g.w / 2 + 4 && Math.abs(ly) <= Math.max(g.h / 2, 12) + 4) {
+          return { type: 'blockade', index: gatePreviewDoor()?.index, side: state.side };
         }
       }
     }
@@ -280,6 +363,21 @@
   function handleAt(sel, which) {
     const obj = selectedObj();
     if (!obj) return null;
+    /**
+     * 【墓穴】坍塌板块：手柄按**旋转后**的外接框摆（`markBox`），
+     * 拖角改尺寸、拖顶上那个点改旋转（每次 90 度）。
+     */
+    if (sel.type === 'collapseMark') {
+      const b = markBox(obj);
+      const pts = {
+        nw: [b.x, b.y],
+        ne: [b.x + b.bw, b.y],
+        se: [b.x + b.bw, b.y + b.bh],
+        sw: [b.x, b.y + b.bh],
+        rot: [b.cx, b.y - 22],
+      };
+      return pts[which];
+    }
     if (sel.type === 'token' || sel.type === 'blockade') {
       const { x, y, w, h } = obj;
       const pts = {
@@ -404,6 +502,44 @@
       }
     }
 
+    /**
+     * 【墓穴】**坍塌板块**（每个可坍塌地点一块）。
+     * 这里把 4 块**全都画出来**（不管局里塌没塌）—— 编辑界面要能提前把位置摆好，
+     * 实际对局里只画"已经塌了"的那些（见 `client/src/Board.tsx`）。
+     */
+    if (state.show.collapseMarks !== false) {
+      for (const m of state.map.collapsedMarks ?? []) {
+        if (!visibleSide(m.side)) continue;
+        const b = markBox(m);
+        const on = sel && sel.type === 'collapseMark' && sel.id === m.roomId;
+        parts.push(
+          `<g transform="translate(${b.cx} ${b.cy}) rotate(${b.rot}) translate(${-m.w / 2} ${-m.h / 2})">`,
+          `<image href="${encodeURI(m.src)}" width="${m.w}" height="${m.h}" preserveAspectRatio="xMidYMid meet" />`,
+          `<rect class="token-hit${on ? ' sel' : ''}" data-type="collapseMark" data-id="${m.roomId}" width="${m.w}" height="${m.h}" fill="rgba(160,120,220,0.25)" stroke="#a06bd6" />`,
+          `</g>`,
+          `<text class="sub" x="${b.cx}" y="${b.y - 6}" fill="#c79bff">坍塌：${m.roomId}</text>`,
+        );
+      }
+    }
+
+    /**
+     * 【城堡】**机关大门**预览（只读）。
+     *
+     * 它**和封堵共用位置**（用户要求）：位置、大小、角度全读那扇门的
+     * `blockade` 数据，只是把图片换成竖闸门。所以这里不给边框、不给手柄
+     * —— 想调就调封堵，拖封堵就是拖它。
+     */
+    if (state.show.gates !== false) {
+      const g = gateMarkAbs();
+      if (g) {
+        parts.push(
+          `<g transform="translate(${g.cx} ${g.cy}) rotate(${g.angle}) translate(${-g.w / 2} ${-g.h / 2})" pointer-events="none">`,
+          `<image href="${encodeURI(LEVER_GATE_SRC)}" width="${g.w}" height="${g.h}" preserveAspectRatio="xMidYMid meet" />`,
+          `</g>`,
+        );
+      }
+    }
+
     if (state.show.blockades) {
       (state.map.edges ?? []).forEach((e, i) => {
         if (!isDoorEdge(e.pathType)) return;
@@ -424,7 +560,7 @@
 
     if (sel) {
       const kinds =
-        sel.type === 'token' || sel.type === 'blockade'
+        sel.type === 'token' || sel.type === 'blockade' || sel.type === 'collapseMark'
           ? ['nw', 'ne', 'se', 'sw', 'rot']
           : sel.type === 'zone' && findZone(sel.id)?.shape === 'circle'
             ? ['e']
@@ -475,7 +611,7 @@
         </div>
         ${
           door
-            ? `<p class="hint">当前视角（${state.side === 'killer' ? '杀手' : '求生者'}）的封堵标记可拖到白门上。换视角再调另一张图。</p>
+            ? `<p class="hint">当前视角（${state.side === 'killer' ? '杀手' : '幸存者'}）的封堵标记可拖到白门上。换视角再调另一张图。</p>
                <button type="button" id="editBlockade">选中本视角封堵标记</button>`
             : `<p class="hint">只有白实线门可以封堵，本通道不会出现封堵标记。</p>`
         }`;
@@ -501,9 +637,65 @@
       }
       return;
     }
+    if (sel.type === 'collapseMark') {
+      const b = markBox(obj);
+      inspector.innerHTML = `<div><strong>坍塌板块：${obj.roomId}</strong></div>
+        <p class="hint">
+          【墓穴】杀手每次升级时会随机塌掉 <strong>${(state.map.collapsibleRooms ?? []).join(' / ') || '（未配置）'}</strong>
+          里的一个，塌掉的地点会盖上这块图。<br />
+          位置存的是<strong>旋转前</strong>的矩形；旋转只吸附 0/90/180/270。<br />
+          素材在生产环境读 <code>${obj.src}</code>。
+        </p>
+        <div class="fields">
+          ${field('X', obj.x, 'x')}
+          ${field('Y', obj.y, 'y')}
+          ${field('宽', obj.w, 'w')}
+          ${field('高', obj.h, 'h')}
+          ${field('旋转', obj.rotation ?? 0, 'rotation')}
+          <label>显示方</label>
+          <select id="cmSide">
+            <option value="both"${(obj.side ?? 'both') === 'both' ? ' selected' : ''}>双方</option>
+            <option value="survivor"${obj.side === 'survivor' ? ' selected' : ''}>只有幸存者</option>
+            <option value="killer"${obj.side === 'killer' ? ' selected' : ''}>只有杀手</option>
+          </select>
+          <label>素材</label>
+          <input type="text" id="cmSrc" value="${escapeHtml(obj.src)}" />
+        </div>
+        <p class="hint">旋转后的外接框：${round1(b.x)}, ${round1(b.y)} · ${round1(b.bw)}×${round1(b.bh)}</p>`;
+      const bind = (id, apply) => {
+        const el = $(id);
+        if (el) el.onchange = () => { apply(el.value); markDirty(); render(); };
+      };
+      bind('cmSide', (v) => { obj.side = v; });
+      bind('cmSrc', (v) => { obj.src = v; });
+      /**
+       * 数字输入：**宽高各自独立**（不像封堵标记那样锁宽高比）——
+       * 坍塌板块贴到地图上以后，用户想单独微调长或宽；
+       * 旋转吸附到 90 的倍数，和拖拽时的规则一致。
+       */
+      inspector.querySelectorAll('input[data-key]').forEach((el) => {
+        el.addEventListener('change', () => {
+          const key = el.getAttribute('data-key');
+          const v = Number(el.value);
+          if (!Number.isFinite(v)) return;
+          if (key === 'rotation') {
+            obj.rotation = ((Math.round(v / 90) * 90) % 360 + 360) % 360;
+          } else if (key === 'w') {
+            obj.w = clamp(v, 12, 500);
+          } else if (key === 'h') {
+            obj.h = clamp(v, 12, 500);
+          } else {
+            obj[key] = v;
+          }
+          markDirty();
+          render();
+        });
+      });
+      return;
+    }
     if (sel.type === 'blockade') {
       const e = (state.map.edges ?? [])[sel.index];
-      const sideLabel = (sel.side || state.side) === 'killer' ? '杀手地图' : '求生者地图';
+      const sideLabel = (sel.side || state.side) === 'killer' ? '杀手地图' : '幸存者地图';
       inspector.innerHTML = `<div><strong>封堵标记 ${e.from} ↔ ${e.to}</strong></div>
         <p class="hint">${sideLabel}。拖动改位置，角点缩放，绿点旋转。对局里封堵这扇门时，双方地图都会显示各自的标记。</p>
         <div class="fields">
@@ -562,7 +754,7 @@
       extra =
         field('X', obj.x, 'x') +
         field('Y', obj.y, 'y') +
-        `<label>求生者名</label><input type="text" data-text="name" value="${escapeHtml(obj.name ?? '')}" />` +
+        `<label>幸存者名</label><input type="text" data-text="name" value="${escapeHtml(obj.name ?? '')}" />` +
         `<label>杀手名</label><input type="text" data-text="nameKiller" value="${escapeHtml(obj.nameKiller ?? '')}" />`;
     }
     if (sel.type === 'zone' && obj.shape === 'circle') {
@@ -627,21 +819,42 @@
 
   function renderTokenList() {
     const tokens = (state.map.tokens ?? []).filter((t) => t.kind !== 'blockade' && t.kind !== '封堵');
-    tokenList.innerHTML = tokens
-      .map((t) => {
-        const on = state.selected?.type === 'token' && state.selected.id === t.id;
-        return `<div class="token-item${on ? ' active' : ''}" data-id="${t.id}">
+    /**
+     * 【墓穴】坍塌板块也列进这张表（点了就选中，方便用手柄/输入框细调）。
+     * 它们不是 `tokens`，而是 `collapsedMarks`，所以单独拼一段并带 `data-mark` 标记。
+     */
+    const marks = state.map.collapsedMarks ?? [];
+    tokenList.innerHTML =
+      marks
+        .map((m) => {
+          const on = state.selected?.type === 'collapseMark' && state.selected.id === m.roomId;
+          return `<div class="token-item${on ? ' active' : ''}" data-mark="${m.roomId}">
+            <img src="${encodeURI(m.src)}" alt="" />
+            <div class="meta">
+              <strong>坍塌板块 · ${m.roomId}</strong><br />
+              位置 ${round1(m.x)}, ${round1(m.y)} · ${round1(m.w)}×${round1(m.h)} · ${round1(m.rotation ?? 0)}°
+            </div>
+          </div>`;
+        })
+        .join('') +
+      tokens
+        .map((t) => {
+          const on = state.selected?.type === 'token' && state.selected.id === t.id;
+          return `<div class="token-item${on ? ' active' : ''}" data-id="${t.id}">
           <img src="${encodeURI(t.src)}" alt="" />
           <div class="meta">
             <strong>${t.label || t.id}</strong><br />
             位置 ${round1(t.x)}, ${round1(t.y)} · ${round1(t.w)}×${round1(t.h)} · ${round1(t.rotation ?? 0)}°
           </div>
         </div>`;
-      })
-      .join('');
+        })
+        .join('');
     tokenList.querySelectorAll('.token-item').forEach((el) => {
       el.onclick = () => {
-        state.selected = { type: 'token', id: el.getAttribute('data-id') };
+        const mark = el.getAttribute('data-mark');
+        state.selected = mark
+          ? { type: 'collapseMark', id: mark }
+          : { type: 'token', id: el.getAttribute('data-id') };
         render();
       };
     });
@@ -748,9 +961,11 @@
         ? findRoom(state.drag.id)
         : state.drag.type === 'zone'
           ? findZone(state.drag.id)
-          : state.drag.type === 'blockade'
-            ? selectedBlockadeMark(state.drag.index, state.drag.side)
-            : findToken(state.drag.id);
+          : state.drag.type === 'collapseMark'
+            ? findCollapseMark(state.drag.id)
+            : state.drag.type === 'blockade'
+              ? selectedBlockadeMark(state.drag.index, state.drag.side)
+              : findToken(state.drag.id);
     if (!obj) return;
     const dx = p.x - state.drag.pointer.x;
     const dy = p.y - state.drag.pointer.y;
@@ -759,6 +974,31 @@
     if (state.drag.kind === 'move') {
       obj.x = round1(s.x + dx);
       obj.y = round1(s.y + dy);
+    } else if (state.drag.type === 'collapseMark') {
+      /**
+       * 坍塌板块：旋转**吸附到 0/90/180/270**。
+       *
+       * 特意不做自由角度：`markBox` 的外接框算法假设直角，
+       * 自由角度会让手柄位置和"点中了没有"都对不上（很难用）。
+       * 规则上板块本来也就是转 90 度贴上去的。
+       */
+      if (state.drag.kind === 'rot') {
+        const cx = s.x + s.w / 2;
+        const cy = s.y + s.h / 2;
+        const raw = (Math.atan2(p.y - cy, p.x - cx) * 180) / Math.PI + 90;
+        obj.rotation = ((Math.round(raw / 90) * 90) % 360 + 360) % 360;
+      } else {
+        const cx = s.x + s.w / 2;
+        const cy = s.y + s.h / 2;
+        const startHalf = Math.hypot(s.w / 2, s.h / 2) || 1;
+        const nowHalf = Math.hypot(p.x - cx, p.y - cy);
+        const scale = clamp(nowHalf / startHalf, 0.15, 8);
+        /** 尺寸始终按"旋转前"存：转了 90 度的那块，拖角时手感会反过来，这是有意的简化 */
+        obj.w = round1(clamp(s.w * scale, 12, 500));
+        obj.h = round1(clamp(s.h * scale, 12, 500));
+        obj.x = round1(cx - obj.w / 2);
+        obj.y = round1(cy - obj.h / 2);
+      }
     } else if (state.drag.type === 'token' || state.drag.type === 'blockade') {
       const cx = s.x + s.w / 2;
       const cy = s.y + s.h / 2;
@@ -983,13 +1223,15 @@
     render();
   };
 
-  ['showRooms', 'showZones', 'showTokens', 'showEdges', 'showBlockades'].forEach((id) => {
+  ['showRooms', 'showZones', 'showTokens', 'showEdges', 'showBlockades', 'showGates', 'showCollapseMarks'].forEach((id) => {
     $(id).onchange = () => {
       state.show.rooms = $('showRooms').checked;
       state.show.zones = $('showZones').checked;
       state.show.tokens = $('showTokens').checked;
       state.show.edges = $('showEdges').checked;
       state.show.blockades = $('showBlockades').checked;
+      state.show.gates = $('showGates').checked;
+      state.show.collapseMarks = $('showCollapseMarks').checked;
       render();
     };
   });

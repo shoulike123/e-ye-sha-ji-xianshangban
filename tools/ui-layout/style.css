@@ -54,6 +54,11 @@ button.primary { background: #8a3b24; border-color: transparent; }
   min-height: 70vh;
   background: #241910;
 }
+.blank-bg.survivorItems {
+  aspect-ratio: 16 / 11;
+  min-height: 70vh;
+  background: #182018;
+}
 .blank-bg[hidden],
 .stage img.map[hidden] { display: none; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; }

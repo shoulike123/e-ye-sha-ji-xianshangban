@@ -3,12 +3,33 @@
  * 升级只多拿新一级，旧级一直留着。力量只有牌面写了才加。
  */
 import type { GameState, PlayerState } from './types.js';
+/**
+ * 2对3 进化时要在两个杀手之间切换镜像（把谁的牌库读进顶层）。
+ * 这些函数住在 `engine.ts`，而 `engine.ts` 已经 import 了本文件 ——
+ * 直接 import 会成环，所以用**处理器注入**（和本文件里 `onEncounterOpenNoTargets` 同一套做法）。
+ */
+let switchKillerTo: ((state: GameState, killerId: string) => void) | null = null;
+let saveKillerMirror: ((state: GameState) => void) | null = null;
+let loadKillerMirror: ((state: GameState, killerId: string) => void) | null = null;
+
+export function setKillerMirrorHandlers(h: {
+  switchTo: (state: GameState, killerId: string) => void;
+  save: (state: GameState) => void;
+  load: (state: GameState, killerId: string) => void;
+}) {
+  switchKillerTo = h.switchTo;
+  saveKillerMirror = h.save;
+  loadKillerMirror = h.load;
+}
+
 import {
   addFear,
   addKillerTurnPower,
   applyDamage,
+  canonicalDoorId,
   clearTrapAfterEncounter,
   doorId,
+  isDoorBlocked,
   isDoorEdge,
   log,
   parseDoor,
@@ -18,8 +39,63 @@ import {
   tryPlaceBlockadeDoor,
   unblockedDoorsAt,
 } from './effects.js';
+/**
+ * 核心标记逻辑放在 `coreMarkers.ts`（**不是** killerSpecials）——
+ * killerSpecials 反过来 import 了本文件的 `killerKindOf`，
+ * 从这里 import killerSpecials 会成环。
+ */
+import { placeCoreAt } from './coreMarkers.js';
 
-export type KillerKind = 'butcher' | 'spectre' | 'murderer';
+/**
+ * **【墓穴】坍塌拦截**。
+ *
+ * 规则：杀手每次升级的**最第一时间**（比任何进化效果都早）先结算一次坍塌。
+ * 所以 `runUpgrade` 一进来就问一句"要不要先塌"：
+ * 要塌就记下 `pendingCollapse` 并**立刻打住**，等 engine 结算完坍塌再回来跑升级。
+ *
+ * 由 engine 注入（`collapse.ts` ← `engine.ts`，避免成环）。
+ */
+let evolutionCollapseGate:
+  | ((state: GameState, fromLevel: number, toLevel: number) => boolean)
+  | null = null;
+
+export function setEvolutionCollapseGate(
+  fn: (state: GameState, fromLevel: number, toLevel: number) => boolean,
+): void {
+  evolutionCollapseGate = fn;
+}
+
+/**
+ * 【变体1】"**这一级结算完之后**"的追加效果钩子（由 engine 注册）。
+ *
+ * 用途（杀手特性）：
+ *  - 09「慢热杀手」：每次升级 +1 力量
+ *  - 08「压抑怒火」：升到 3 级时**立刻升到 4 级** —— 返回 `4`，
+ *    这里会**递归再结算一轮 4 级**（4 级该有的力量/锁定牌照常拿到）
+ *
+ * ⚠ 调用时 `state.killerId` 就是当前正在结算的那名杀手（`resolveDeferredEvolution`
+ * 是逐个 `switchKillerTo` 切过去再结算的），所以特性要按他本人的来查。
+ *
+ * @returns 需要继续跳到的等级（比当前大才会再结算一轮）；没有就返回 void
+ */
+let afterLevelSettled: ((state: GameState, level: number) => number | void) | null = null;
+
+export function setAfterLevelSettledHandler(
+  fn: (state: GameState, level: number) => number | void,
+): void {
+  afterLevelSettled = fn;
+}
+
+export type KillerKind =
+  | 'butcher'
+  | 'spectre'
+  | 'murderer'
+  | 'huntress'
+  | 'werewolf'
+  | 'statue'
+  | 'unidentified'
+  | 'strangler'
+  | 'queen';
 
 /** 进化牌原文，按等级 1～5。空字符串 = 这一级没有效果。 */
 export const EVOLUTION_TEXT: Record<KillerKind, string[]> = {
@@ -27,38 +103,105 @@ export const EVOLUTION_TEXT: Record<KillerKind, string[]> = {
     '/',
     '力量 +1',
     '解锁「残酷暴怒」',
-    '「链锯轰鸣」成为快速',
+    '「链锯轰鸣」成为快速卡牌',
     '发生遭遇时，在攻击前伤害地点中的所有目标',
   ],
   spectre: [
     '发生遭遇时，【惊吓】地点中的所有目标',
-    '在使用「呼啸而过」后，你可以弃掉 2 张卡牌来【搜索】',
-    '每当有求生者惊恐过度时，你可以弃掉 3 张卡牌来伤害该求生者',
+    '在使用「呼啸而过」后，你可以弃掉 2 张卡牌来【搜索房间】',
+    '每当有幸存者惊恐过度时，你可以弃掉 3 张卡牌来伤害该幸存者',
     '解锁「生命吸取」',
     '发生遭遇时，在攻击前伤害地点中的所有目标',
   ],
   murderer: [
     '/',
-    '如果你在重现时遇到任何求生者，本回合 +3 力量',
+    '如果你在重现时遭遇了任何幸存者，本回合 +3 力量',
     '解锁「死亡盛放」',
-    '力量 +1；在任意地点总计【封堵】×4（可以在多个地点使用）',
+    '力量 +1；在任意地点总计【封堵】×4',
     '发生遭遇时，在攻击前伤害地点中的所有目标',
+  ],
+  /** 女猎手：等级 2 解锁「陷阱重置」 */
+  huntress: [
+    '/',
+    '解锁「陷阱重置」',
+    '所有卡牌费用 -1（最少为 0）',
+    '使用「追逐」后〔移动〕×0-1',
+    '发生遭遇时，在攻击前伤害所有目标',
+  ],
+  /** 狼人：等级 2 解锁「超听觉」 */
+  werewolf: [
+    '/',
+    '解锁「超听觉」',
+    '力量 +1',
+    '你的回合结束时，如果本回合你没有遭遇任何幸存者且你不在〔潜行〕，〔惊吓〕距离 2 内的所有幸存者',
+    '发生遭遇时，在攻击前伤害所有目标',
+  ],
+  /** 雕像：等级 1 就可以转换主雕像；等级 3 解锁「圍困」 */
+  statue: [
+    '每当你升级时，你都可以转换主雕像',
+    '力量 +1',
+    '解锁「圍困」',
+    '力量 +2；将「圍困」从弃牌堆加入你的手牌',
+    '发生遭遇时，在攻击前伤害所有目标',
+  ],
+  /** 未命名：等级 2、4 各获得一张进化卡牌（二选一在等级 3） */
+  unidentified: [
+    '你可以〔移動〕通过秘密通道',
+    '获得任意 1 张进化卡牌',
+    '解锁以下之一：「刺耳噪声」或「酸液喷吐」',
+    '获得任意 1 张进化卡牌',
+    '发生遭遇时，在攻击前伤害所有目标',
+  ],
+  /** 扼杀者：在自己的地点放核心标记 */
+  strangler: [
+    '你可以在慢速行动阶段期间使用不限张数的沙漏卡牌',
+    '在你的当前地点放置一个核心标记',
+    '解锁「狂亂枝條」',
+    '在任意 2 个地点各放置一个核心标记（不能是同一地点）',
+    '发生遭遇时，在攻击前伤害所有目标',
+  ],
+  /** 女王：生成丧尸、中毒标记 */
+  queen: [
+    '你的回合结束时，如果本回合中你没有遭遇任何幸存者且你不在〔潜行〕，在你的地点生成一个丧尸',
+    '如果你使用〔感知〕目击了任何幸存者，〔惊吓〕他们',
+    '解锁「君臨天下」',
+    '在任意 2 个地点各生成一个丧尸（不能是同一地点）',
+    '发生遭遇时，在攻击前伤害所有目标',
   ],
 };
 
-export function killerKindOf(state: GameState): KillerKind | null {
-  const k = state.killerId ? state.players[state.killerId] : null;
+/**
+ * 这个棋子是哪种杀手。
+ *
+ * `killerId` 可选：2v3 有**两名**杀手，判定"某个杀手是什么类型"时
+ * 必须能指定是谁，不能一律看 `state.killerId`（那个只是"现在轮到谁"）。
+ */
+export function killerKindOf(state: GameState, killerId?: string | null): KillerKind | null {
+  const kid = killerId ?? state.killerId;
+  const k = kid ? state.players[kid] : null;
   const ch = state.characters.find((c) => c.id === k?.characterId);
   const hay = `${k?.characterId ?? ''} ${ch?.name ?? ''} ${k?.name ?? ''}`;
   if (/killer1|屠夫|butcher/i.test(hay)) return 'butcher';
   if (/killer2|幽魂|spectre/i.test(hay)) return 'spectre';
   if (/killer3|谋杀|murder/i.test(hay)) return 'murderer';
+  if (/killer4|女猎手|huntress/i.test(hay)) return 'huntress';
+  if (/killer5|狼人|werewolf/i.test(hay)) return 'werewolf';
+  if (/killer6|雕像|statue/i.test(hay)) return 'statue';
+  if (/killer7|未命名|unidentified/i.test(hay)) return 'unidentified';
+  if (/killer8|扼杀者|strangler/i.test(hay)) return 'strangler';
+  if (/killer9|女王|queen/i.test(hay)) return 'queen';
   return null;
 }
 
-/** 1 级到当前级，已经生效的原文（给「查看杀手信息」） */
-export function activeEvolutionLines(state: GameState): Array<{ level: number; text: string }> {
-  const kind = killerKindOf(state);
+/**
+ * 1 级到当前级，已经生效的原文（给「查看杀手信息」）。
+ * `killerId` 可选：2对3 里要看的是**哪一个**杀手的进化效果。
+ */
+export function activeEvolutionLines(
+  state: GameState,
+  killerId?: string | null,
+): Array<{ level: number; text: string }> {
+  const kind = killerKindOf(state, killerId);
   if (!kind) return [];
   const lv = Math.max(1, Math.min(5, state.killerLevel));
   return EVOLUTION_TEXT[kind].slice(0, lv).map((text, i) => ({ level: i + 1, text }));
@@ -75,6 +218,36 @@ export function formatKillerPowerLabel(state: GameState): string {
   return bonus > 0 ? `${state.killerPower}+${bonus}` : `${String(state.killerPower)}`;
 }
 
+/**
+ * **女猎手进化 3 级**：「所有卡牌费用 -1（最少为 0）」。
+ * 返回**要减掉几点**（不是女猎手、或等级不到就是 0）。
+ *
+ * 纯查询函数 —— 真正的扣费在各处调用点用
+ * `killerCardCostAfterDiscount(cardHandCost(card), huntressCostDiscount(state))`。
+ */
+export function huntressCostDiscount(state: GameState): number {
+  if (killerKindOf(state) !== 'huntress') return 0;
+  return state.killerLevel >= 3 ? 1 : 0;
+}
+
+/**
+ * **女猎手进化 4 级**：「使用『追逐』后〔移動〕×0-1」。
+ *
+ * 打出追逐并**走完它自己的那 1 步之后**，追加一次 0-1 步的移动草稿
+ * （可以不移动 = 0 步，点确认即可）。
+ * 直接建草稿（和 `pickMoveSurvivor` 同一套结构），不经过"潜行"那套。
+ */
+export function huntressChaseFollowupMove(state: GameState): boolean {
+  if (killerKindOf(state) !== 'huntress') return false;
+  if (state.killerLevel < 4) return false;
+  const k = killerActorOrNull(state);
+  if (!k?.roomId) return false;
+  if (state.pendingPathDraft) return false;
+  state.pendingPathDraft = { min: 0, max: 1, rooms: [k.roomId] };
+  log(state, '女猎手进化 4 级：追逐之后可以再〔移動〕×0-1（不想动就直接确认）。', 'killer');
+  return true;
+}
+
 function addPermanentPower(state: GameState, delta: number): void {
   const cap = state.rules.killerPowerMax ?? 10;
   const before = state.killerPower;
@@ -89,7 +262,7 @@ function allUnblockedDoorIds(state: GameState): string[] {
   for (const e of state.map.edges) {
     if (!isDoorEdge(e.pathType)) continue;
     const id = doorId(e.from, e.to);
-    if (!state.blockades.includes(id)) seen.add(id);
+    if (!isDoorBlocked(state, id)) seen.add(id);
   }
   return [...seen];
 }
@@ -110,31 +283,264 @@ export function removableForJob(state: GameState): string[] {
 }
 
 /** 摸牌堆空了还要摸时调用：升一级、结算该级力量/锁定牌，并停下来确认新效果。 */
+/**
+ * 进化发生时的**总入口**。
+ *
+ * `state.killerLevel` 是**队伍共用的等级**（2对3 里两名杀手共用一条进化进度）；
+ * 但每个杀手要结算的是**自己类型**的 1~5 级效果、以及**自己牌组**里的锁定牌。
+ * 所以这里挨个把杀手读进镜像、各结算一遍，再存回各自的切片。
+ */
 export function runUpgrade(state: GameState): void {
   const beforeLv = state.killerLevel;
   if (beforeLv >= 5) return;
-  state.killerLevel = beforeLv + 1;
-  log(state, `杀手进化！等级 ${beforeLv} → ${state.killerLevel}。请确认新效果。弃牌洗回摸牌堆。`);
-  applyNewEvolutionLevel(state, state.killerLevel);
+  const teamLevel = beforeLv + 1;
+
+  /**
+   * **【墓穴】坍塌插在进化之前**（规则：先告知进化到几级 → 结算坍塌 → 再结算进化）。
+   *
+   * `evolutionCollapseGate` 返回 true = "这次已经记好要塌了，你先打住"。
+   * engine 结算完坍塌后会把 `pendingCollapse` 清掉、把 `collapseConsumedForLevel`
+   * 标成这一级，然后**再调一次 `runUpgrade`** —— 那时 gate 返回 false，升级正常走完。
+   */
+  const collapseAlreadySettled = state.collapseConsumedForLevel === teamLevel;
+  if (!collapseAlreadySettled && evolutionCollapseGate?.(state, beforeLv, teamLevel)) {
+    log(
+      state,
+      `杀手进化到 **${teamLevel} 级**（在结算进化效果之前，先处理墓穴的坍塌）。`,
+      'all',
+      true,
+    );
+    return;
+  }
+
+  /**
+   * 谁要进化：
+   *  - 1 杀手模式：就是当前那个（`state.killerId`）
+   *  - 2对3：**两名杀手同时进化**
+   */
+  const ids = state.mode === '2v3' && state.killerIds.length
+    ? [...state.killerIds]
+    : (state.killerId ? [state.killerId] : []);
+
+  log(
+    state,
+    ids.length > 1
+      ? `杀手进化！等级 ${beforeLv} → ${teamLevel}（两名杀手同时进化）。请确认新效果。弃牌洗回摸牌堆。`
+      : `杀手进化！等级 ${beforeLv} → ${teamLevel}。请确认新效果。弃牌洗回摸牌堆。`,
+  );
+
+  if (!ids.length) {
+    /** 没有杀手棋子（大厅等）—— 只把等级推上去，别丢进度 */
+    state.killerLevel = teamLevel;
+    return;
+  }
+
+  for (const kid of ids) {
+    if (!state.killers[kid]) continue;
+    /** 切到他：他的牌库 / 秘密牌 / 手牌进镜像 */
+    switchKillerTo?.(state, kid);
+    /** 队伍等级对所有杀手一致 */
+    state.killerLevel = teamLevel;
+    runUpgradeForCurrentKiller(state, beforeLv, teamLevel, ids.length > 1, ids);
+    saveKillerMirror?.(state);
+  }
+  /** 收尾：把镜像切回"当前行动的杀手"，等级按队伍值统一写回 */
+  const back = state.killerId && state.killers[state.killerId] ? state.killerId : ids[0]!;
+  loadKillerMirror?.(state, back);
+  state.killerLevel = teamLevel;
+  saveKillerMirror?.(state);
+}
+
+/**
+ * 针对**当前镜像里的那个杀手**结算一次进化。
+ *
+ * ⚠ **升级当场不执行任何实际效果**（用户要求：
+ * 「杀手在确认进化效果后才执行进化效果」）。
+ * 这里只挂"确认前必须做完的选择"：
+ *  - 解锁二选一（刺耳噪声 / 酸液喷吐）
+ *  - 雕像：要不要转换主雕像
+ *  - 未命名：选一张进化卡牌
+ *  - 女王 4 级：点 2 个地点生成丧尸
+ *
+ * 真正的结算 —— 力量 +N、锁定牌入手、手牌超限弃牌 —— 都在
+ * `resolveDeferredEvolution()`（杀手点「确认新效果」时调用）。
+ *
+ * 这样就不会再有"手牌满了要弃牌"和"还没选要不要转主雕像"互相卡死：
+ * 弃牌发生在确认**之后**，那时前面那些选择都已经做完了。
+ */
+function runUpgradeForCurrentKiller(
+  state: GameState,
+  beforeLv: number,
+  teamLevel: number,
+  multi: boolean,
+  killerIds: string[],
+): void {
+  state.killerLevel = teamLevel;
+  /**
+   * **解锁二选一**（未命名「刺耳噪声 / 酸液喷吐」）：
+   * 同一个 `unlockChoice` 组到了 `unlockAtLevel`，就让杀手挑一张。
+   * 这是"确认前的选择"，所以留在这一步挂出来。
+   */
+  const groups = new Set<string>();
+  for (const id of state.killerLocked) {
+    const card = state.cardById[id];
+    if (card?.unlockChoice && card.unlockAtLevel != null && card.unlockAtLevel <= state.killerLevel) {
+      groups.add(card.unlockChoice);
+    }
+  }
+  if (groups.size) {
+    const pool: string[] = [];
+    for (const id of state.killerLocked) {
+      const card = state.cardById[id];
+      if (card?.unlockChoice && groups.has(card.unlockChoice))
+        pool.push(id);
+    }
+    if (pool.length > 1) {
+      state.pendingUnlockChoice = pool;
+      log(
+        state,
+        `进化 ${state.killerLevel} 级：请从「${pool.map((id) => state.cardById[id]?.name ?? id).join(' / ')}」里选 1 张解锁。`,
+        'killer',
+      );
+    }
+    /** `pool.length === 1` 的"只有一张、没得选"也留到确认时再入手（见下方 settle） */
+  }
+  if (!state.pendingEvolutionAck) {
+    state.pendingEvolutionAck = {
+      fromLevel: beforeLv,
+      toLevel: state.killerLevel,
+      deferred: true,
+      killerIds: [...killerIds],
+    };
+  } else {
+    state.pendingEvolutionAck.toLevel = state.killerLevel;
+    state.pendingEvolutionAck.deferred = true;
+    state.pendingEvolutionAck.killerIds = [...killerIds];
+  }
+  /**
+   * 雕像「等级 1：每当你升级时，你都可以转换主雕像」——
+   * 这是**每次升级首先要执行**的一步：停下来问要不要切换，
+   * 选完（切换或不切）才继续结算这一级的其它效果。
+   */
+  if (killerKindOf(state) === 'statue' && state.statueIds?.length) {
+    state.pendingStatueEvoSwitch = true;
+    log(state, '雕像进化 1 级：你可以转换主雕像（也可以不切）。', 'killer');
+  }
+  /**
+   * 未命名「等级 2 / 4：获得任意 1 张进化卡牌」——
+   * 从候选池里挑一张，**没选过的**。
+   * 候选池在开局时由引擎写进 state（`unEvolutionPool`），这里不依赖 content。
+   */
+  if (killerKindOf(state) === 'unidentified' && (state.killerLevel === 2 || state.killerLevel === 4)) {
+    const chosen = new Set(state.chosenEvolutionCards ?? []);
+    const pool = (state.unEvolutionPool ?? []).filter((id) => !chosen.has(id));
+    if (pool.length) {
+      state.pendingEvolutionCardPick = pool;
+      log(
+        state,
+        `未命名进化 ${state.killerLevel} 级：请从 ${pool.length} 张进化卡牌里选 1 张。`,
+        'killer',
+      );
+    }
+  }
+  /**
+   * 女王「等级 1」是被动（回合结束生成僵尸，见 closeKillerTurn），这里不用停。
+   * 女王「等级 4：在任意 2 个地点各生成一个丧尸（不能是同一地点）」——
+   * 停下来让杀手点 2 个不同地点。
+   */
+  if (killerKindOf(state) === 'queen' && state.killerLevel === 4) {
+    state.pendingQueenSpawnRooms = [];
+    log(state, '女王进化 4 级：请在任意 2 个不同地点各生成一个丧尸（点两个地点）。', 'killer');
+  }
+}
+
+/**
+ * **杀手点「确认新效果」时才真正结算这一级。**
+ *
+ * 对本次进化涉及的每个杀手各结算一次（2对3 是两个），内容：
+ *  1. `applyNewEvolutionLevel` —— 力量 +N、解锁副作用等
+ *  2. 锁定牌（`unlockLevel` 到期、以及二选一里只剩一张的）加入手牌
+ *  3. 手牌超上限 → 让杀手自选弃置
+ */
+export function resolveDeferredEvolution(state: GameState): void {
+  const ack = state.pendingEvolutionAck;
+  if (!ack?.deferred) return;
+  const ids = ack.killerIds?.length
+    ? ack.killerIds.filter((id) => Boolean(state.killers[id]))
+    : (state.killerId && state.killers[state.killerId] ? [state.killerId] : []);
+  const multi = ids.length > 1;
+  for (const kid of ids) {
+    switchKillerTo?.(state, kid);
+    state.killerLevel = ack.toLevel;
+    settleEvolutionForCurrentKiller(state, ack.toLevel, multi);
+    saveKillerMirror?.(state);
+  }
+  const back = state.killerId && state.killers[state.killerId] ? state.killerId : ids[0];
+  if (back && ids.length) loadKillerMirror?.(state, back);
+  state.killerLevel = ack.toLevel;
+  saveKillerMirror?.(state);
+}
+
+/** 单个杀手这一级的实际结算（力量 / 解锁入手 / 手牌超限） */
+function settleEvolutionForCurrentKiller(
+  state: GameState,
+  level: number,
+  multi: boolean,
+): void {
+  const tag = multi ? `「${state.players[state.killerId ?? '']?.name ?? '杀手'}」` : '';
+  applyNewEvolutionLevel(state, level);
+  /**
+   * 普通锁定牌：unlockLevel 到了就入手。
+   * 「二选一」的牌（带 unlockChoice）在确认**之前**已经选好了
+   * （`pickUnlockChoice` 会把选中的加入手牌、另一张永久移除）；
+   * 但"候选只剩一张、没得选"的组要在这里补上。
+   */
   const unlocked = state.killerLocked.filter((id) => {
     const card = state.cardById[id];
+    if (card?.unlockChoice)
+      return false;
     return card?.unlockLevel != null && card.unlockLevel <= state.killerLevel;
   });
   for (const id of unlocked) {
     state.killerLocked = state.killerLocked.filter((x) => x !== id);
     state.killerHand.push(id);
-    log(state, `锁定牌「${state.cardById[id]?.name ?? id}」加入手牌，此后与普通牌无异。`);
+    log(state, `${tag}锁定牌「${state.cardById[id]?.name ?? id}」加入手牌，此后与普通牌无异。`);
+  }
+  /** 二选一里"只剩一张"的组：直接入手 */
+  const soloChoice = new Set<string>();
+  for (const id of state.killerLocked) {
+    const card = state.cardById[id];
+    if (!card?.unlockChoice || card.unlockAtLevel == null || card.unlockAtLevel > level) continue;
+    soloChoice.add(card.unlockChoice);
+  }
+  for (const group of soloChoice) {
+    const ids = state.killerLocked.filter((id) => state.cardById[id]?.unlockChoice === group);
+    /** 还有两张以上说明是待选、不是"没得选"，跳过 */
+    if (ids.length !== 1) continue;
+    const only = ids[0]!;
+    state.killerLocked = state.killerLocked.filter((x) => x !== only);
+    state.killerHand.push(only);
+    unlocked.push(only);
+    log(state, `锁定牌「${state.cardById[only]?.name ?? only}」加入手牌。`);
   }
   const max = state.rules.killerHandMax ?? 5;
   if (state.killerHand.length > max) {
     state.pendingUnlockDiscard = true;
     state.pendingKillerDiscards = state.killerHand.length - max;
+    /** 刚入手的锁定牌本次不能弃（满手牌时摸进来的牌不在此列，那些就该弃） */
+    state.justUnlockedCards = [...unlocked];
     log(state, `进化入手牌后手牌超过 ${max}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
-  }
-  if (!state.pendingEvolutionAck) {
-    state.pendingEvolutionAck = { fromLevel: beforeLv, toLevel: state.killerLevel };
   } else {
-    state.pendingEvolutionAck.toLevel = state.killerLevel;
+    state.justUnlockedCards = [];
+  }
+  /**
+   * 【变体1】这一级全部结算完之后，再跑特性的追加效果（09 慢热杀手 +力量 /
+   * 08 压抑怒火 3 级跳 4 级）。跳级时**递归**把新那一级也照常结算完。
+   */
+  const jump = afterLevelSettled?.(state, level);
+  if (typeof jump === 'number' && jump > level) {
+    state.killerLevel = jump;
+    settleEvolutionForCurrentKiller(state, jump, multi);
   }
 }
 
@@ -147,13 +553,70 @@ export function applyNewEvolutionLevel(state: GameState, newLevel: number): void
   if (kind === 'murderer' && newLevel === 4) {
     state.pendingEvoFourBlockade = true;
   }
+  /** 狼人「等级 3：力量 +1」 */
+  if (kind === 'werewolf' && newLevel === 3) addPermanentPower(state, 1);
+  /** 雕像「等级 2：力量 +1」 */
+  if (kind === 'statue' && newLevel === 2) addPermanentPower(state, 1);
+  /**
+   * 雕像「等级 4：力量 +2；将「圍困」从弃牌堆加入你的手牌」。
+   *
+   * 「圍困」`unlockLevel` 是 3，所以到 4 级时它**通常已经在弃牌堆**（打出去过）。
+   * 为了不因为「提前解锁」而永远拿不到，这里兜底也接受它还在锁定区或已经在手里的情况。
+   */
+  if (kind === 'statue' && newLevel === 4) {
+    addPermanentPower(state, 2);
+    const SIEGE = 'statue_siege';
+    if (state.killerHand.includes(SIEGE)) {
+      log(state, '雕像进化 4 级：力量 +2。「圍困」已经在手牌里。');
+    } else if (state.killerLocked.includes(SIEGE)) {
+      state.killerLocked = state.killerLocked.filter((x) => x !== SIEGE);
+      state.killerHand.push(SIEGE);
+      log(state, '雕像进化 4 级：力量 +2，把「圍困」从锁定区加入手牌。');
+    } else {
+      const i = state.killerDiscard.indexOf(SIEGE);
+      if (i >= 0) {
+        state.killerDiscard.splice(i, 1);
+        state.killerHand.push(SIEGE);
+        log(state, '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。');
+      } else {
+        log(state, '雕像进化 4 级：力量 +2。「圍困」既不在弃牌堆也不在锁定区，无法取回。');
+      }
+    }
+    const maxSiege = state.rules.killerHandMax ?? 5;
+    if (state.killerHand.length > maxSiege) {
+      state.pendingUnlockDiscard = true;
+      state.pendingKillerDiscards = state.killerHand.length - maxSiege;
+      state.justUnlockedCards = state.killerHand.includes(SIEGE) ? [SIEGE] : [];
+      log(state, `雕像进化 4 级取回「圍困」后手牌超过 ${maxSiege}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
+    }
+  }
+  /**
+   * 扼杀者「等级 2：在你的当前地点放置一个核心标记」。
+   * 地点是**确定的**（就是他所在地点），所以不用停，直接放。
+   * 如果已达 5 个上限，`placeCoreAt` 会停下来让玩家选要移除哪一个（规则允许）。
+   */
+  if (kind === 'strangler' && newLevel === 2) {
+    const k = state.killerId ? state.players[state.killerId] : null;
+    if (k?.roomId) {
+      log(state, `扼杀者进化 2 级：在「${roomName(state, k.roomId)}」放置一个核心标记。`, 'all', true);
+      placeCoreAt(state, k.roomId);
+    }
+  }
+  /**
+   * 扼杀者「等级 4：在任意 2 个地点各放置一个核心标记（不能是同一地点）」——
+   * 停下来让杀手点 2 个不同地点（和女王 4 级同一套交互）。
+   */
+  if (kind === 'strangler' && newLevel === 4) {
+    state.pendingStranglerCoreRooms = [];
+    log(state, '扼杀者进化 4 级：请在任意 2 个不同地点各放置一个核心标记（点两个地点）。', 'killer');
+  }
 }
 
 /** 重现强制搜索确实发现人：谋杀者 2 级本回合 +3 力量（上限 10） */
 export function applyMurdererRevealPower(state: GameState): void {
   if (killerKindOf(state) !== 'murderer' || state.killerLevel < 2) return;
   if (!state.lastSearchFound) return;
-  log(state, '谋杀者进化 2 级：重现时搜到人，本回合力量 +3。');
+  log(state, '谋杀者进化 2 级：重现时搜索房间找到人，本回合力量 +3。');
   addKillerTurnPower(state, 3);
 }
 
@@ -204,7 +667,7 @@ export function resolveOverFearWound(state: GameState, use: boolean, payCardIds:
     state.killerDiscard.push(id);
   }
   const names = pay.map((id) => state.cardById[id]?.name ?? id);
-  log(state, `幽魂弃置「${names.join('、')}」，伤害 ${t?.name ?? '求生者'}。`);
+  log(state, `幽魂弃置「${names.join('、')}」，伤害 ${t?.name ?? '幸存者'}。`);
   if (t?.alive && state.killerId) {
     applyDamage(state, t.id, 1, state.killerId);
   }
@@ -266,7 +729,7 @@ export function finishEncounterOpen(state: GameState): void {
   const alive = survivorsInRoom(state, enc.roomId);
   if (alive.length === 0) {
     // 当前模式打死人通常已 gameOver；各自为战等模式可能地点清空但局未终——必须清掉遭遇，否则行动区卡住。
-    log(state, '遭遇地点已没有存活求生者，遭遇结束。');
+    log(state, '遭遇地点已没有存活幸存者，遭遇结束。');
     onEncounterOpenNoTargets?.(state);
     return;
   }
@@ -303,21 +766,21 @@ export function maybeOfferWhizSearch(state: GameState): void {
   state.whizJustResolved = false;
   if (killerKindOf(state) !== 'spectre' || state.killerLevel < 2) return;
   if (state.killerHand.length < 2) {
-    log(state, '幽魂进化 2 级：手里不足 2 张，不能弃牌搜索。');
+    log(state, '幽魂进化 2 级：手里不足 2 张，不能弃牌搜索房间。');
     return;
   }
   state.pendingWhizSearch = true;
-  log(state, '幽魂进化 2 级：可以弃 2 张手牌，搜索走完后的当前格（不占行动）。');
+  log(state, '幽魂进化 2 级：可以弃 2 张手牌，搜索移动结束后的当前房间（不占行动）。');
 }
 
 export function resolveWhizSearch(state: GameState, use: boolean, payCardIds: string[]): boolean {
-  if (!state.pendingWhizSearch) throw new Error('当前没有呼啸后的搜索选择');
+  if (!state.pendingWhizSearch) throw new Error('当前没有呼啸后的搜索房间选择');
   state.pendingWhizSearch = false;
   if (!use) {
-    log(state, '幽魂不使用呼啸后的搜索。');
+    log(state, '幽魂不使用呼啸后的搜索房间。');
     return false;
   }
-  if (state.killerHand.length < 2) throw new Error('手里不足 2 张，不能弃牌搜索');
+  if (state.killerHand.length < 2) throw new Error('手里不足 2 张，不能弃牌搜索房间');
   const pay = [...new Set(payCardIds)];
   if (pay.length !== 2) throw new Error('请自选弃置 2 张手牌');
   for (const id of pay) {
@@ -330,12 +793,12 @@ export function resolveWhizSearch(state: GameState, use: boolean, payCardIds: st
   }
   const names = pay.map((id) => state.cardById[id]?.name ?? id);
   const k = state.killerId ? state.players[state.killerId] : null;
-  log(state, `幽魂弃置「${names.join('、')}」，搜索「${roomName(state, k?.roomId)}」。`);
+  log(state, `幽魂弃置「${names.join('、')}」，搜索房间「${roomName(state, k?.roomId)}」。`);
   if (!k?.roomId) return false;
   const victims = survivorsInRoom(state, k.roomId);
   state.lastSearchFound = victims.length > 0;
-  if (victims.length === 0) log(state, `${k.name} 搜索，没有发现人。`);
-  else log(state, `${k.name} 搜索，发现了 ${victims.map((v) => v.name).join('、')}！`);
+  if (victims.length === 0) log(state, `${k.name} 搜索房间，没有发现人。`);
+  else log(state, `${k.name} 搜索房间，发现了 ${victims.map((v) => v.name).join('、')}！`);
   return victims.length > 0;
 }
 
@@ -354,7 +817,7 @@ export function startOneDoorBlockade(state: GameState, roomId: string): boolean 
     return false;
   }
   state.pendingBlockadeJob = { kind: 'oneDoor', roomId, need: 1, removeLeft: 1, placed: 0, firstRoomId: null };
-  log(state, '场上可放置封堵不足。请先选一扇场上封堵移除（每次确认），然后再封新门。');
+  log(state, '场上可放置封堵不足。请先选一扇场上封堵移除，然后再封新门。');
   return true;
 }
 
@@ -436,8 +899,8 @@ export function startAnyDoorsBlockade(state: GameState, want: number): boolean {
 export function removeBoardBlockade(state: GameState, doorIdStr: string): void {
   const job = state.pendingBlockadeJob;
   if (!job || job.removeLeft <= 0) throw new Error('当前不是移除场上封堵');
-  if (!state.blockades.includes(doorIdStr)) throw new Error('那里没有封堵');
-  if ((state.blockadesThisAction ?? []).includes(doorIdStr)) {
+  if (!isDoorBlocked(state, doorIdStr)) throw new Error('那里没有封堵');
+  if (state.blockadesThisAction?.some((id) => canonicalDoorId(id) === canonicalDoorId(doorIdStr))) {
     throw new Error('不能拆除本次刚封上的门');
   }
   if (job.kind === 'sealAll' && job.roomId && doorTouchesRoom(doorIdStr, job.roomId)) {
@@ -497,7 +960,7 @@ export function pickAnyDoorRoom(state: GameState, roomId: string): void {
       ((e.from === job.firstRoomId && e.to === roomId) || (e.to === job.firstRoomId && e.from === roomId)),
   );
   if (!edge) throw new Error('这两个地点之间没有可封的门');
-  if (state.blockades.includes(id)) throw new Error('这扇门已经封上了');
+  if (isDoorBlocked(state, id)) throw new Error('这扇门已经封上了');
   job.secondRoomId = roomId;
   log(state, `已选「${roomName(state, job.firstRoomId)}」与「${roomName(state, roomId)}」，请在行动区确认封堵。`);
 }

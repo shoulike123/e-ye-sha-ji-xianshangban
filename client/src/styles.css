@@ -12,7 +12,7 @@
   --line: rgba(243, 230, 212, 0.14);
   --legal: #d4a017;
   --noise: #e07040;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'DM Sans', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   color: var(--ink);
   background: var(--bg0);
 }
@@ -57,7 +57,7 @@ body {
 h1,
 h2,
 h3 {
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', Georgia, 'Songti SC', 'SimSun', serif;
   font-weight: 400;
   margin: 0 0 0.4rem;
 }
@@ -160,6 +160,17 @@ a.ghost-btn {
   border-radius: 4px;
 }
 
+/** 【解散房间】：最顶栏那颗按钮 / 确认面板 */
+.disband-bar {
+  align-items: flex-start;
+  gap: 0.3rem;
+  border-color: #a2453f;
+}
+
+.disband-bar .row {
+  gap: 0.4rem;
+}
+
 .table-layout {
   flex: 1;
   min-height: 0;
@@ -205,6 +216,101 @@ a.ghost-btn {
   container-type: size;
 }
 
+/**
+ * 【地图 + 右侧信息栏】
+ *  - 幸存者：右边是「杀手当前打出的牌」；
+ *  - 杀手：右边是「获得的信息」（只放打牌拿到的那类信息，不是战报）。
+ */
+.table-map .map-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.table-map .map-row .board-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.map-side {
+  flex: 0 0 168px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+/** 收起：只留一条竖排按钮，地图占满整宽 */
+.map-side.collapsed {
+  flex: 0 0 28px;
+  overflow: hidden;
+  padding: 0.35rem 0.1rem;
+}
+
+.map-side-toggle {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.4rem;
+  padding: 0.15rem 0.25rem;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.map-side-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.map-side.collapsed .map-side-toggle {
+  margin: 0;
+  padding: 0.5rem 0.15rem;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.05em;
+}
+
+.map-side h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.88rem;
+}
+
+.map-side p {
+  margin: 0.2rem 0;
+}
+
+.map-side-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.map-side-card-name {
+  font-weight: 600;
+}
+
+.intel-entry + .intel-entry {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.16);
+}
+
+.intel-entry ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.05rem;
+}
+
 .killer-place-bar {
   flex: 0 0 auto;
   display: flex;
@@ -218,6 +324,51 @@ a.ghost-btn {
   position: relative;
   line-height: 0;
   overflow: visible;
+}
+
+/* —— 右键地点的小菜单（列出该地点当前有什么） —— */
+.room-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+  cursor: default;
+}
+
+.room-menu {
+  position: absolute;
+  z-index: 41;
+  min-width: 120px;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 213, 168, 0.55);
+  background: rgba(12, 9, 6, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  line-height: 1.35;
+  color: #f2e6cf;
+  font-size: 13px;
+  text-align: left;
+  pointer-events: auto;
+}
+
+.room-menu-title {
+  font-weight: 700;
+  color: #ffd9a0;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(232, 213, 168, 0.28);
+  white-space: nowrap;
+}
+
+.room-menu-row {
+  padding: 1px 0;
+  white-space: nowrap;
+}
+
+.room-menu-empty {
+  color: #9c8f7a;
+  font-style: italic;
 }
 
 .deck-hotspot {
@@ -393,9 +544,10 @@ a.ghost-btn {
   padding: 0.4rem 0.55rem;
 }
 
+/* 战报用固定高度的滚动框：历史全都在里面，不会把整页越撑越长 */
 .table-log .log-box {
-  max-height: none;
-  overflow: visible;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .hero {
@@ -520,6 +672,16 @@ a.ghost-btn {
   stroke-width: 3;
 }
 
+/*
+ * 【女猎手】开局布陷阱：可以放陷阱的地点画**白色的圈**。
+ * 四个都放完之后服务端不再下发这些地点，圈就自动变回平时的黄色。
+ */
+.room-node.trap-spot {
+  stroke: #ffffff;
+  stroke-width: 3.5;
+  fill: rgba(255, 255, 255, 0.14);
+}
+
 .room-node.blocked {
   stroke: #8a7a5a;
   stroke-dasharray: 4 3;
@@ -535,12 +697,37 @@ a.ghost-btn {
   stroke: #f0c14b;
 }
 
+/*
+ * 移动路径上**已被点选**的格子（含起点/中间步）。
+ * 和末端 `.preview` 同一色系但稍实 —— 一眼看出整条路线，而不只是最后一格。
+ */
+.room-node.path-picked {
+  fill: rgba(212, 160, 23, 0.26);
+  stroke: #f0c14b;
+  stroke-width: 2.5;
+}
+
 .preview-path {
   stroke: #f0c14b;
   stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.75;
+  /**
+   * 移动预览路线：用**流动的虚线**表示"要往那边走"。
+   * 只在移动草稿/预览时有这条折线，所以不影响别的东西。
+   */
+  stroke-dasharray: 10 8;
+  animation: preview-path-flow 0.9s linear infinite;
+}
+
+@keyframes preview-path-flow {
+  from {
+    stroke-dashoffset: 18;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 .preview-token {
@@ -553,14 +740,14 @@ a.ghost-btn {
   font-size: 10px;
   font-weight: 700;
   pointer-events: none;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'DM Sans', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .room-label {
   fill: #dcc9a8;
   font-size: 8px;
   pointer-events: none;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'DM Sans', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .room-tag {
@@ -606,8 +793,49 @@ a.ghost-btn {
   pointer-events: none;
 }
 
+/**
+ * 【分头行动】逃脱/被杀的幸存者：立绘**留在原地**但**变暗**（用户要求）。
+ * 双方地图都画，所以这里是纯粹的视觉状态，不带交互。
+ */
+.map-standee.downed image {
+  opacity: 0.38;
+  filter: grayscale(1) drop-shadow(0 2px 3px #000c);
+}
+
+.map-standee.downed .standee-you,
+.map-standee.downed .standee-acting {
+  display: none;
+}
+
 .map-standee image {
   filter: drop-shadow(0 2px 3px #000c);
+}
+
+/**
+ * 【移动动画】棋子换房间时，从**旧地点**滑到新地点。
+ *
+ * 立绘画在各自房间的 `<g>` 里，换房间 = 换 DOM 节点，所以没法用 `transition`。
+ * `Board` 会把"旧地点相对新地点的位移"写进 `--mv-dx/--mv-dy`，
+ * 新挂载的立绘从这里起手滑回 (0,0) —— 看上去就是"走过去的"。
+ * 加 `just-moved` 才播；不动的棋子没有这个类，不会被影响。
+ */
+@keyframes standee-move-in {
+  from {
+    transform: translate(var(--mv-dx, 0px), var(--mv-dy, 0px));
+    opacity: 0.35;
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+.map-standee.just-moved,
+.zombie-standee.just-moved {
+  animation: standee-move-in 0.42s cubic-bezier(0.22, 0.8, 0.24, 1);
 }
 
 .standee-you {
@@ -803,16 +1031,342 @@ a.ghost-btn {
 }
 
 .killer-info-piece.evo,
-.killer-info-piece.card {
+.killer-info-piece.card,
+.killer-info-piece.rule {
   cursor: zoom-in;
 }
 
 .killer-info-piece.evo img,
-.killer-info-piece.card img {
+.killer-info-piece.card img,
+.killer-info-piece.rule img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
+}
+
+/* 特殊规则卡：金边 + 角标，和行动牌区分开 */
+.killer-info-piece.rule {
+  border-color: #c9a227;
+  box-shadow: 0 0 0 1px #c9a22755, 0 0 10px #c9a22744;
+}
+
+.killer-info-piece.rule::after {
+  content: '特殊规则';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 0;
+  text-align: center;
+  font-size: 0.62rem;
+  color: #1a1410;
+  background: #c9a227dd;
+}
+
+/* 进化卡牌：青边 + 角标 */
+.killer-info-piece.evo-card {
+  cursor: zoom-in;
+  border-color: #4aa3c9;
+  box-shadow: 0 0 0 1px #4aa3c955, 0 0 10px #4aa3c944;
+}
+
+.killer-info-piece.evo-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.killer-info-piece.evo-card::after {
+  content: '进化卡牌';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 0;
+  text-align: center;
+  font-size: 0.62rem;
+  color: #06181f;
+  background: #4aa3c9dd;
+}
+
+/* —— 雕像：杀手行动区的雕像 1–4 选择 —— */
+.statue-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #16120e;
+}
+
+.statue-pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.35rem 0.6rem;
+  min-width: 7.5rem;
+  text-align: left;
+}
+
+.statue-pick-idx {
+  font-weight: 700;
+}
+
+.statue-pick-room {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* 主雕像：金色描边 */
+.statue-pick.main {
+  border-color: #c9a227;
+  box-shadow: 0 0 0 1px #c9a22788, 0 0 10px #c9a22755;
+}
+
+/* 已选中待确认：虚线 */
+.statue-pick.picked {
+  outline: 2px dashed #f0c14b;
+  outline-offset: 2px;
+}
+
+/* 被停滞：灰暗划线 */
+.statue-pick.halted {
+  opacity: 0.65;
+}
+
+.statue-pick-tag {
+  font-size: 0.62rem;
+  color: #1a1410;
+  background: #c9a227;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.statue-pick-tag.halted {
+  background: #9a9a9a;
+}
+
+/* 雕像：正在移动中的提示 */
+.statue-moving-now {
+  border-left: 3px solid #4aa3c9;
+  padding-left: 0.5rem;
+}
+
+/* 已获得的进化卡牌：金色轮廓高亮 */
+.killer-info-piece.evo-card.evo-card-chosen {
+  border-color: #f0c14b;
+  box-shadow: 0 0 0 2px #f0c14b, 0 0 14px #f0c14b88;
+}
+
+/* 杀手信息里「已生效进化」列表中的进化卡牌那一行 */
+.killer-info-evo-list li.evo-card-line {
+  color: #f0c14b;
+  border-top: 1px dashed #f0c14b55;
+  margin-top: 2px;
+  padding-top: 2px;
+}
+
+/* 「或」牌：二选一面板 */
+.effect-choice {
+  margin: 0.4rem 0;
+  padding: 0.5rem;
+  border: 1px solid #7a5a2a;
+  border-radius: 8px;
+  background: #1c1510;
+}
+
+/* 女猎手放置陷阱面板 */
+.trap-place {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+  padding: 0.5rem;
+  border: 1px solid #7a5a2a;
+  border-radius: 8px;
+  background: #1c1510;
+}
+
+/* 幸存者侧的「停滞雕像」面板 */
+.statue-halt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+  padding: 0.5rem;
+  border: 1px solid #7a5a2a;
+  border-radius: 8px;
+  background: #1c1510;
+}
+
+/* 地图上的雕像立绘：主雕像轮廓高亮 / 幸存者猜测轮廓 */
+.statue-standee .standee-main-outline {
+  fill: none;
+  stroke: #f0c14b;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px #f0c14b);
+}
+
+.statue-standee .standee-guess-outline {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-dasharray: 5 3;
+}
+
+/**
+ * 【扼杀者核心标记】与【女王僵尸立绘】外围的**细白色高光** ——
+ * 这两样在暗色地图上很容易和背景糊在一起，加一圈细白边能一眼看清。
+ */
+.core-marker-glow,
+.zombie-glow {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1.2;
+  stroke-opacity: 0.9;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.75));
+}
+
+/*
+ * 【杀手打牌后的信息块】—— 已经**废弃**：用户要求把这类信息移到
+ * 地图右边的信息区（`.map-side-intel`）、并删掉行动区的"确认"流程。
+ * 样式留着是因为 `analysis-panel` 之类可能还引用同名类；不再有新代码用它。
+ */
+.killer-info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0;
+  border: 1px solid #c9932f;
+  border-left-width: 5px;
+  border-radius: 6px;
+  background: rgba(201, 147, 47, 0.12);
+}
+
+.killer-info-block h4 {
+  margin: 0;
+  color: #f0c14b;
+}
+
+.killer-info-block ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.killer-info-block li {
+  line-height: 1.5;
+}
+
+.statue-standee.halted {
+  opacity: 0.55;
+}
+
+/*
+ * 【停滞】被停滞的雕像立绘上画一个**红叉**（双方地图都画）。
+ * 停滞效果在新大回合开始时清掉，这个叉也就跟着消失了。
+ */
+.statue-standee .standee-halt-x line {
+  stroke: #ff5a5a;
+  stroke-width: 5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(255, 90, 90, 0.85));
+}
+
+/*
+ * 【停滞】幸存者正在选"要停滞哪尊"时，**可选的雕像立绘上下浮动**
+ * （用户要求：「选择被停滞的雕像时那个雕像立绘要呈浮动状态」）。
+ */
+@keyframes statue-halt-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+
+.statue-standee.halt-pickable {
+  animation: statue-halt-float 1.1s ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(255, 210, 120, 0.9));
+}
+
+/* —— 求生者相关物品 —— */
+/*
+ * 「求生者相关物品」面板：
+ * 三行，每行一名幸存者；行内物品**横向排列**，卡片尺寸固定。
+ *
+ * 历史坑：这里写死过一次 190px 行高，而色块是 `h:28%` → 卡片只剩 53px；
+ * 后来改成按 `h%` 反推行高，结果算到 680px、框大得全是空白。
+ * 现在**卡片定尺寸、框贴合卡片**，不再让 `h%` 参与尺寸计算。
+ */
+.survivor-items-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.survivor-items-row {
+  position: relative;
+  /* 行高由内容（卡片 130px + 名字一行）撑开，不再写死、也不再按百分比算 */
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.7rem 0.6rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #16120e;
+}
+
+.survivor-items-name {
+  position: absolute;
+  left: 0.6rem;
+  top: 0.5rem;
+  z-index: 1;
+  font-weight: 700;
+  color: #f0c14b;
+  pointer-events: none;
+}
+
+/*
+ * 一张专属物品卡：高度固定，宽度按卡牌比例（531:803 ≈ 0.661）算出来。
+ * 这样它看起来就和别处的卡牌一个大小。
+ */
+.survivor-item-piece {
+  --item-card-h: 130px;
+  position: relative;
+  margin: 0;
+  padding: 0;
+  width: calc(var(--item-card-h) * 0.661);
+  height: var(--item-card-h);
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: zoom-in;
+  flex: 0 0 auto;
+}
+
+.survivor-item-piece img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.survivor-item-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .killer-info-piece.effects {
@@ -1026,7 +1580,7 @@ a.ghost-btn {
   align-items: center;
   justify-content: center;
   color: #f3e6d4;
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Instrument Serif', Georgia, 'Songti SC', 'SimSun', serif;
   font-size: clamp(1.2rem, 3.2cqw, 2.4rem);
   font-weight: 700;
   text-shadow: 0 1px 4px #000c;
@@ -1040,6 +1594,8 @@ a.ghost-btn {
 .killer-dock {
   width: 100%;
   margin-bottom: 0.45rem;
+  /** 【变体1】特性卡块要贴着这个区域 —— 它自己也得是定位上下文 */
+  position: relative;
 }
 
 .killer-dock-stage {
@@ -1138,6 +1694,123 @@ a.ghost-btn {
   border-style: dashed;
   background: transparent;
   cursor: default;
+}
+
+/**
+ * 【通用"新到手"动画】背包里刚入手的物品、钥匙架上刚挂上的钥匙…
+ * 元素是新挂载的（或刚带上 `pop-in`），所以动画只在那一刻播一次。
+ */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.45) rotate(-10deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.pop-in {
+  animation: pop-in 0.32s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+/**
+ * 【分头行动】顶栏标识 —— 替换原来的钥匙架（钥匙各自保管、不上架）。
+ * 用官方木牌素材，铺满这一块并保持比例。
+ */
+.split-badge-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+
+/**
+ * 【分头行动】先手标记 —— 在「持有钥匙」**上方**（用户要求先手在钥匙之前）。
+ */
+.surv-first-mark {
+  position: absolute;
+  left: 0;
+  top: -2.05rem;
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+  color: #7fd1ff;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+/**
+ * 【分头行动】物品栏上方的「持有钥匙」小标签。
+ * 绝对定位，**不参与**那三/六个物品格子的流式排布（否则会挤动它们）。
+ */
+.surv-held-keys {
+  position: absolute;
+  left: 0;
+  top: -1.05rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  white-space: nowrap;
+  color: #f0c14b;
+  pointer-events: none;
+}
+
+/**
+ * 【一般行动的确认栏】—— 行动区里的一条普通面板。
+ * 用它替代 `window.confirm`：不遮地图、不冻界面，动画照常播。
+ */
+.pending-act-bar {
+  border: 1px solid #c9932f;
+  border-left-width: 5px;
+  border-radius: 6px;
+  background: rgba(201, 147, 47, 0.12);
+  padding: 0.5rem 0.75rem;
+}
+
+.pending-act-bar strong {
+  color: #f0c14b;
+}
+
+/**
+ * 【摸牌动画】新摸进来的手牌从下方滑入。
+ * `KillerDock` 按"下标 >= 上一次的手牌数"给它挂 `card-enter`，
+ * 只有刚摸到的那几张会播。
+ */
+@keyframes card-draw-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.84);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.killer-dock-hand.card-enter,
+.card.card-enter {
+  animation: card-draw-in 0.34s cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+
+/**
+ * 【打出牌进弃牌堆】弃牌堆顶那张牌落下来。
+ * 靠 `key` 换掉元素来重播（见 `KillerDock` 的 `discardTopKey`）。
+ */
+@keyframes card-drop-in {
+  from {
+    opacity: 0.25;
+    transform: translateY(-18px) rotate(-6deg) scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+.card-drop-in {
+  animation: card-drop-in 0.3s ease-out;
 }
 
 .killer-dock-evo,
@@ -1262,7 +1935,8 @@ a.ghost-btn {
 
 .surv-skills-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 列数由组件按在场幸存者数写成 style="--board-cols:N"；兜底 3 列 */
+  grid-template-columns: repeat(var(--board-cols, 3), minmax(0, 1fr));
   gap: 0.4rem;
   flex-shrink: 0;
 }
@@ -1329,6 +2003,29 @@ a.ghost-btn {
   color: #fff6e4;
   text-shadow: 0 1px 3px #000;
   pointer-events: none;
+}
+
+/*
+ * 幸存者身上的标记（鼓励标记 / 坚毅标记）：
+ * **只画在装备卡里的人物身体上**，位置由 survivorLayout.skillBoard.body 决定。
+ */
+.surv-body-token {
+  position: absolute;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.85));
+  animation: surv-token-in 0.22s ease-out;
+}
+
+@keyframes surv-token-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .surv-board-pop {
@@ -1781,10 +2478,44 @@ body.surv-item-dragging {
 .df-4 { transform: rotateX(90deg) translateZ(44px); }
 .df-5 { transform: rotateX(-90deg) translateZ(44px); }
 
+/* 同队幸存者的鼠标预选圈（1对2 / 1对3 互看） */
+.room-cursor {
+  fill: none;
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+  pointer-events: none;
+  opacity: 0.9;
+  animation: cursor-dash 1.2s linear infinite;
+}
+
+@keyframes cursor-dash {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+
 .dice-caption {
   color: #fff6e4;
   font-size: 1.05rem;
   text-shadow: 0 2px 8px #000;
+}
+
+/* 鸿运当骰：可点选重掷的骰子 */
+.dice-pick {
+  cursor: pointer;
+  pointer-events: auto;
+  border-radius: 10px;
+  padding: 4px;
+  transition: box-shadow 0.12s, background 0.12s;
+}
+
+.dice-pick:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dice-picked {
+  background: rgba(240, 193, 75, 0.22);
+  box-shadow: 0 0 0 3px #f0c14b, 0 0 14px #f0c14baa;
 }
 
 @keyframes dice-spin {
@@ -1851,7 +2582,13 @@ body.surv-item-dragging {
 .map-skill-card {
   position: absolute;
   z-index: 5;
-  pointer-events: none;
+  /* 这里必须是 auto：原来写成 none，导致地图上三张幸存者技能牌收不到点击，
+     写了 onClick 也永远不触发（放大功能等于没有）。 */
+  pointer-events: auto;
+  cursor: zoom-in;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .map-skill-card img {
@@ -1914,6 +2651,20 @@ body.surv-item-dragging {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.88rem;
+  /* 现在这一行是可点的按钮（点开看大图） */
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.15rem 0.3rem;
+  color: inherit;
+  text-align: left;
+  font-family: inherit;
+}
+
+.pile-inspect-row:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--line);
 }
 
 .pile-inspect-row img {
@@ -1963,6 +2714,15 @@ body.surv-item-dragging {
   color: var(--muted);
 }
 
+/* 整张立绘 / 技能图 / 牌堆里的牌面：给更大的画布，方便看清牌面文字 */
+.card-zoom.art {
+  width: min(760px, 96vw);
+}
+
+.card-zoom.art .card-zoom-art {
+  max-height: min(78vh, 900px);
+}
+
 .card-zoom-meta h3 {
   margin: 0 0 0.35rem;
   font-size: 1.15rem;
@@ -2000,4 +2760,179 @@ body.surv-item-dragging {
   .hud-overlay-card .rescue-track {
     height: 180px;
   }
+}
+
+/* ============================================================
+   【变体1】特性卡
+   —— 开局选卡弹窗 + 展示用的卡（幸存者物品栏下方 / 杀手信息面板）
+   ============================================================ */
+
+/* 开局选卡弹窗：宽一点，几张卡并排 */
+.trait-pick-card {
+  max-width: min(1200px, 94vw);
+}
+
+.trait-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin: 0.5rem 0;
+}
+
+.trait-pick-item {
+  width: 330px;
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  border: 2px solid #444;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+
+.trait-pick-item:hover {
+  transform: translateY(-2px);
+}
+
+/* 选中的那张：金色描边 + 发光，一眼看出选了几张 */
+.trait-pick-item.picked {
+  border-color: #ffd76a;
+  box-shadow: 0 0 0 2px rgba(255, 215, 106, 0.4), 0 0 18px rgba(255, 215, 106, 0.35);
+}
+
+.trait-pick-item img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  /** 提示"这张图可以点开看大图" */
+  cursor: zoom-in;
+}
+
+.trait-pick-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.trait-pick-text {
+  font-size: 0.92rem;
+  line-height: 1.35;
+  opacity: 0.85;
+  text-align: center;
+}
+
+/* 展示用的一行小卡（物品栏下方 / 杀手信息面板 / 杀手卡牌区）
+ *
+ * 尺寸都在下面这三条里调（用户要求：特性卡别太小）。 */
+.trait-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.trait-chip {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.trait-chip img {
+  width: 150px;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+
+/* 已经用掉的「每场游戏仅限一次」：卡面变暗 */
+.trait-chip.used img {
+  filter: brightness(0.42) grayscale(0.7);
+}
+
+/* 杀手视角：特性卡放在杀手信息面板里的那一块 */
+.killer-info-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+.killer-info-traits .trait-chip img {
+  width: 190px;
+}
+
+/* 杀手信息面板最下方那一块（用户要求：特性卡放面板最下方，不放标题处） */
+.killer-info-traits-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* 杀手卡牌区（KillerActionDock）里的那一份：出现在卡牌区**正下方**
+ *
+ * ⚠ 别改成 `position:absolute` —— `.killer-dock` 里真正带定位的是
+ * `.killer-dock-stage`，绝对定位会相对更外层的祖先算，卡会**飞出卡牌区看不见**
+ * （用户报的"这个是杀手卡牌区，怎么没有"就是这个原因）。
+ */
+.killer-dock-traits {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: flex-end;
+  margin-top: 0.35rem;
+  pointer-events: auto;
+}
+
+.killer-dock-trait-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.killer-dock-trait-name {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.killer-dock-traits .trait-chip img {
+  width: 130px;
+}
+
+/* 【变体1】杀手在卡牌区发动特性卡时的提示条。
+ * ⚠ 文案来自**独立字段** `traitPayHint`，不借用"打出某张牌的代价"那一套。 */
+.killer-dock-trait-pay {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid rgba(255, 215, 106, 0.5);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 0.85rem;
+}
+
+/* 正在为它选弃牌的那张特性卡：金色描边 */
+.trait-chip.pending img {
+  box-shadow: 0 0 0 2px #ffd76a, 0 0 14px rgba(255, 215, 106, 0.5);
+}
+
+/* 【变体1】现在不能发动的特性卡（手牌不够等）：压暗 + 不允许点 */
+.trait-chip.blocked {
+  cursor: not-allowed;
+}
+
+.trait-chip.blocked img {
+  filter: brightness(0.55) saturate(0.6);
 }

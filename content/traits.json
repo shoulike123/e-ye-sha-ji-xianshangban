@@ -1,0 +1,395 @@
+{
+  "note": "【变体1】特性卡：幸存者 20 张 + 杀手 20 张。素材 Image/Traits/{幸存者,杀手}/NN_名称.png（从官方拼版图无损裁出）。kind：passive=被动自动 / special=特殊行动 / extra=额外行动 / trigger=时机触发；oncePerGame=（每场游戏仅限一次），用掉后卡牌变暗；optional=卡面写「可以」，需要玩家选择并确认；setup=开局设置类。",
+  "traits": [
+    {
+      "id": "trait_s01",
+      "faction": "survivor",
+      "index": 1,
+      "name": "速度爆发",
+      "kind": "special",
+      "oncePerGame": true,
+      "text": "（每场游戏仅限一次）特殊行动：在你的地点发出响声，然后【移动】X2-4。",
+      "art": "/Image/Traits/幸存者/01_速度爆发.png"
+    },
+    {
+      "id": "trait_s02",
+      "faction": "survivor",
+      "index": 2,
+      "name": "调度人员",
+      "kind": "special",
+      "text": "特殊行动：位于同一地点的所有其他幸存者【移动】X1-2。",
+      "art": "/Image/Traits/幸存者/02_调度人员.png"
+    },
+    {
+      "id": "trait_s03",
+      "faction": "survivor",
+      "index": 3,
+      "name": "草药知识",
+      "kind": "passive",
+      "text": "使用草药（治疗自己或其他幸存者）时你不会发出响声。",
+      "art": "/Image/Traits/幸存者/03_草药知识.png"
+    },
+    {
+      "id": "trait_s04",
+      "faction": "survivor",
+      "index": 4,
+      "name": "持枪证明",
+      "kind": "passive",
+      "setup": true,
+      "text": "游戏开始时，从发现牌堆搜索一张左轮手枪加入你的物品栏，然后洗混牌堆。使用弹药包或者银质子弹时，+1 额外防御值。",
+      "art": "/Image/Traits/幸存者/04_持枪证明.png"
+    },
+    {
+      "id": "trait_s05",
+      "faction": "survivor",
+      "index": 5,
+      "name": "武艺超群",
+      "kind": "passive",
+      "text": "一次遭遇期间，如果你没有使用任何物品来增强你的防御，则 +1 防御值（和威廉「坚韧不拔」各自独立结算，可叠加）。",
+      "art": "/Image/Traits/幸存者/05_武艺超群.png"
+    },
+    {
+      "id": "trait_s06",
+      "faction": "survivor",
+      "index": 6,
+      "name": "匆匆逃离",
+      "kind": "trigger",
+      "optional": true,
+      "text": "当你在位于杀手距离 1 以内的位置，选择【移动】作为基础行动时，你可以额外【移动】X1。",
+      "art": "/Image/Traits/幸存者/06_匆匆逃离.png"
+    },
+    {
+      "id": "trait_s07",
+      "faction": "survivor",
+      "index": 7,
+      "name": "无所畏惧",
+      "kind": "passive",
+      "text": "选择【移动】作为你的基础行动时，移除你的 1 个恐惧标记。",
+      "art": "/Image/Traits/幸存者/07_无所畏惧.png"
+    },
+    {
+      "id": "trait_s08",
+      "faction": "survivor",
+      "index": 8,
+      "name": "紧急救治",
+      "kind": "special",
+      "oncePerGame": true,
+      "text": "（每场游戏仅限一次）特殊行动：【治疗】另一名幸存者（需要位于同一地点）。",
+      "art": "/Image/Traits/幸存者/08_紧急救治.png"
+    },
+    {
+      "id": "trait_s09",
+      "faction": "survivor",
+      "index": 9,
+      "name": "生存本能",
+      "kind": "trigger",
+      "optional": true,
+      "text": "在你遭遇杀手后，你可以【移动】最多 2，而不是 1。之后，移除你的所有恐惧标记。",
+      "art": "/Image/Traits/幸存者/09_生存本能.png"
+    },
+    {
+      "id": "trait_s10",
+      "faction": "survivor",
+      "index": 10,
+      "name": "鼓舞士气",
+      "kind": "special",
+      "text": "特殊行动：移除任意地点中所有其他幸存者的所有恐惧标记。",
+      "art": "/Image/Traits/幸存者/10_鼓舞士气.png"
+    },
+    {
+      "id": "trait_s11",
+      "faction": "survivor",
+      "index": 11,
+      "name": "安静搜查",
+      "kind": "trigger",
+      "oncePerGame": true,
+      "optional": true,
+      "text": "（每场游戏仅限一次）取消你自己翻发现牌造成的一个响声。",
+      "art": "/Image/Traits/幸存者/11_安静搜查.png"
+    },
+    {
+      "id": "trait_s12",
+      "faction": "survivor",
+      "index": 12,
+      "name": "英勇阻截",
+      "kind": "trigger",
+      "optional": true,
+      "text": "当你和任意幸存者共同遭遇杀手时，你可以让所有其他幸存者【移动】X1 来逃离这次攻击（在告知杀手找到的是哪些幸存者之后再使用本卡牌）。跑掉的人脱离这次遭遇。",
+      "art": "/Image/Traits/幸存者/12_英勇阻截.png"
+    },
+    {
+      "id": "trait_s13",
+      "faction": "survivor",
+      "index": 13,
+      "name": "声音诱饵",
+      "kind": "extra",
+      "oncePerGame": true,
+      "text": "（每场游戏仅限一次）额外行动：在任意地点发出响声。",
+      "art": "/Image/Traits/幸存者/13_声音诱饵.png"
+    },
+    {
+      "id": "trait_s14",
+      "faction": "survivor",
+      "index": 14,
+      "name": "嘲讽战术",
+      "kind": "special",
+      "text": "特殊行动：在你的地点发出响声，杀手弃掉 3 张卡牌并抽取 1 张卡牌。",
+      "art": "/Image/Traits/幸存者/14_嘲讽战术.png"
+    },
+    {
+      "id": "trait_s15",
+      "faction": "survivor",
+      "index": 15,
+      "name": "吉人天相",
+      "kind": "passive",
+      "text": "在一次遭遇期间，如果你所有的投掷结果都为 0，则算作防御成功。",
+      "art": "/Image/Traits/幸存者/15_吉人天相.png"
+    },
+    {
+      "id": "trait_s16",
+      "faction": "survivor",
+      "index": 16,
+      "name": "高度警觉",
+      "kind": "passive",
+      "text": "当你位于杀手距离 1 以内，修理、搜索、发现造成的响声不会发出（但不包括物品、特性或计划造成的响声）。",
+      "art": "/Image/Traits/幸存者/16_高度警觉.png"
+    },
+    {
+      "id": "trait_s17",
+      "faction": "survivor",
+      "index": 17,
+      "name": "秘密武器",
+      "kind": "trigger",
+      "oncePerGame": true,
+      "optional": true,
+      "text": "（每场游戏仅限一次）你可以在一次遭遇期间展示本卡牌，将本卡牌视为一个 +4 防御值的物品（算作使用物品加防）。",
+      "art": "/Image/Traits/幸存者/17_秘密武器.png"
+    },
+    {
+      "id": "trait_s18",
+      "faction": "survivor",
+      "index": 18,
+      "name": "拾物妙手",
+      "kind": "trigger",
+      "oncePerGame": true,
+      "optional": true,
+      "text": "（每场游戏仅限一次）保留你在回合结束发现的两件物品（弃掉发现的卡牌前使用本卡牌）。",
+      "art": "/Image/Traits/幸存者/18_拾物妙手.png"
+    },
+    {
+      "id": "trait_s19",
+      "faction": "survivor",
+      "index": 19,
+      "name": "明智之举",
+      "kind": "extra",
+      "oncePerGame": true,
+      "text": "（每场游戏仅限一次）额外行动：移除一个封堵标记，或移除你的所有恐惧标记，或在一个相邻地点发出响声。",
+      "art": "/Image/Traits/幸存者/19_明智之举.png"
+    },
+    {
+      "id": "trait_s20",
+      "faction": "survivor",
+      "index": 20,
+      "name": "迅速反应",
+      "kind": "extra",
+      "oncePerGame": true,
+      "text": "（每场游戏仅限一次）额外行动：【移动】X1。",
+      "art": "/Image/Traits/幸存者/20_迅速反应.png"
+    },
+    {
+      "id": "trait_k01",
+      "faction": "killer",
+      "index": 1,
+      "name": "完全围困",
+      "kind": "trigger",
+      "optional": true,
+      "text": "你的回合结束时，如果在本回合你没有遭遇幸存者并且你不在【潜行】，你可以弃掉 2 张卡牌在你的地点【封堵】X1。",
+      "art": "/Image/Traits/杀手/01_完全围困.png"
+    },
+    {
+      "id": "trait_k02",
+      "faction": "killer",
+      "index": 2,
+      "name": "玩弄猎物",
+      "kind": "trigger",
+      "optional": true,
+      "text": "当你遭遇任何幸存者时，你可以立刻取消遭遇。然后，你抽取 3 张卡牌（回合结束时照常再摸 3 张）并结束你的回合。",
+      "art": "/Image/Traits/杀手/02_玩弄猎物.png"
+    },
+    {
+      "id": "trait_k03",
+      "faction": "killer",
+      "index": 3,
+      "name": "狡猾诡计",
+      "kind": "passive",
+      "setup": true,
+      "text": "游戏开始时，抽取额外一张卡牌。在游戏期间，如果你超出了手牌上限，你可以弃掉任意手牌，而不是只能弃掉新抽到的卡牌。",
+      "art": "/Image/Traits/杀手/03_狡猾诡计.png"
+    },
+    {
+      "id": "trait_k04",
+      "faction": "killer",
+      "index": 4,
+      "name": "噩梦降临",
+      "kind": "trigger",
+      "setup": true,
+      "text": "游戏开始时，【惊吓】所有幸存者。",
+      "art": "/Image/Traits/杀手/04_噩梦降临.png"
+    },
+    {
+      "id": "trait_k05",
+      "faction": "killer",
+      "index": 5,
+      "name": "迅捷行动",
+      "kind": "trigger",
+      "optional": true,
+      "text": "你的回合开始时，如果你不在【潜行】，你可以弃掉 2 张卡牌来【移动】X1。",
+      "art": "/Image/Traits/杀手/05_迅捷行动.png"
+    },
+    {
+      "id": "trait_k06",
+      "faction": "killer",
+      "index": 6,
+      "name": "敏锐听觉",
+      "kind": "trigger",
+      "optional": true,
+      "text": "你的回合开始时，你可以弃掉任意 1 张卡牌来感知一个带有响声的地点。",
+      "art": "/Image/Traits/杀手/06_敏锐听觉.png"
+    },
+    {
+      "id": "trait_k07",
+      "faction": "killer",
+      "index": 7,
+      "name": "进阶追踪",
+      "kind": "trigger",
+      "optional": true,
+      "text": "你的回合开始时，如果你不在【潜行】，你可以弃掉 1 张卡牌来【感知】距离 1 内的所有地点。",
+      "art": "/Image/Traits/杀手/07_进阶追踪.png"
+    },
+    {
+      "id": "trait_k08",
+      "faction": "killer",
+      "index": 8,
+      "name": "压抑怒火",
+      "kind": "passive",
+      "setup": true,
+      "text": "游戏开始时，你没有起始手牌并 -1 力量。当你升级到等级 3 时，立刻升级到等级 4。",
+      "art": "/Image/Traits/杀手/08_压抑怒火.png"
+    },
+    {
+      "id": "trait_k09",
+      "faction": "killer",
+      "index": 9,
+      "name": "慢热杀手",
+      "kind": "passive",
+      "setup": true,
+      "text": "游戏开始时，-1 力量。当你升级时，+1 力量。",
+      "art": "/Image/Traits/杀手/09_慢热杀手.png"
+    },
+    {
+      "id": "trait_k10",
+      "faction": "killer",
+      "index": 10,
+      "name": "即刻反应",
+      "kind": "trigger",
+      "optional": true,
+      "text": "如果你使用【感知】发现了任何幸存者，你可以弃掉 1 张卡牌来【移动】X1。",
+      "art": "/Image/Traits/杀手/10_即刻反应.png"
+    },
+    {
+      "id": "trait_k11",
+      "faction": "killer",
+      "index": 11,
+      "name": "恐惧迸发",
+      "kind": "trigger",
+      "text": "当你伤害任何幸存者时，【惊吓】所有幸存者。",
+      "art": "/Image/Traits/杀手/11_恐惧迸发.png"
+    },
+    {
+      "id": "trait_k12",
+      "faction": "killer",
+      "index": 12,
+      "name": "致命攻击",
+      "kind": "passive",
+      "text": "+1 力量。",
+      "art": "/Image/Traits/杀手/12_致命攻击.png"
+    },
+    {
+      "id": "trait_k13",
+      "faction": "killer",
+      "index": 13,
+      "name": "阴险圈套",
+      "kind": "trigger",
+      "setup": true,
+      "text": "游戏开始时，在任意地点总计【封堵】X2（可以在多个地点使用，地点由杀手选）。",
+      "art": "/Image/Traits/杀手/13_阴险圈套.png"
+    },
+    {
+      "id": "trait_k14",
+      "faction": "killer",
+      "index": 14,
+      "name": "埋伏等待",
+      "kind": "passive",
+      "setup": true,
+      "text": "你开始游戏时等级为 2，但跳过你自己的第一个回合。",
+      "art": "/Image/Traits/杀手/14_埋伏等待.png"
+    },
+    {
+      "id": "trait_k15",
+      "faction": "killer",
+      "index": 15,
+      "name": "谋杀意图",
+      "kind": "trigger",
+      "optional": true,
+      "text": "如果你使用【感知】发现了任何幸存者，你可以弃掉 1 张卡牌来【惊吓】他们。",
+      "art": "/Image/Traits/杀手/15_谋杀意图.png"
+    },
+    {
+      "id": "trait_k16",
+      "faction": "killer",
+      "index": 16,
+      "name": "敏锐感知",
+      "kind": "trigger",
+      "optional": true,
+      "text": "每轮一次，如果你使用【感知】发现了任何幸存者，你可以额外【感知】一个颜色区域。",
+      "art": "/Image/Traits/杀手/16_敏锐感知.png"
+    },
+    {
+      "id": "trait_k17",
+      "faction": "killer",
+      "index": 17,
+      "name": "压迫威慑",
+      "kind": "trigger",
+      "text": "当你升级到等级 3/4/5 时，【惊吓】任意 1 个幸存者（由杀手选人）。",
+      "art": "/Image/Traits/杀手/17_压迫威慑.png"
+    },
+    {
+      "id": "trait_k18",
+      "faction": "killer",
+      "index": 18,
+      "name": "狡诈猎手",
+      "kind": "trigger",
+      "text": "当你升级到等级 2/4 时，在任意地点【封堵】X1（地点由杀手选）。",
+      "art": "/Image/Traits/杀手/18_狡诈猎手.png"
+    },
+    {
+      "id": "trait_k19",
+      "faction": "killer",
+      "index": 19,
+      "name": "恐惧光环",
+      "kind": "trigger",
+      "text": "你的回合结束时，如果在本回合你没有遭遇幸存者并且你不在【潜行】，【惊吓】你所在地点的所有幸存者。",
+      "art": "/Image/Traits/杀手/19_恐惧光环.png"
+    },
+    {
+      "id": "trait_k20",
+      "faction": "killer",
+      "index": 20,
+      "name": "危险伏击",
+      "kind": "trigger",
+      "optional": true,
+      "text": "你的回合结束时，如果在本回合你没有遭遇幸存者并且你不在【潜行】，可以弃掉 1 张卡牌来【潜行】X0-2。",
+      "art": "/Image/Traits/杀手/20_危险伏击.png"
+    }
+  ]
+}

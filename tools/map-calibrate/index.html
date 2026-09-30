@@ -14,7 +14,7 @@
     </label>
     <label>视角
       <select id="sideSelect">
-        <option value="survivor">求生者</option>
+        <option value="survivor">幸存者</option>
         <option value="killer">杀手</option>
       </select>
     </label>
@@ -24,7 +24,7 @@
     <nav class="nav">
       <a href="/">回对局</a>
       <a href="/map-debug/">移动调试</a>
-      <a href="/ui-layout/">求生者界面校准</a>
+      <a href="/ui-layout/">幸存者界面校准</a>
       <a href="/ui-debug/">界面调试</a>
     </nav>
   </header>
@@ -45,8 +45,13 @@
         <label class="check"><input type="checkbox" id="showTokens" checked /> 道具</label>
         <label class="check"><input type="checkbox" id="showEdges" checked /> 通道</label>
         <label class="check"><input type="checkbox" id="showBlockades" checked /> 封堵标记（白门）</label>
-        <p class="hint">每扇白实线门在求生者图、杀手图上各有一枚封堵标记。切换「视角」后分别拖到白门上，保存后对局里封堵会显示在对应位置。</p>
-        <p class="hint">救援警车：每张图每侧 6 格（5→0）各有一辆警车。把它们拖进对应方框。求生者车开到第 N 格时，杀手图会显示杀手侧同一格的车。</p>
+        <label class="check"><input type="checkbox" id="showGates" checked /> 机关大门（城堡）</label>
+        <label class="check"><input type="checkbox" id="showCollapseMarks" checked /> 坍塌板块（墓穴）</label>
+        <p class="hint">每扇白实线门在幸存者图、杀手图上各有一枚封堵标记。切换「视角」后分别拖到白门上，保存后对局里封堵会显示在对应位置。</p>
+        <p class="hint"><strong>机关大门（只有城堡有）和封堵共用同一个位置</strong> —— 位置、大小、角度全读那扇门的封堵数据，画的时候只把图片换成竖闸门。所以这里它是<strong>只读预览</strong>：想调就调封堵，拖封堵 = 拖机关大门。不用另存字段。</p>
+        <p class="hint">急救箱（只有实验室有）：它就是「全部道具」列表里的 <code>firstAidKit</code>，和手提箱一样直接拖。它写的是 <code>side: "survivor"</code>，所以**只有幸存者的地图上画**。位置存在 <code>content/maps/laboratory.json</code> 的 <code>tokens</code>。</p>
+        <p class="hint">救援警车：每张图每侧 6 格（5→0）各有一辆警车。把它们拖进对应方框。幸存者车开到第 N 格时，杀手图会显示杀手侧同一格的车。</p>
+        <p class="hint">坍塌板块（只有墓穴有）：4 块全都画出来，先摆好位置；对局里只画"已经塌了"的那些。位置 <code>content/maps/crypt.json</code> 的 <code>collapsedMarks</code>。</p>
       </section>
 
       <section>
@@ -65,7 +70,7 @@
 
       <section>
         <h2>选中对象</h2>
-        <div id="inspector" class="inspector muted">点击地图上的圆点、矩形、道具或连线。选中地点可改求生者名和杀手名。</div>
+        <div id="inspector" class="inspector muted">点击地图上的圆点、矩形、道具或连线。选中地点可改幸存者名和杀手名。</div>
       </section>
 
       <section>
@@ -80,6 +85,7 @@
     </aside>
   </div>
 
+  <script src="/shared/util.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -12,14 +12,15 @@
     <label>面板
       <select id="panelSelect">
         <option value="hud">公共 · 顶栏三块位置</option>
-        <option value="status">公共 · 求生者状态栏</option>
+        <option value="status">公共 · 幸存者状态栏</option>
         <option value="keys">公共 · 钥匙格</option>
         <option value="rescue">公共 · 救援警车格</option>
         <option value="public">公共 · 进化 / 等级 / 力量</option>
-        <option value="skill3">求生者 · 技能背包 3 格</option>
-        <option value="skill6">求生者 · 技能背包 6 格</option>
+        <option value="skill3">幸存者 · 技能背包 3 格</option>
+        <option value="skill6">幸存者 · 技能背包 6 格</option>
         <option value="killer">杀手 · 立绘 / 牌堆 / 手牌 / 进化 / 锁定牌</option>
-        <option value="killerInfo">杀手信息 · 进化牌 / 锁定牌 / 行动牌</option>
+        <option value="killerInfo">杀手信息 · 进化牌 / 锁定牌 / 行动牌 / 特殊规则 / 进化卡牌</option>
+        <option value="survivorItems">求生者相关物品 · 3 行专属物品</option>
       </select>
     </label>
     <label>预览杀手
@@ -27,6 +28,12 @@
         <option value="killer1">屠夫</option>
         <option value="killer2">幽魂</option>
         <option value="killer3">谋杀者</option>
+        <option value="killer4">女猎手</option>
+        <option value="killer5">狼人</option>
+        <option value="killer6">雕像</option>
+        <option value="killer7">未命名</option>
+        <option value="killer8">扼杀者</option>
+        <option value="killer9">女王</option>
       </select>
     </label>
     <button type="button" id="reloadBtn">重新加载</button>
@@ -58,6 +65,8 @@
       </section>
     </aside>
   </div>
+  <script src="/shared/util.js"></script>
+  <script src="/shared/killer-art.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

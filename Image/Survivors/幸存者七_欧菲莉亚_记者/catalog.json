@@ -1,0 +1,25 @@
+{
+  "id": "survivor7",
+  "name": "欧菲莉亚·罗梅罗",
+  "nameEn": "Ophelia Romero",
+  "role": "记者",
+  "folder": "幸存者七_欧菲莉亚_记者",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "encourage",
+      "name": "言语鼓励",
+      "text": "特殊行动：移除任意 1 名幸存者的所有恐惧，并在目标上放置一个鼓励标记（取消恐惧 或 +1 防御值）"
+    },
+    {
+      "id": "sixth_sense",
+      "name": "第六感",
+      "text": "你搜索时，可以抽取 2 张卡牌，将其中 1 张返回搜索牌库顶（返回的卡牌不会触发警报）"
+    }
+  ],
+  "token": "Image/UI/欧菲莉亚的鼓励标记.png"
+}

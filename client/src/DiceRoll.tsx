@@ -40,19 +40,57 @@ export function DiceOverlay({ roll }: { roll: DiceRollData | null }) {
     };
   }, [roll?.id]);
 
-  const faces = useMemo(() => {
-    if (!shown) return [];
-    const used = DICE_FACES.map(() => false);
-    return shown.values.map((v) => faceIndexForValue(v, used));
-  }, [shown]);
-
   if (!shown) return null;
 
   return (
     <div className="dice-overlay" aria-live="polite">
-      <div className="dice-tray">
-        {faces.map((fi, i) => (
-          <div key={`${shown.id}-${i}`} className="dice-wrap">
+      <DiceTray values={shown.values} seed={shown.id} rolling={rolling} />
+      {!rolling && (
+        <div className="dice-caption">
+          {shown.survivorName} {shown.values.join(' + ')} = {shown.total}
+          {shown.success ? ' · 防住' : ` · 未过 ${shown.attack}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 一排 3D 骰子。
+ * `selectable` 时每颗可点选（再点一次取消），选中的外轮廓高亮 —— 「鸿运当骰」重掷用。
+ */
+export function DiceTray({
+  values,
+  seed,
+  rolling = false,
+  selectable = false,
+  selected = [],
+  onToggle,
+}: {
+  values: number[];
+  seed: number | string;
+  rolling?: boolean;
+  selectable?: boolean;
+  selected?: number[];
+  onToggle?: (index: number) => void;
+}) {
+  const faces = useMemo(() => {
+    const used = DICE_FACES.map(() => false);
+    return values.map((v) => faceIndexForValue(v, used));
+  }, [values.join(','), seed]);
+
+  return (
+    <div className="dice-tray">
+      {faces.map((fi, i) => {
+        const picked = selected.includes(i);
+        return (
+          <div
+            key={`${seed}-${i}`}
+            className={`dice-wrap${selectable ? ' dice-pick' : ''}${picked ? ' dice-picked' : ''}`}
+            onClick={selectable && onToggle ? () => onToggle(i) : undefined}
+            role={selectable ? 'button' : undefined}
+            title={selectable ? (picked ? '再点一次取消' : '点选这颗骰子重掷') : undefined}
+          >
             <div
               className={`dice-cube${rolling ? ' rolling' : ' landed'}`}
               style={{ ['--land' as string]: LAND[fi] }}
@@ -66,14 +104,8 @@ export function DiceOverlay({ roll }: { roll: DiceRollData | null }) {
               ))}
             </div>
           </div>
-        ))}
-      </div>
-      {!rolling && (
-        <div className="dice-caption">
-          {shown.survivorName} {shown.values.join(' + ')} = {shown.total}
-          {shown.success ? ' · 防住' : ` · 未过 ${shown.attack}`}
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }

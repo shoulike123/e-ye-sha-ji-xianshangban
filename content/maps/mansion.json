@@ -1,10 +1,10 @@
 {
   "id": "mansion",
-  "name": "庄园图一",
+  "name": "豪宅",
   "width": 1000,
   "height": 500,
   "backgrounds": {
-    "survivor": "/Image/Maps/求生者1.png",
+    "survivor": "/Image/Maps/幸存者1.png",
     "killer": "/Image/Maps/杀手1.png"
   },
   "rooms": [
@@ -21,7 +21,7 @@
     {
       "id": "R2",
       "name": "陈列室",
-      "nameKiller": "卧室",
+      "nameKiller": "陈列室",
       "x": 262.7,
       "y": 352.2,
       "tags": [
@@ -31,6 +31,7 @@
     {
       "id": "R3",
       "name": "走廊",
+      "nameKiller": "走廊",
       "x": 384.5,
       "y": 239,
       "tags": []
@@ -38,6 +39,7 @@
     {
       "id": "R4",
       "name": "休息室",
+      "nameKiller": "休息室",
       "x": 444.4,
       "y": 294.4,
       "tags": [
@@ -47,6 +49,7 @@
     {
       "id": "R5",
       "name": "图书室",
+      "nameKiller": "图书室",
       "x": 397.7,
       "y": 375.9,
       "tags": []
@@ -54,6 +57,7 @@
     {
       "id": "B1",
       "name": "起居室",
+      "nameKiller": "起居室",
       "x": 264.4,
       "y": 105.5,
       "tags": [
@@ -63,6 +67,7 @@
     {
       "id": "B2",
       "name": "餐厅",
+      "nameKiller": "餐厅",
       "x": 396,
       "y": 125.2,
       "tags": []
@@ -70,6 +75,7 @@
     {
       "id": "B3",
       "name": "厨房",
+      "nameKiller": "厨房",
       "x": 518.6,
       "y": 84.1,
       "tags": []
@@ -77,6 +83,7 @@
     {
       "id": "B4",
       "name": "储藏室",
+      "nameKiller": "储藏室",
       "x": 668.9,
       "y": 105.1,
       "tags": [
@@ -86,6 +93,7 @@
     {
       "id": "B5",
       "name": "宴会厅",
+      "nameKiller": "宴会厅",
       "x": 570.7,
       "y": 235.1,
       "tags": []
@@ -93,6 +101,7 @@
     {
       "id": "G1",
       "name": "小径",
+      "nameKiller": "小径",
       "x": 329.2,
       "y": 441.5,
       "tags": []
@@ -100,6 +109,7 @@
     {
       "id": "G2",
       "name": "墓地",
+      "nameKiller": "墓地",
       "x": 492.4,
       "y": 439.9,
       "tags": [
@@ -109,7 +119,7 @@
     {
       "id": "G3",
       "name": "棚屋",
-      "nameKiller": "矮屋",
+      "nameKiller": "棚屋",
       "x": 672.6,
       "y": 404.2,
       "tags": [
@@ -119,6 +129,7 @@
     {
       "id": "G4",
       "name": "温室",
+      "nameKiller": "温室",
       "x": 553.4,
       "y": 352.2,
       "tags": [
@@ -128,6 +139,7 @@
     {
       "id": "G5",
       "name": "花园",
+      "nameKiller": "花园",
       "x": 696,
       "y": 240.9,
       "tags": [
@@ -755,18 +767,6 @@
       "label": "封堵标记"
     },
     {
-      "id": "token_mtps62z4",
-      "kind": "封堵",
-      "src": "/Image/UI/封堵.png",
-      "x": 477.5,
-      "y": 199.3,
-      "w": 46.2,
-      "h": 46.2,
-      "rotation": 91.1,
-      "side": "both",
-      "label": "封堵"
-    },
-    {
       "id": "krepair1",
       "kind": "repair",
       "src": "/Image/UI/修理.png",
@@ -825,6 +825,217 @@
       "rotation": 0,
       "side": "killer",
       "label": "猜测修理5"
+    },
+    {
+      "id": "chest1",
+      "kind": "treasureChest",
+      "src": "/Image/Killers/杀手五_狼人/宝藏_宝箱.png",
+      "x": 677,
+      "y": 224.7,
+      "w": 35,
+      "h": 35,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "G5",
+      "label": "宝箱（G5 花园）"
+    },
+    {
+      "id": "chest2",
+      "kind": "treasureChest",
+      "src": "/Image/Killers/杀手五_狼人/宝藏_宝箱.png",
+      "x": 424.8,
+      "y": 274.2,
+      "w": 40.9,
+      "h": 40.9,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "R4",
+      "label": "宝箱（R4 休息室）"
+    },
+    {
+      "id": "chest3",
+      "kind": "treasureChest",
+      "src": "/Image/Killers/杀手五_狼人/宝藏_宝箱.png",
+      "x": 651,
+      "y": 384.4,
+      "w": 40.2,
+      "h": 40.2,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "G3",
+      "label": "宝箱（G3 棚屋）"
+    },
+    {
+      "id": "chest4",
+      "kind": "treasureChest",
+      "src": "/Image/Killers/杀手五_狼人/宝藏_宝箱.png",
+      "x": 473.2,
+      "y": 420.5,
+      "w": 38.4,
+      "h": 38.4,
+      "rotation": 0,
+      "side": "survivor",
+      "roomId": "G2",
+      "label": "宝箱（G2 墓地）"
+    },
+    {
+      "id": "trapPart1",
+      "kind": "trapPart",
+      "src": "/Image/UI/陷阱.png",
+      "side": "survivor",
+      "roomId": "R4",
+      "label": "陷阱零件（R4 休息室）",
+      "relativeToRoom": true
+    },
+    {
+      "id": "trapPart2",
+      "kind": "trapPart",
+      "src": "/Image/UI/陷阱.png",
+      "side": "survivor",
+      "roomId": "B5",
+      "label": "陷阱零件（B5 宴会厅）",
+      "relativeToRoom": true
+    },
+    {
+      "id": "trapPart3",
+      "kind": "trapPart",
+      "src": "/Image/UI/陷阱.png",
+      "side": "survivor",
+      "roomId": "G4",
+      "label": "陷阱零件（G4 温室）",
+      "relativeToRoom": true
+    },
+    {
+      "id": "rescue5_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 18,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车5（幸存者）"
+    },
+    {
+      "id": "rescue4_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 44,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车4（幸存者）"
+    },
+    {
+      "id": "rescue3_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 70,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车3（幸存者）"
+    },
+    {
+      "id": "rescue2_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 96,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车2（幸存者）"
+    },
+    {
+      "id": "rescue1_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 122,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车1（幸存者）"
+    },
+    {
+      "id": "rescue0_survivor",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 148,
+      "y": 448,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "survivor",
+      "label": "警车0（幸存者）"
+    },
+    {
+      "id": "rescue5_killer",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 13.2,
+      "y": 95.4,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "killer",
+      "label": "警车5（杀手）"
+    },
+    {
+      "id": "rescue4_killer",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 40.4,
+      "y": 95.4,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "killer",
+      "label": "警车4（杀手）"
+    },
+    {
+      "id": "rescue3_killer",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 67.6,
+      "y": 95.4,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "killer",
+      "label": "警车3（杀手）"
+    },
+    {
+      "id": "rescue2_killer",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 94.7,
+      "y": 95.4,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "killer",
+      "label": "警车2（杀手）"
+    },
+    {
+      "id": "rescue1_killer",
+      "kind": "rescue",
+      "src": "/Image/UI/警车.png",
+      "x": 121.9,
+      "y": 95.4,
+      "w": 24,
+      "h": 16,
+      "rotation": 0,
+      "side": "killer",
+      "label": "警车1（杀手）"
     }
   ],
   "survivorStartRoomId": "R1",

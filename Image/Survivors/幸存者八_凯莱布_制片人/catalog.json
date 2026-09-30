@@ -1,0 +1,26 @@
+{
+  "id": "survivor8",
+  "name": "凯莱布·皮尔",
+  "nameEn": "Caleb Pyle",
+  "role": "制片人",
+  "folder": "幸存者八_凯莱布_制片人",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "lucky_coin",
+      "name": "幸运币",
+      "text": "开始游戏时拥有凯莱布的幸运币"
+    },
+    {
+      "id": "cult_fanatic",
+      "name": "神秘狂热粉",
+      "text": "你可以在摄影机标记的地点搜索（从搜索牌库抽取 1 张物品）"
+    }
+  ],
+  "itemCard": "幸运币卡牌.png",
+  "itemIcon": "Image/UI/凯莱布的幸运币.png"
+}

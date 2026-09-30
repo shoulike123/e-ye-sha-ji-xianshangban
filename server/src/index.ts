@@ -157,12 +157,51 @@ const io = new Server(httpServer, {
   cors: { origin: '*' },
 });
 
-/** 房间里每个人看到的信息不一样（杀手看不到求生者背包），所以要挨个发快照 */
+/** 房间里每个人看到的信息不一样（杀手看不到幸存者背包），所以要挨个发快照 */
 function pushToRoom(roomCode: string) {
   for (const sid of rooms.listConnectedSockets(roomCode)) {
     const s = rooms.snapshotFor(sid);
     if (s) io.to(sid).emit('state', s);
   }
+}
+
+/**
+ * 幸存者之间共享的「鼠标预选地点」。
+ * 只保存在内存里、不进对局状态（不参与悔棋/重开），也不发给杀手。
+ */
+const cursors = new Map<string, { roomCode: string; roomId: string | null }>();
+
+/**
+ * 算出这一桌当前所有幸存者预选的地点，只发给幸存者。
+ * 注意：`state.players` 的键是**棋子 id**（像 host1__surv1），不是 socket id ——
+ * 所以要按 controllerId 反查，不能直接 players[socketId]。
+ */
+function broadcastCursors(roomCode: string) {
+  const state = rooms.stateOf(roomCode);
+  if (!state) return;
+  const list: Array<{ playerId: string; roomId: string }> = [];
+  for (const [sid, c] of cursors) {
+    if (c.roomCode !== roomCode || !c.roomId) continue;
+    // 这个网线现在操控的幸存者棋子（1对2 下一个人控制多枚）
+    for (const p of Object.values(state.players)) {
+      if (p.faction !== 'survivor' || !p.alive) continue;
+      if (p.controllerId !== sid || !p.connected) continue;
+      list.push({ playerId: p.id, roomId: c.roomId });
+    }
+  }
+  for (const sid of rooms.listConnectedSockets(roomCode)) {
+    // 操作杀手的那个网线不给看
+    const mine = Object.values(state.players).filter((p) => p.controllerId === sid);
+    if (mine.length && mine.every((p) => p.faction === 'killer')) continue;
+    io.to(sid).emit('cursors', list);
+  }
+}
+
+/** 有人离开/断线：把他那一圈擦掉，并通知同队 */
+function dropCursor(socketId: string, roomCode: string) {
+  if (!cursors.has(socketId)) return;
+  cursors.delete(socketId);
+  broadcastCursors(roomCode);
 }
 
 // 有人用浏览器连上来：建房、加入、点按钮、离开，都从这里收
@@ -196,10 +235,23 @@ io.on('connection', (socket) => {
 
   socket.on('action', (action: ClientAction, cb?: (r: unknown) => void) => {
     try {
-      rooms.action(socket.id, action);
+      const result = rooms.action(socket.id, action);
       cb?.({ ok: true });
-      const roomCode = rooms.roomCodeOf(socket.id);
-      if (roomCode) pushToRoom(roomCode);
+      if (result.disbanded) {
+        /**
+         * 【解散房间】：最后一票确认 → 房间已经从服务器上删掉。
+         * 先给每个人发他自己那份快照（`disbanded: true`，客户端据此退回主界面），
+         * 再让他离开这个 socket.io 房间，后面的广播就不会再打扰他。
+         */
+        for (const { socketId: sid, snapshot } of result.snapshots) {
+          io.to(sid).emit('state', snapshot);
+          io.sockets.sockets.get(sid)?.leave(result.roomCode);
+        }
+        return;
+      }
+      for (const { socketId: sid, snapshot } of result.snapshots) {
+        io.to(sid).emit('state', snapshot);
+      }
     } catch (e) {
       cb?.({ ok: false, error: (e as Error).message });
       const snap = rooms.snapshotFor(socket.id);
@@ -207,11 +259,30 @@ io.on('connection', (socket) => {
     }
   });
 
+  /**
+   * 幸存者把鼠标预选的地点实时报给同队其他人（只发给幸存者，杀手看不到）。
+   * 每次回的是**完整列表**，客户端直接覆盖 —— 不用做增量，避免残留。
+   */
+  socket.on('cursorRoom', (payload: { roomId?: string | null }) => {
+    const roomCode = rooms.roomCodeOf(socket.id);
+    if (!roomCode) return;
+    if (cursors.get(socket.id)?.roomCode !== roomCode) {
+      cursors.set(socket.id, { roomCode, roomId: null });
+    }
+    const entry = cursors.get(socket.id)!;
+    const next =
+      typeof payload?.roomId === 'string' && payload.roomId ? payload.roomId : null;
+    if (entry.roomId === next) return;      // 没变化就别广播
+    entry.roomId = next;
+    broadcastCursors(roomCode);
+  });
+
   socket.on('leaveRoom', (cb?: (r: unknown) => void) => {
     const roomCode = rooms.roomCodeOf(socket.id);
     const result = rooms.leave(socket.id);
     if (roomCode) socket.leave(roomCode);
     cb?.({ ok: true });
+    if (roomCode) dropCursor(socket.id, roomCode);
     if (!result) return;
     for (const sid of rooms.listConnectedSockets(result.roomCode)) {
       const snap = rooms.snapshotFor(sid);
@@ -220,7 +291,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    const roomCode = rooms.roomCodeOf(socket.id);
     const result = rooms.leave(socket.id);
+    if (roomCode) dropCursor(socket.id, roomCode);
     if (!result) return;
     for (const sid of rooms.listConnectedSockets(result.roomCode)) {
       const snap = rooms.snapshotFor(sid);

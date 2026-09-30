@@ -1,0 +1,25 @@
+{
+  "id": "survivor9",
+  "name": "迪伦·温",
+  "nameEn": "Dylan Wynn",
+  "role": "摄影师",
+  "folder": "幸存者九_迪伦_摄影师",
+  "inventorySlots": 3,
+  "statusHealthy": "状态_健康.png",
+  "statusInjured": "状态_受伤.png",
+  "skillCard": "技能图.png",
+  "skillBoard": "技能与背包.png",
+  "skills": [
+    {
+      "id": "resilient",
+      "name": "坚韧",
+      "text": "开始游戏时拥有一个坚毅标记。移除该标记来防止第一次伤害"
+    },
+    {
+      "id": "mechanical_knack",
+      "name": "机械知识",
+      "text": "（在工具标记的地点）额外行动：从弃牌堆获得一张工具箱"
+    }
+  ],
+  "token": "Image/UI/坚毅标记.png（素材待补）"
+}
