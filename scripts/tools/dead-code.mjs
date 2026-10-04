@@ -101,3 +101,45 @@ for (const f of [...walk('client/src', [], /\.(ts|tsx)$/), ...walk('tools', [], 
 const deadCss = [...classDefs].filter((c) => !used.has(c)).sort();
 console.log(`\n════ C. CSS 里没被引用的类（含拼字符串的宽泛匹配后仍无引用）：${deadCss.length} 个 ════`);
 console.log('  ' + deadCss.join('  '));
+
+/* ---------------- D. 手工清单：扫描抓不到的死代码 ---------------- */
+/**
+ * **扫描抓不到、但确实是死代码**的东西 —— 手工维护，别把这段删了。
+ *
+ * 上面 A/B 两段只认"`export` 出来的标识符"。而下面这些是**字符串**：
+ * action 类型名、对象字面量里的字段名 —— 它们没有独立的定义行，
+ * 自动引用计数扫不出来，可是**真的没有任何调用者**。
+ *
+ * 记在这里的用途：免得以后有人看到它们，以为"还有一条没接上的路"，
+ * 又去客户端补一套 UI（`relocateBlockade` 就是这样被误会过一次）。
+ */
+const KNOWN_DEAD = [
+  {
+    name: 'relocateBlockade',
+    kind: 'action 类型（ClientAction 联合里的字符串）',
+    where:
+      'server/src/game/types.ts + client/src/types.ts 的联合类型；' +
+      "实现是 server/src/game/engine.ts 的 `case 'relocateBlockade'`",
+    note:
+      '它做的事就是 `removeBoardBlockade`（移除场上一个封堵），' +
+      '客户端从来没发过这个 action —— 真正的入口是行动区的「拆除 A–B」按钮' +
+      '（发 `removeBoardBlockade`）+ 快照里的 `removableBoardBlockades`。' +
+      '两者功能重复，**不要再为它补客户端 UI**。',
+  },
+  {
+    name: 'relocatableBlockades',
+    kind: '快照字段（PublicSnapshot 上的对象字面量键）',
+    where:
+      'server/src/game/engine.ts 的 buildSnapshot（= removableBlockades 的另一份）+ ' +
+      '两边的 types.ts',
+    note:
+      '和 `removableBoardBlockades` 是同一个列表的两个名字，' +
+      '客户端只读 `removableBoardBlockades`。**接新 UI 时用后者**。',
+  },
+];
+console.log(`\n════ D. 手工清单：扫描抓不到的死代码：${KNOWN_DEAD.length} 条 ════`);
+for (const d of KNOWN_DEAD) {
+  console.log(`  ${d.name} —— ${d.kind}`);
+  console.log(`      位置：${d.where}`);
+  console.log(`      说明：${d.note}`);
+}

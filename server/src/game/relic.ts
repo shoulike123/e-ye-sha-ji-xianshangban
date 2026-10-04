@@ -112,8 +112,14 @@ export function applyRelicKey(state: GameState, p: PlayerState): number {
       : added > 0
         ? `${p.name} 的遗物「鑰匙」放上钥匙立牌（${state.keysCollected}/${state.rules.keysNeeded}）。`
         : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，「鑰匙」不再上架。`,
-    state.split ? 'survivor' : 'all',
-    !state.split,
+    /**
+     * ⚠ **只给幸存者看**（用户口径：「这个遗物牌堆的钥匙在**杀手方视角**与普通的
+     * 钥匙（搜索或发现）走**一样的战报**，不能让杀手知道是遗物堆出来的」）。
+     *
+     * 普通钥匙上架那条本来就是 `'survivor'`（杀手只能看钥匙架上的进度，
+     * 看不到"谁什么时候上架了一把"），所以这里跟着一样 —— 杀手那边**什么都没有**。
+     */
+    'survivor',
   );
   return added;
 }

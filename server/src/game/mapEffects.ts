@@ -18,6 +18,7 @@ import {
   doorId,
   isDoorBlocked,
   log,
+  logSplit,
   pushNoise,
   roomName,
 } from './effects.js';
@@ -197,13 +198,16 @@ export function placeLeverGate(
   state.leverGateDoorId = id;
   state.leverGateOwnerId = actorId ?? null;
   const who = actorId ? state.players[actorId]?.name : null;
-  log(
-    state,
-    `${who ? `${who} 操作控制杆：` : ''}「${roomName(state, fromRoomId)}」与「${roomName(state, toRoomId)}」之间出现了**机关大门**` +
-      '（幸存者不能通过；杀手要弃 3 张手牌才能通过，通过后大门被拆除）。',
-    'all',
-    true,
-  );
+  const where =
+    `「${roomName(state, fromRoomId)}」与「${roomName(state, toRoomId)}」之间出现了**机关大门**` +
+    '（幸存者不能通过；杀手要弃 3 张手牌才能通过，通过后大门被拆除）。';
+  /**
+   * 用户口径：
+   *  - **幸存者**那边照旧写清楚"谁操作的控制杆"；
+   *  - **杀手**只能看到**机关大门出现在哪扇门**，**不能知道是谁操纵的**
+   *    （「遭遇外的幸存者行动只能告诉杀手现象…不能说是谁」）。
+   */
+  logSplit(state, who ? `${who} 操作控制杆：${where}` : `操作控制杆：${where}`, where);
 }
 
 /** 杀手过门要弃几张手牌 */

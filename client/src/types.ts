@@ -509,7 +509,8 @@ export interface PublicSnapshot {
   /** 【城堡】这道机关大门是谁操作控制杆放的（名字，双方都看得到） */
   leverGateOwnerName?: string | null;
   /** 【城堡】杀手过门要弃 3 张手牌，等他自选（只有杀手视角有） */
-  pendingGatePay?: { toRoomId: string; doorId: string; cost: number; ownerName?: string | null } | null;
+  /** 杀手过机关大门的付费状态 —— ⚠ **不带"谁放的"**（用户口径：杀手不知道谁放的门） */
+  pendingGatePay?: { toRoomId: string; doorId: string; cost: number } | null;
   /** 【城堡】当前观众能不能在 R1 放机关大门 */
   canPlaceLeverGate?: boolean;
   /** 【城堡】B4 的"第一次有人进入"是否已触发 */
@@ -764,6 +765,10 @@ export interface PublicSnapshot {
   pendingStatueRally?: boolean;
   /** 这次重整旗鼓的切换机会是否已用掉 */
   pendingStatueRallySwitched?: boolean;
+  /** 【重整旗鼓】第二步：正在等杀手搬一个封堵 */
+  pendingStatueRallyMoveBlockade?: boolean;
+  /** 【重整旗鼓】已经选中、准备搬走的那扇门（`"A|B"`） */
+  pendingStatueMovedBlockadeFrom?: string | null;
   /** 2对3：两名杀手的先后手偏好是否已一致 */
   killerOrderDecided?: boolean;
   /** 2对3：本轮的先后手顺序（两个杀手棋子 id） */
@@ -1063,6 +1068,8 @@ export type ClientAction =
   | { type: 'pickMainStatue'; statueId: string }
   | { type: 'confirmMainStatue' }
   | { type: 'cancelMainStatue' }
+  /** 【重整旗鼓】这次不切换主雕像（卡面是"可以"切换） */
+  | { type: 'skipStatueRallySwitch' }
   /** 雕像：重整旗鼓移动封堵 */
   | { type: 'pickMoveBlockade'; doorId: string }
   | { type: 'placeMovedBlockade'; toDoorId: string }

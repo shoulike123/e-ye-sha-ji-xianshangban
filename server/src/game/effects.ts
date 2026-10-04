@@ -76,6 +76,28 @@ export function log(state: GameState, text: string, vis?: LogVis, needsCommon = 
   if (state.logs.length > 200) state.logs.shift();
 }
 
+/**
+ * **同一件事、两个视角两份说法**（用户口径）。
+ *
+ * 规则：「**所有遭遇外的幸存者行动只能告诉杀手"现象"**，比如哪里的封堵被移除、
+ * 哪里的哪个雕像被停滞、哪里的几个僵尸被消灭、哪里的核心标记被移除、
+ * 哪里的猎手陷阱被踩。**不能说是谁**」。
+ *
+ * 所以这类事件写两条：
+ *  - `survivorText`（可以点名是谁做的）→ `vis: 'survivor'`，只有幸存者看得到；
+ *  - `killerText`（**只讲现象、不带人名**）→ `vis: 'killer'`，只有杀手看得到。
+ *
+ * 两条合起来正好覆盖双方，不会重复、也不会漏。
+ */
+export function logSplit(
+  state: GameState,
+  survivorText: string,
+  killerText: string,
+): void {
+  log(state, survivorText, 'survivor');
+  log(state, killerText, 'killer');
+}
+
 export function roomName(state: GameState, roomId: string | null | undefined): string {
   if (!roomId) return '未知';
   const room = state.map.rooms.find((r) => r.id === roomId);
@@ -430,10 +452,19 @@ export function passageNeighbors(map: MapDef, from: string): string[] {
  * 也就是说：只要你在其中任意一个秘密通道地点，就可以去**任何一个**通道地点
  * （原本只能沿着地图上画的那几条通道走）。
  *
- * 判定走 `planImplActive`（注入的），所以 effects.ts 不用认识计划卡。
+ * ⚠⚠ **只给幸存者**（用户口径）。这张计划是**幸存者的**能力，
+ * 所以杀手的寻路（`neighborsOpen` 里「未命名 1 级：秘密通道当路走」）
+ * **不能**吃这个好处 —— 他永远只走地图上画出来的那几条。
+ * 靠下面这个 `side` 参数区分，默认 `'survivor'`（绝大多数调用点都是幸存者）。
  */
-export function passageNeighborsFor(state: GameState, from: string | null | undefined): string[] {
+export function passageNeighborsFor(
+  state: GameState,
+  from: string | null | undefined,
+  /** 谁在用这条通道：`'killer'` = 杀手寻路（不吃计划①），其余按幸存者算 */
+  side: 'survivor' | 'killer' = 'survivor',
+): string[] {
   if (!from) return [];
+  if (side !== 'survivor') return passageNeighbors(state.map, from);
   if (!planImplActive(state, 'passagesLinked')) return passageNeighbors(state.map, from);
   const all = new Set<string>();
   for (const e of state.map.passages ?? []) {
@@ -549,7 +580,12 @@ function neighborsOpen(
   }
   /** 【未命名 1 级】秘密通道当成一条可走的路（传送式的，不看门/封堵） */
   if (passagesFor && killerUsesSecretPassages(state, passagesFor)) {
-    for (const other of passageNeighborsFor(state, from)) {
+    /**
+     * ⚠ 这是**杀手**在用通道 → 传 `'killer'`：
+     * 幸存者的计划【通道調查】①「所有秘密通道互相连接」**不给杀手用**
+     * （用户口径），他只能沿地图上画出来的那几条走。
+     */
+    for (const other of passageNeighborsFor(state, from, 'killer')) {
       if (isRoomGone(state, other)) continue;
       if (!out.includes(other)) out.push(other);
     }
@@ -1031,19 +1067,29 @@ export function triggerHunterTrapOnEnter(state: GameState, p: PlayerState): bool
     any = true;
 
     if (kind === 'bear') {
-      /** 踩陷阱是**立即向双方报告**的事件（用户明确列的 4 类之一） */
-      log(state, `${p.name} 在「${roomName(state, roomIdHit)}」触发了${name}（直接伤害）。陷阱已移除。`, 'survivor', true);
+      /**
+       * 踩陷阱是**立即向双方报告**的事件（用户明确列的"现象"之一）——
+       * 但**杀手那边不点名**（「哪里的猎手陷阱被踩」只说地点和陷阱种类）。
+       */
+      logSplit(
+        state,
+        `${p.name} 在「${roomName(state, roomIdHit)}」触发了${name}（直接伤害）。陷阱已移除。`,
+        `「${roomName(state, roomIdHit)}」的${name}被触发（直接伤害）。陷阱已移除。`,
+      );
       applyDamage(state, p.id, 1, state.killerId ?? p.id);
     } else if (kind === 'bone') {
       addFear(state, p.id, 1);
       addFear(state, p.id, 1);
-      log(state, `${p.name} 在「${roomName(state, roomIdHit)}」触发了${name}（获得 2 恐惧）。陷阱已移除。`, 'survivor', true);
+      logSplit(
+        state,
+        `${p.name} 在「${roomName(state, roomIdHit)}」触发了${name}（获得 2 恐惧）。陷阱已移除。`,
+        `「${roomName(state, roomIdHit)}」的${name}被触发（2 个恐惧）。陷阱已移除。`,
+      );
     } else {
-      log(
+      logSplit(
         state,
         `${p.name} 在「${roomName(state, roomIdHit)}」触发了${name}（放倒模型，本回合不能离开本地点）。陷阱已移除。`,
-        'survivor',
-        true,
+        `「${roomName(state, roomIdHit)}」的${name}被触发（有人被放倒，本回合不能离开本地点）。陷阱已移除。`,
       );
       /**
        * 捕网：陷阱本身消失了，但**效果要留到本回合结束** ——
@@ -1563,9 +1609,20 @@ function finishSealAllIfDone(state: GameState) {
 }
 
 
-/** 在一扇门上放封堵。槽位必须事先够；不够时走封堵任务先移除。 */
-export function placeBlockade(state: GameState, doorOrRoom: string, otherRoom?: string) {
-  if (!state.rules.enableBlockades) return;
+/**
+ * 在一扇门上放封堵。槽位必须事先够；不够时走封堵任务先移除。
+ *
+ * @returns `true` = 这次封堵**有着落**（已经落下一块，或已进入"请点门"的待选）；
+ *   `false` = **跳过**（本局没开封锁 / 这两点之间没有门 / 这里没有可封堵的门）。
+ *   调用方（比如特性 01「完全围困」）要靠它决定战报怎么写 ——
+ *   否则会出现"跳过封堵"和"封堵 1"两条自相矛盾的话。
+ */
+export function placeBlockade(
+  state: GameState,
+  doorOrRoom: string,
+  otherRoom?: string,
+): boolean {
+  if (!state.rules.enableBlockades) return false;
   let id = doorOrRoom;
   if (otherRoom) {
     const edge = state.map.edges.find(
@@ -1575,33 +1632,53 @@ export function placeBlockade(state: GameState, doorOrRoom: string, otherRoom?: 
     );
     if (!edge) {
       log(state, `「${roomName(state, doorOrRoom)}」与「${roomName(state, otherRoom)}」之间没有可封的门。`);
-      return;
+      return false;
     }
     id = doorId(doorOrRoom, otherRoom);
   } else if (!parseDoor(doorOrRoom)) {
     if (unblockedDoorsAt(state, doorOrRoom).length === 0) {
-      throw new Error(
+      /**
+       * ⚠ **没有可封堵的地方就跳过**（用户口径）。
+       *
+       * 以前这里是 `throw` —— 而这条也会被**卡牌效果**调用
+       * （`case 'placeBlockade'`），一抛错就会**中断整张牌的结算**。
+       * 现在改成写一条战报就返回 `false`，两种情况分开说清楚：
+       *  - 门都封完了 / 门上是机关大门 → "没有可封堵的门"
+       *  - 这地方压根没门 → "没有门"
+       */
+      log(
+        state,
         doorsAt(state, doorOrRoom).length
-          ? '这里的门都已封堵，无法再设障'
-          : '所在地点没有门，无法使用封堵牌',
+          ? `「${roomName(state, doorOrRoom)}」没有可封堵的门（都已封堵、或那扇门上是机关大门），跳过封堵。`
+          : `「${roomName(state, doorOrRoom)}」没有门，跳过封堵。`,
       );
+      return false;
     }
     state.pendingBlockade = true;
     log(state, `请点击一扇与「${roomName(state, doorOrRoom)}」相连的门进行封堵。`);
-    return;
+    return true;
   }
   const placed = tryPlaceBlockadeDoor(state, id);
   state.pendingBlockade = false;
   if (placed === 'full') {
     log(state, '可放置封堵不足，请先按提示移除场上封堵。');
   }
+  /** `'skip'`（比如那扇门上是机关大门）也写过了原因，不算"有着落" */
+  return placed === 'ok';
 }
 
 /** @returns true if waiting for the player to relocate a blockade */
 export function placeAllDoorsAt(state: GameState, roomId: string): boolean {
   state.sealAllRoomId = roomId;
+  /**
+   * ⚠ 这里必须用 `isBlockadableDoor`（**它含"不能封在机关大门那扇门上"**），
+   * 不能只判"还没被封" —— 否则「封堵全部门」会把机关大门那扇也算进队列
+   * （用户口径：「**封堵不能封在有机关大门的门上**」）。
+   * 队列为空时 `continueSealQueue` 会直接走收尾、写一条"已封堵全部门"的日志，
+   * 也就是"**没有可封堵的地方就跳过封堵**"。
+   */
   state.pendingSealQueue = doorsAt(state, roomId)
-    .filter((d) => !isDoorBlocked(state, d.id))
+    .filter((d) => isBlockadableDoor(state, d.id))
     .map((d) => d.id);
   return continueSealQueue(state);
 }
@@ -1610,9 +1687,13 @@ export function placeAllDoorsAt(state: GameState, roomId: string): boolean {
  * 拆掉一块封堵。
  *
  * @param doorOrRoom 规范门号（"A|B"）或地点 id（拆该地点上任意一块）
- * @param actorId **谁拆的** —— 传入后战报会写明「**谁**在**哪里**移除了封堵」。
- *   用户对【分头行动】的明确要求：「移除封堵要公开是谁在哪移除」，
- *   所以这里对双方可见（`'all'`）—— 拆封堵本来就是公开事件。
+ * @param actorId **谁拆的** —— 战报会写明「**谁**在**哪里**移除了封堵」。
+ *
+ * ⚠⚠ **拆封堵必须写明是谁**（用户明确要求，【分头行动】尤其如此：
+ * 「移除封堵要公开是谁在哪移除」；后来又强调过「分头行动要分清谁清除了封堵」）。
+ *
+ * **不要把这一条并进"遭遇外的幸存者行动只告诉杀手现象、不点名"那套里** ——
+ * 拆封堵是那条口径的**例外**。所以这里仍旧 `'all'`（双方都看得到）+ 带人名。
  */
 export function removeBlockade(state: GameState, doorOrRoom: string, actorId?: string) {
   /**
@@ -1625,7 +1706,7 @@ export function removeBlockade(state: GameState, doorOrRoom: string, actorId?: s
     state.blockades.splice(state.blockades.indexOf(hit), 1);
     const pair = parseDoor(hit);
     /**
-     * **立即向双方报告**（用户明确列的 4 类之一）：拆封堵是公开事件。
+     * **立即向双方报告，并写明是谁**（见上面的注意事项）。
      * 其他幸存者行为（移动/搜索/修理…）在幸存者大回合里对杀手是隐藏的。
      */
     log(state, blockadeRemovedText(state, pair, actorId), 'all', true);
@@ -1639,12 +1720,12 @@ export function removeBlockade(state: GameState, doorOrRoom: string, actorId?: s
   if (!byRoom) return false;
   state.blockades.splice(state.blockades.indexOf(byRoom), 1);
   const pair = parseDoor(byRoom);
-  /** 同 `removeBlockade`：拆封堵**立即向双方报告** */
+  /** 同 `removeBlockade`：拆封堵**立即向双方报告，并写明是谁** */
   log(state, blockadeRemovedText(state, pair, actorId), 'all', true);
   return true;
 }
 
-/** 拆封堵的战报文本：带上"谁 + 在哪" */
+/** 拆封堵的战报文本：带上"谁 + 在哪"（**必须带名字**，见 `removeBlockade` 的说明） */
 function blockadeRemovedText(
   state: GameState,
   pair: [string, string] | null,
@@ -2693,7 +2774,17 @@ export function checkSplitEnd(state: GameState): void {
   log(state, `杀手**失败** —— 只击杀 ${killed} 人，逃脱 ${escaped} 人。`, 'all', true);
 }
 
-/** 钥匙到齐且人都在出口，或警车开到 0，幸存者赢 */
+/**
+ * 幸存者获胜的三条判定：钥匙到齐且人都在主要出口 / 警车开到 0 / 带秘密地图站隐藏出口。
+ *
+ * ⚠⚠ **只在「幸存者大回合开始时」调用一次**（用户口径）：
+ * 「幸存者收集钥匙胜利的检测应该在**幸存者大回合开始时**，警车到 0 也是大回合开始时检测，
+ *   隐藏出口也一起挪到大回合开始」。
+ *
+ * 唯一的调用点是 `engine.startRound()`（`round += 1` 之后、幸存者开始行动之前）。
+ * **动作之后不要调它** —— 以前搜索 / 修理 / 移动…… 后面挂了 31 处，全都删掉了；
+ * 凑齐钥匙的那一刻不会马上赢，要等下一个幸存者大回合开始才结算。
+ */
 export function checkSurvivorWin(state: GameState): void {
   if (state.phase === 'gameOver') return;
   const survivors = Object.values(state.players).filter(

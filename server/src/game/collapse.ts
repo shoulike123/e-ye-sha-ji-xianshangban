@@ -535,8 +535,14 @@ export function resolveRelicCard(state: GameState, p: PlayerState, cardId: strin
   const card = state.cardById[cardId];
   const noisy = Boolean(card?.makesNoise) || (card ? isKeyCard(card) : false);
   if (noisy && p.roomId) {
+    /**
+     * ⚠ **只有 `pushNoise` 这一条战报**（它自己写"响声出现在「X」。"，只给幸存者），
+     * 不再额外写「遗物「鑰匙」带有响声…」—— 那条会把"这一响来自遗物牌堆"
+     * 暴露给杀手（用户口径：遗物钥匙要和**普通钥匙走一样的战报**）。
+     * 杀手那边照旧在**响声阶段**统一看到"发出响声的位置：R6遗物室"，
+     * 和任何一次搜索引起的响声没有区别。
+     */
     pushNoise(state, p.roomId);
-    log(state, `遗物「${card?.name ?? cardId}」带有响声，在「${roomName(state, p.roomId)}」发出响声。`, 'all', true);
   }
 }
 

@@ -13,6 +13,7 @@ import { loadContent } from '../../server/dist/content/loader.js';
 import {
   createLobby, createPlayer, startGame, handleAction, enterNoiseReport,
 } from '../../server/dist/game/engine.js';
+import { passageNeighborsFor } from '../../server/dist/game/effects.js';
 
 const content = loadContent();
 let pass = 0;
@@ -182,6 +183,37 @@ console.log('=== ③ 通道調查 ①：秘密通道互连（手电筒能去任�
   ok(!errB, '**互连后 B1 能直接去 G5**', String(errB ?? ''));
   ok(sb.roomId === 'G5', '人真的到了 G5', String(sb.roomId));
   console.log(`   战报：${text(b, 2)}`);
+}
+
+/* ═══════════ ③b ①**只给幸存者**：杀手不吃这个好处 ═══════════ */
+console.log('=== ③b 通道調查 ①：**只给幸存者**（杀手的"秘密通道当路走"不跟着受益） ===');
+{
+  /**
+   * 用户口径：这条计划是**幸存者的**能力 ——
+   * 杀手（未命名 1 级「秘密通道当路走」）只能沿**地图上画出来的那几条**走，
+   * 不能因为幸存者做完了①就在通道口之间任意传送。
+   */
+  const st = mk();
+  st.planCompletedId = 'plan_passage_survey';
+  const survEnds = passageNeighborsFor(st, 'B1', 'survivor');
+  const killerEnds = passageNeighborsFor(st, 'B1', 'killer');
+  console.log(`  B1 的通道邻居：幸存者=${JSON.stringify(survEnds)} 杀手=${JSON.stringify(killerEnds)}`);
+  ok(survEnds.includes('G5'), '**幸存者能跨端点（B1 → G5）**', JSON.stringify(survEnds));
+  ok(!killerEnds.includes('G5'), '**杀手不能跨端点**', JSON.stringify(killerEnds));
+  ok(killerEnds.length > 0, '（前提）杀手仍然走得了地图原本画的那条', JSON.stringify(killerEnds));
+
+  /** 端到端：杀手想走"互连"才通的那条 → 走不了 */
+  const st2 = mk();
+  st2.planCompletedId = 'plan_passage_survey';
+  st2.phase = 'killerMain';
+  st2.killerTurnStep = 'main';
+  st2.killerMainChoice = 'actions';
+  st2.killerMainActionsLeft = 2;
+  const k = st2.players[st2.killerId];
+  k.roomId = 'B1';
+  const err = tryIt(st2, { type: 'move', toRoomId: 'G5' }, 'h');
+  console.log(`  杀手从 B1 走 G5 → ${err ?? '（竟然走成了 ✗）'}`);
+  ok(err != null, '**杀手实际也走不过去**', String(err ?? '（竟然走成了）'));
 }
 
 /* ═══════════ ④ 通道調查 ②：特殊行动穿过一条秘密通道 ═══════════ */

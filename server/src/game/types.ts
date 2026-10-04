@@ -1674,6 +1674,8 @@ export type ClientAction =
   | { type: 'confirmMainStatue' }
   /** 雕像：取消切换选择 */
   | { type: 'cancelMainStatue' }
+  /** 【重整旗鼓】这次**不切换**主雕像（卡面是"可以"切换，所以必须有这条路） */
+  | { type: 'skipStatueRallySwitch' }
   /** 雕像：切换主雕像后，选一个封堵来移动（重整旗鼓） */
   | { type: 'pickMoveBlockade'; doorId: string }
   /** 雕像：把选中的封堵移到这扇门（重整旗鼓） */
@@ -2165,6 +2167,10 @@ export interface PublicSnapshot {
   pendingStatueEvoTarget?: string | null;
   /** 雕像「重整旗鼓」：卡牌效果允许切换主雕像 */
   pendingStatueRally?: boolean;
+  /** 【重整旗鼓】第二步：正在等杀手搬一个封堵 */
+  pendingStatueRallyMoveBlockade?: boolean;
+  /** 【重整旗鼓】已经选中、准备搬走的那扇门（`"A|B"`） */
+  pendingStatueMovedBlockadeFrom?: string | null;
   /** 这次重整旗鼓的切换机会是否已用掉 */
   pendingStatueRallySwitched?: boolean;
   /** 2对3：两名杀手的先后手偏好是否已一致（未定则继续在大厅提示选） */

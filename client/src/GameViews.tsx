@@ -1406,6 +1406,29 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       setGateActorId(null);
     }
   }, [gatePicking, gateUsable]);
+  /**
+   * **【城堡・机关大门】选门时的地图高亮**（用户要求：
+   * 「幸存者放置机关大门，**预选的地点在幸存者地图上应高亮**」）。
+   *
+   * 交互是"点一个地点 → 再点与它**以门相连**的地点" = 选中它们之间那扇门：
+   *  - 还没点第一格 → 整张地图都能点（第一格随便选）；
+   *  - 点了第一格 → 只有**与它门相连**的地点能点（外加它自己 —— 再点一次取消）。
+   *
+   * ⚠ **必须按 door 边筛**：机关大门只能放在门上，虚线小径 / 杀手通道 /
+   * 秘密通道都不行（服务端 `placeLeverGate` 会拒）。所以**不能**用 `neighbors()`，
+   * 它把虚线也算成邻居（旧代码里"点了虚线才报错"就是这么来的）。
+   */
+  const gatePickRooms = useMemo(() => {
+    if (!gateUsable) return [] as string[];
+    if (!gateDoorFrom) return state.map.rooms.map((r) => r.id);
+    const out: string[] = [gateDoorFrom];
+    for (const e of state.map.edges ?? []) {
+      if (e.pathType && e.pathType !== 'door') continue;
+      if (e.from === gateDoorFrom) out.push(e.to);
+      else if ((e.bidirectional ?? true) && e.to === gateDoorFrom) out.push(e.from);
+    }
+    return out;
+  }, [gateUsable, gateDoorFrom, state.map]);
   useEffect(() => {
     if (!state.pendingGatePay) setGatePayIds([]);
   }, [state.pendingGatePay]);
@@ -1589,6 +1612,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       state.pendingBlockade ||
       state.pendingBlockadePlace ||
       state.pendingBlockadeJob ||
+      /** 【城堡】机关大门选门模式：点了第一个地点后也要有高亮 */
+      gateUsable ||
       state.pendingMoveRange != null ||
       extraPick ||
       fleePick ||
@@ -3218,6 +3243,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   blockadeTargetRooms.length > 0 && (state.pendingBlockade || state.pendingBlockadePlace)
                   ? blockadeTargetRooms
                   : /**
+                     * **【城堡】机关大门选门**：候选 = 与「已经点的第一格」以门相连的地点
+                     * （还没点第一格时 = 整张地图）；已经点的那一格另外画成实心金圈。
+                     * 详见 `gatePickRooms`。
+                     */
+                    gateUsable
+                    ? gatePickRooms
+                    : /**
                      * **幸运币的草稿**：高亮「从草稿末端还能走到的格子」。
                      * 不能用 `state.legalMoves`（那是当前行动者的移动范围，
                      * 幸运币常在他做完一般行动之后，那时它是空的）。
@@ -3252,6 +3284,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
              */
             pickedRoomIds={[
               ...(blockadeDest ? [blockadeDest] : []),
+              /** 【城堡】机关大门：已经预选的那一格画实心金圈 */
+              ...(gateUsable && gateDoorFrom ? [gateDoorFrom] : []),
               ...(state.pendingBlockadeJob?.kind === 'anyDoors'
                 ? [state.pendingBlockadeJob.firstRoomId, state.pendingBlockadeJob.secondRoomId].filter(
                     (r): r is string => Boolean(r),
@@ -3840,6 +3874,77 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       取消
                     </button>
                   </div>
+                )}
+                {/**
+                 * **不切换**（卡面写的是「你**可以**切换主雕像」）。
+                 * 用户口径：不切换 = 重整旗鼓到此结束，只留抽的那 1 张牌、不用移封堵。
+                 * 以前没有这颗按钮，玩家被卡在这一步。
+                 */}
+                {!state.pendingStatueSwitch && (
+                  <div className="row">
+                    <button type="button" onClick={() => onAction({ type: 'skipStatueRallySwitch' })}>
+                      不切换（只保留抽到的牌）
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {/**
+             * 【重整旗鼓・第二步】**移动封堵**（切了主雕像就必须搬一个）。
+             *
+             * ⚠ 以前这一步在界面上**完全不存在**：服务端 `pickMoveBlockade` /
+             * `placeMovedBlockade` 都写好了，但快照没下发"正在搬封堵"的状态，
+             * 客户端根本不知道要画（用户报的「场上有封堵标记没有移动封堵的步骤」）。
+             *
+             * 交互用**按钮列表**（不依赖点地图）：
+             *  ① 先选一个场上的封堵 → ② 再选一扇能放的门。
+             */}
+            {state.isStatueKiller &&
+              viewerFaction === 'killer' &&
+              state.pendingStatueRallyMoveBlockade === true && (
+              <div className="statue-switch stack">
+                <span className="muted">
+                  重整旗鼓：必须把一个封堵标记移到**另一扇没被封堵的门**
+                  （任意位置，但不能是原处、也不能是机关大门）。
+                </span>
+                {!state.pendingStatueMovedBlockadeFrom ? (
+                  <div className="row" style={{ flexWrap: 'wrap' }}>
+                    {(state.blockades ?? []).map((door) => (
+                      <button
+                        key={door}
+                        type="button"
+                        onClick={() => onAction({ type: 'pickMoveBlockade', doorId: door })}
+                      >
+                        移走 {doorEndsLabel(state.map, door, 'killer')}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <span className="muted">
+                      已选：{doorEndsLabel(state.map, state.pendingStatueMovedBlockadeFrom, 'killer')}
+                      —— 点一扇门放过去。
+                    </span>
+                    <div className="row" style={{ flexWrap: 'wrap' }}>
+                      {(state.map.edges ?? [])
+                        .filter((e) => !e.pathType || e.pathType === 'door')
+                        .map((e) => [e.from, e.to].sort().join('|'))
+                        .filter((key, i, arr) => arr.indexOf(key) === i)
+                        .filter((key) => key !== state.pendingStatueMovedBlockadeFrom)
+                        .filter((key) => !(state.blockades ?? []).includes(key))
+                        .filter((key) => key !== state.leverGateDoorId)
+                        .map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className="primary"
+                            onClick={() => onAction({ type: 'placeMovedBlockade', toDoorId: key })}
+                          >
+                            放到 {doorEndsLabel(state.map, key, 'killer')}
+                          </button>
+                        ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -4811,11 +4916,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {isActive && state.you.faction === 'killer' && state.pendingGatePay && (
               <div className="stack">
                 <p className="muted">
-                  机关大门挡路
-                  {state.pendingGatePay.ownerName
-                    ? `（${state.pendingGatePay.ownerName} 操作控制杆放置的）`
-                    : ''}
-                  ：从手牌里选 <strong>{state.pendingGatePay.cost}</strong> 张弃掉，
+                  {/** 不写"是谁放的"（用户口径：杀手不知道谁放的门） */}
+                  机关大门挡路：从手牌里选 <strong>{state.pendingGatePay.cost}</strong> 张弃掉，
                   才能通过并拆除大门（当前手里 {killerHand.length} 张）。
                   通过后你会走到
                   {roomDisplayName(state.map, state.pendingGatePay.toRoomId, viewerFaction)}。

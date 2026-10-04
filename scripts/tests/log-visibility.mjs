@@ -182,7 +182,12 @@ console.log('=== ③ 3 类事件立即向双方报告 ===');
   st.hunterTraps = { t1: { roomId: 'R1', kind: 'bear', revealed: false, removed: false } };
   handleAction(st, s.id, { type: 'move', toRoomId: 'R1' }, content);
   ok(st.logs.some((l) => l.text.includes('触发了')), '产生了"触发陷阱"战报');
-  ok(killerLogText(st).includes('触发了'), '杀手立即看到"踩到陷阱"');
+  /**
+   * ⚠ 口径更新（用户 2026-10）：遭遇外的幸存者行动**只告诉杀手现象、不点名**。
+   * 陷阱现在是两条：幸存者版（带名字）+ 杀手版（「哪里的哪种陷阱被触发」）。
+   */
+  ok(killerLogText(st).includes('被触发'), '杀手立即看到"哪里踩了陷阱"（现象版）');
+  ok(!killerLogText(st).includes(s.name), '杀手那份**不写是谁踩的**', s.name);
 }
 {
   /** ③ 拆除封堵 */
@@ -235,24 +240,40 @@ console.log('=== ③ 3 类事件立即向双方报告 ===');
   ok(Boolean(st.leverGateDoorId), '机关大门已放置', String(st.leverGateDoorId));
   const gateLogs = st.logs.filter((l) => l.text.includes('之间出现了'));
   ok(gateLogs.length > 0, '产生了「哪里和哪里之间出现了机关大门」的战报');
-  ok(gateLogs.every((l) => l.vis === 'all'), '**双方战报都写**（vis=all）');
+  /**
+   * ⚠ 口径更新（用户 2026-10）：**杀手不能知道是谁操纵的控制杆**，只知道门在哪。
+   * 所以现在是两条：幸存者版（带名字）+ 杀手版（不带名字）。
+   */
+  ok(gateLogs.some((l) => l.vis === 'survivor') && gateLogs.some((l) => l.vis === 'killer'),
+    '**双方各有一条**（幸存者版 / 杀手版）',
+    JSON.stringify(gateLogs.map((l) => l.vis)));
   ok(killerLogText(st).includes('之间出现了'), '杀手战报里立即有这条');
+  ok(!killerLogText(st).includes(s2.name), '**杀手那份不写是谁操作的**', s2.name);
   ok(
     gateLogs.some((l) => l.text.includes('R1') && l.text.includes('R2')),
     '写明了是**哪两个地点之间**',
   );
   ok(
-    gateLogs.some((l) => l.text.includes(s2.name) && l.text.includes('操作控制杆')),
-    '也写明了**是谁操作的控制杆**',
+    gateLogs.some((l) => l.vis === 'survivor' && l.text.includes(s2.name) && l.text.includes('操作控制杆')),
+    '**幸存者那份**写明是谁操作的控制杆',
   );
   ok(
     buildSnapshot(st, 'h').leverGateDoorId === st.leverGateDoorId,
     '杀手**看得见地图上那道闸门**（位置照常下发）',
   );
+  /**
+   * ⚠ 口径（用户 2026-10）：「**杀手不知道谁放的门**」——
+   * 快照里的 `leverGateOwnerName` 只给幸存者，杀手拿到的是 null。
+   */
   ok(
-    buildSnapshot(st, 'h').leverGateOwnerName === s2.name,
-    '快照里也带上了操作者的名字',
+    buildSnapshot(st, 'h').leverGateOwnerName == null,
+    '**杀手快照里没有操作者的名字**',
     String(buildSnapshot(st, 'h').leverGateOwnerName),
+  );
+  ok(
+    buildSnapshot(st, 's').leverGateOwnerName === s2.name,
+    '幸存者快照里照旧带着名字',
+    String(buildSnapshot(st, 's').leverGateOwnerName),
   );
 }
 

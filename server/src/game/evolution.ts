@@ -928,6 +928,19 @@ export function startOneDoorBlockade(state: GameState, roomId: string): boolean 
 }
 
 export function startSealAllBlockade(state: GameState, roomId: string): boolean {
+  /**
+   * ⚠ **"本来就没门可封"要在这里就拦住**，不能等到 `continueSealAllBlockade`。
+   *
+   * 那边收尾那句是「**已封堵**「X」的全部门」—— 如果一扇都没封过（玩家在
+   * 一个门全封完 / 只有机关大门的地点打出「留下!!!!」），这句话会读成
+   * "这次把门都封上了"，其实什么都没发生（用户问的"跳过会不会影响这种牌"）。
+   * 所以入口先判一次，措辞就准确了。
+   */
+  if (unblockedDoorsAt(state, roomId).length === 0) {
+    state.pendingBlockadeJob = null;
+    log(state, `「${roomName(state, roomId)}」没有可封堵的门（都已封堵、或那扇门上是机关大门），跳过封堵。`);
+    return false;
+  }
   state.pendingBlockadeJob = {
     kind: 'sealAll',
     roomId,
@@ -1102,6 +1115,35 @@ export function afterOneDoorPlaced(state: GameState): void {
   state.pendingBlockade = false;
 }
 
+/**
+ * **进化流程里"还停在等玩家做选择"的那些状态**（用户口径：
+ * 「杀手的**进化效果要执行完**才进行下一步骤」）。
+ *
+ * 典型漏网的是**扼杀者 4 级**：它要"在任意 2 个不同地点各放一个核心标记"，
+ * 玩家还没点完地点，回合就被收尾、直接进了幸存者大回合
+ * （用户报的「图四中扼杀者核心标记都没放就开始幸存者回合了」）。
+ *
+ * 所以这张清单要覆盖**每一级的"要你选"**：
+ *  - 未命名：选进化卡 / 解锁二选一 / 超限弃牌
+ *  - 雕像：转换主雕像
+ *  - 女王 4 级：选 2 个地点生成丧尸
+ *  - 扼杀者 4 级：选 2 个地点放核心标记（以及之后"选地点放/移核心"那两步）
+ *  - 变体1：特性 17 选目标 / 封堵作业
+ */
+export function hasEvolutionChoicePending(state: GameState): boolean {
+  return Boolean(
+    (state.pendingEvolutionCardPick?.length ?? 0) > 0 ||
+      (state.pendingUnlockChoice?.length ?? 0) > 0 ||
+      (state.pendingUnlockDiscard && state.pendingKillerDiscards > 0) ||
+      state.pendingStatueEvoSwitch ||
+      state.pendingQueenSpawnRooms != null ||
+      state.pendingStranglerCoreRooms != null ||
+      state.pendingCorePick != null ||
+      state.pendingTraitVictim ||
+      state.pendingTraitBlockades > 0,
+  );
+}
+
 export function hasEvolutionPending(state: GameState): boolean {
   return Boolean(
     state.pendingEvolutionAck ||
@@ -1110,7 +1152,9 @@ export function hasEvolutionPending(state: GameState): boolean {
       (state.pendingOverFearQueue && state.pendingOverFearQueue.length > 0) ||
       state.encounterOpenHold ||
       state.pendingBlockadeJob ||
-      state.pendingEvoFourBlockade,
+      state.pendingEvoFourBlockade ||
+      /** ⚠ 还停在"要你选"的状态里时，进化不算做完（扼杀者 4 级放核心标记…） */
+      hasEvolutionChoicePending(state),
   );
 }
 

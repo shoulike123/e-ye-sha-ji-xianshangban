@@ -64,6 +64,7 @@ import {
   legalBlockadeRooms,
   legalMoveRooms,
   log,
+  logSplit,
   mapAdjacentRooms,
   maybeArmRescue,
   moveAdjacentRooms,
@@ -224,6 +225,7 @@ import {
   resolveDeferredEvolution,
   resolveOverFearWound,
   resolveWhizSearch,
+  hasEvolutionChoicePending,
   roomsForAnyDoorPick,
   roomsForBlockadeRemove,
   runUpgrade,
@@ -596,13 +598,22 @@ export function isStatueGhostPiece(state: GameState, p: PlayerState): boolean {
 
 /**
  * 重整旗鼓／雕像封堵搬运：把场上一个已有封堵从 fromDoorId 移到 toDoorId。
- * 目标门必须还没有封堵。
+ *
+ * 规则（用户口径）：「**任意一扇没被封堵的门，但不能是原处**」——
+ * 所以目标门必须：① 目前没有封堵；② 不是它原来那扇。
+ *
+ * ⚠ 机关大门也**不能**放（`isLeverGate` 那扇门等于"不可封堵"，见 `isBlockadableDoor`）——
+ * 这一条和"封堵不能封在机关大门上"是同一个口径。
  */
 export function moveBlockadeTo(state: GameState, fromDoorId: string, toDoorId: string) {
     if (!isDoorBlocked(state, fromDoorId))
         throw new Error('那里没有封堵');
+    if (canonicalDoorId(fromDoorId) === canonicalDoorId(toDoorId))
+        throw new Error('封堵不能移回原处（要换一扇没被封堵的门）');
     if (isDoorBlocked(state, toDoorId))
         throw new Error('那扇门已经有封堵了');
+    if (isLeverGate(state, toDoorId))
+        throw new Error('那扇门上是机关大门，封堵不能移过去');
     const i = state.blockades.findIndex((id) => canonicalDoorId(id) === canonicalDoorId(fromDoorId));
     if (i < 0)
         throw new Error('找不到这个封堵');
@@ -1987,6 +1998,18 @@ export function startRound(state: GameState) {
             log(state, `新回合开始：警车开到 ${state.rescueCountdown}。`, 'all', true);
         }
     }
+    /**
+     * **幸存者获胜的判定统一放在这里**（用户口径）：
+     * 「幸存者**收集钥匙**胜利的检测应该在**幸存者大回合开始时**，
+     *   **警车到 0** 也是大回合开始时检测」、「**隐藏出口**也一起挪到大回合开始」。
+     *
+     * ⚠ 所以**动作之后不要再调 `checkSurvivorWin`** —— 那些调用点（搜索后 / 修理后 /
+     * 移动后…，以前有 31 处）已经全部删掉。凑齐钥匙的那一刻不会马上赢，
+     * 要等**下一个幸存者大回合开始**才结算（和警车同一条时间线）。
+     */
+    checkSurvivorWin(state);
+    if (state.phase === 'gameOver')
+        return;
     clearNoiseAndFirecrackerTokens(state);
     /**
      * 女猎手捕网：**到"此轮结束"才解除**
@@ -2676,7 +2699,6 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
              * （`announceRepairIfJustFinished` / `maybeArmRescue` 自己会写）。
              */
             log(state, `【变体3】自製無線電：修理进度直接拉满（${state.repairProgress}/${state.rules.repairNeeded}），并在「${actor?.roomId ? roomName(state, actor.roomId) : '?'}」发出响声。`, 'survivor');
-            checkSurvivorWin(state);
             break;
         }
         /** 萬能鑰匙：从**线索（搜索）牌库底部**取出钥匙 */
@@ -2704,7 +2726,6 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
                         : `钥匙上架（${state.keysCollected}/${state.rules.keysNeeded}，本次 +${added}）。`),
                 'survivor',
             );
-            checkSurvivorWin(state);
             break;
         }
         /** 古代箱子：从搜索牌库抽 3 张（代价"弃一个古代护符"已由通用部分扣掉） */
@@ -2715,7 +2736,6 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
             }
             for (let i = 0; i < 3; i += 1)
                 planDrawSearchCard(state, actor, '古代箱子');
-            checkSurvivorWin(state);
             break;
         }
         /** 反擊！暗中伏擊：**完成计划时**立刻在幸存者地点放置计划标记 */
@@ -2820,7 +2840,6 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
                 `【变体3】通道調查：${who} 用计划找到的通道从「${fromRoom ? roomName(state, fromRoom) : '?'}」移动到「${roomName(state, toRoomId)}」（占一般行动）。`,
                 'survivor',
             );
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, actor.id);
             break;
         }
@@ -2835,7 +2854,6 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
             const pick = pickId ? state.players[pickId] : null;
             if (pick && pick.alive && pick.faction === 'survivor') {
                 planDrawSearchCard(state, pick, '情報分享');
-                checkSurvivorWin(state);
                 break;
             }
             if (!actor) {
@@ -3899,7 +3917,6 @@ export function fastForwardSurvivors(state: GameState) {
         pl.moveLeft = 0;
         pl.actedThisRound = true;
         log(state, `${pl.name} 消除恐惧（快进）。`);
-        checkSurvivorWin(state);
         if (state.phase === 'gameOver')
             return;
     }
@@ -4259,7 +4276,6 @@ export function resolveDiscoveryChoice(state: GameState, cardId: string) {
  */
 export function closeSurvivorBigRound(state: GameState) {
     state.killerPublicKeys = state.keysCollected;
-    checkSurvivorWin(state);
 }
 
 /** 一名幸存者做完一般行动：立刻结束其小回合，不必再点结束 */
@@ -4267,7 +4283,6 @@ export function advanceAfterSurvivor(state: GameState, endedPlayerId: string) {
     const ended = state.players[endedPlayerId];
     if (ended)
         ended.actedThisRound = true;
-    checkSurvivorWin(state);
     if (state.phase === 'gameOver')
         return;
     /**
@@ -4420,7 +4435,6 @@ export function georgeToolboxRepair(state: GameState, p: PlayerState) {
     log(state, `${p.name} 用「聪明绝顶」弃置工具箱，修理进度 +1（${state.repairProgress}/${state.rules.repairNeeded}）。`);
     announceRepairIfJustFinished(state, before);
     maybeArmRescue(state);
-    checkSurvivorWin(state);
     advanceAfterSurvivor(state, p.id);
 }
 
@@ -4464,7 +4478,6 @@ export function georgeDraw(state: GameState, p: PlayerState) {
     /** 【变体1】特性 16：搜索造成的响声算"其他来源"，距离杀手 1 以内时不响 */
     if (makeNoise && p.roomId)
         pushNoise(state, p.roomId, false, { byPlayerId: p.id, source: 'skill' });
-    checkSurvivorWin(state);
     advanceAfterSurvivor(state, p.id);
 }
 
@@ -4938,6 +4951,21 @@ export function maybeCloseKillerUpkeep(state: GameState) {
         state.phase = 'upkeep';
         return;
     }
+    /**
+     * ⚠ **「进化效果要执行完才进行下一步骤」**（用户口径）。
+     *
+     * 还停在"要你选"的状态里时**不许收尾** —— 典型漏网的是**扼杀者 4 级**
+     * （"在任意 2 个不同地点各放一个核心标记"）：以前这里直接
+     * `closeKillerTurn`，核心标记一个没放就进了幸存者大回合
+     * （用户报的「图四中扼杀者核心标记都没放就开始幸存者回合了」）。
+     *
+     * 清单见 `evolution.hasEvolutionChoicePending()`：选进化卡 / 解锁二选一 /
+     * 超限弃牌 / 转主雕像 / 女王选地点 / 扼杀者选地点 / 核心标记落点 / 特性 17、18。
+     */
+    if (hasEvolutionChoicePending(state)) {
+        state.phase = 'upkeep';
+        return;
+    }
     state.pendingKillerDiscards = 0;
     state.killerTurnPowerBonus = 0;
     closeKillerTurn(state);
@@ -5106,7 +5134,6 @@ function finishKillerTurn(state: GameState) {
     state.pendingRevealPower = 0;
     /** 屏息等「持续到下回合」的力量：本回合结束就失效 */
     clearPowerUntilNextTurn(state);
-    checkSurvivorWin(state);
     if (state.phase === 'gameOver')
         return;
     /**
@@ -5446,16 +5473,24 @@ export function resolveEncounterCombat(state: GameState, diceValues: number[] | 
         if (itemBonus > 0) {
             defenseValue += itemBonus;
             otherDefenseBoost += itemBonus;
-            /**
-             * 乔治的笔记：用物品防御时额外 +2（加在物品加成之上，不消耗）。
-             * 只有真的用了防御物品才触发 —— 这颗棋子没有物品可用时它不生效。
-             */
-            const noteBonus = georgeDefenseNoteBonus(state, surv);
-            if (noteBonus > 0) {
-                defenseValue += noteBonus;
-                otherDefenseBoost += noteBonus;
-                log(state, `${surv.name}「乔治的笔记」：使用物品防御，额外 +${noteBonus}。`);
-            }
+        }
+    }
+    /**
+     * **乔治的笔记**：用物品防御时额外 +2（加在物品加成之上，不消耗）。
+     *
+     * ⚠ 判定条件是「这次防御**用了任何防御物品**」，**剛毅之盾也算一件防御物品**
+     * （用户口径：「剛毅之盾其他方面应该视为普通的防御物品，只是它不占防御物品
+     * 使用名额…比如它**应该能吃到乔治的防御笔记**」）。
+     *
+     * 所以这一条必须放在"普通防御物品 / 剛毅之盾"两个分支**外面**，
+     * 而且只算一次（两个都用也只 +2）。
+     */
+    if (itemId || relicShield > 0) {
+        const noteBonus = georgeDefenseNoteBonus(state, surv);
+        if (noteBonus > 0) {
+            defenseValue += noteBonus;
+            otherDefenseBoost += noteBonus;
+            log(state, `${surv.name}「乔治的笔记」：使用物品防御，额外 +${noteBonus}。`);
         }
     }
     if (trapBonus) {
@@ -6826,10 +6861,17 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                             throw new Error('不在地图上');
                         if (!state.rules.enableBlockades)
                             throw new Error('本局未启用封堵');
-                        placeBlockade(state, who.roomId);
+                        /**
+                         * ⚠ `placeBlockade` 会返回"这次封堵有没有着落"：
+                         * 所在地没有可封堵的门（都封完了 / 门上是机关大门）时它是 `false`
+                         * —— 那时候**别再说"封堵 1"**，两条话会自相矛盾。
+                         */
+                        const blockadeDone = placeBlockade(state, who.roomId);
                         log(
                             state,
-                            `【变体1】${who.name}「完全围困」：弃掉 ${need} 张卡牌，在「${roomName(state, who.roomId)}」【封堵】1。`,
+                            blockadeDone
+                                ? `【变体1】${who.name}「完全围困」：弃掉 ${need} 张卡牌，在「${roomName(state, who.roomId)}」【封堵】1。`
+                                : `【变体1】${who.name}「完全围困」：弃掉 ${need} 张卡牌，但「${roomName(state, who.roomId)}」没有可封堵的门，跳过封堵。`,
                             'all',
                             true,
                         );
@@ -7233,7 +7275,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (tdef.kind === 'special') {
                 who.mainActionUsed = true;
                 who.moveLeft = 0;
-                checkSurvivorWin(state);
                 advanceAfterSurvivor(state, who.id);
             }
             break;
@@ -7854,7 +7895,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         'survivor',
                     );
                 }
-                checkSurvivorWin(state);
                 advanceAfterSurvivor(state, p.id);
             }
             else if (p.faction === 'killer') {
@@ -8043,17 +8083,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                             picked: [],
                         };
                         /**
-                         * 用户要求：**要写明是谁动的机关** ——
-                         * 只说"机关大门挡路"的话，杀手不知道是谁放的这道门。
-                         * 闸门在地图上双方都看得见，名字不泄露新信息。
+                         * ⚠ 用户口径（2026-10）：「**杀手不知道谁放的门**」——
+                         * 所以这里**不写**是谁操作的控制杆，只说"大门挡路"。
+                         * （以前这条写过名字，那是更早的要求，已被这条取代。）
                          */
-                        const gateOwner = state.leverGateOwnerId
-                            ? state.players[state.leverGateOwnerId]?.name
-                            : null;
                         log(
                             state,
-                            `机关大门挡路${gateOwner ? `（${gateOwner} 操作控制杆放置）` : ''}：` +
-                                `请自选弃置 ${LEVER_GATE_COST} 张手牌才能通过（通过后大门被拆除）。`,
+                            `机关大门挡路：请自选弃置 ${LEVER_GATE_COST} 张手牌才能通过（通过后大门被拆除）。`,
                             'killer',
                         );
                         break;
@@ -8083,7 +8119,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 doSearch(state, playerId);
                 p.mainActionUsed = true;
                 p.moveLeft = 0;
-                checkSurvivorWin(state);
                 /**
                  * ⚠ **第六感挂起时先别推进回合** —— 搜索者还要选留哪张。
                  *
@@ -8159,7 +8194,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             doRepair(state, playerId);
             p.mainActionUsed = true;
             p.moveLeft = 0;
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -8567,7 +8601,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 log(state, extra
                     ? `${p.name} 持手电筒发动「观察入微」（额外行动）。`
                     : `${p.name} 发动「观察入微」。`);
-                checkSurvivorWin(state);
                 if (!extra)
                     advanceAfterSurvivor(state, p.id);
                 break;
@@ -8644,7 +8677,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 p.mainActionUsed = true;
                 p.moveLeft = 0;
                 p.skillUsedThisTurn.add(skill.id);
-                checkSurvivorWin(state);
                 advanceAfterSurvivor(state, p.id);
                 break;
             }
@@ -8683,7 +8715,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 maybeStartEncounter(state);
                 maybeFinishKillerMain(state);
             }
-            checkSurvivorWin(state);
             if (p.faction === 'survivor') {
                 advanceAfterSurvivor(state, p.id);
             }
@@ -8770,7 +8801,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 maybeArmRescue(state);
                 if (state.rules.repairMakesNoise && p.roomId)
                     pushNoise(state, p.roomId);
-                checkSurvivorWin(state);
                 advanceAfterSurvivor(state, p.id);
                 break;
             }
@@ -8802,7 +8832,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 if (!ok)
                     throw new Error('移动不合法');
                 log(state, `${p.name} 使用肾上腺素移动。`, 'survivor');
-                checkSurvivorWin(state);
                 break;
             }
             if (action.itemId === 'sedative') {
@@ -8847,7 +8876,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 p.mainActionUsed = true;
                 p.moveLeft = 0;
                 log(state, `${p.name} 使用手电筒穿过秘密通道。`);
-                checkSurvivorWin(state);
                 advanceAfterSurvivor(state, p.id);
                 break;
             }
@@ -8857,7 +8885,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     throw new Error('请选择秘密通道出口');
                 trySecretPassage(state, playerId, action.toRoomId);
                 log(state, `${p.name} 使用煤油灯穿过秘密通道。`);
-                checkSurvivorWin(state);
                 break;
             }
             // 神秘包裹：额外行动，从发现牌堆抽一张，并在自己所在格发出响声
@@ -8874,7 +8901,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     log(state, '发现牌堆已空，神秘包裹没有抽到牌。');
                 }
                 pushNoise(state, p.roomId);
-                checkSurvivorWin(state);
                 break;
             }
             if (action.itemId === 'trap') {
@@ -8963,7 +8989,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             log(state, heal.clearFear
                 ? `${p.name} 使用「${itemName(action.itemId)}」治疗了 ${target.name}，并消除其恐惧。`
                 : `${p.name} 使用「${itemName(action.itemId)}」治疗了 ${target.name}。`);
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -8986,7 +9011,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('发现牌堆已空');
             state.suitcaseAvailable = false;
             keepSuitcaseDiscovery(state, p.id, cardId);
-            checkSurvivorWin(state);
             break;
         }
         /**
@@ -9017,8 +9041,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             p.coreRemovedThisRound = true;
             p.mainActionUsed = true;
             p.moveLeft = 0;
-            log(state, `${p.name} 移除「${roomName(state, p.roomId)}」的一个核心标记（现有 ${(state.coreMarkers ?? []).length} 个）。`, 'all', true);
-            checkSurvivorWin(state);
+            /**
+             * ⚠ **只写幸存者版**（带名字）。
+             *
+             * 杀手那边要的"哪里的核心标记被移除"已经由 `removeCoreAt`
+             * （`killerSpecials.ts`）写了 —— 那条**不带名字**、本来就符合口径。
+             * 这里再写一条杀手版就重复播报了。
+             */
+            log(
+                state,
+                `${p.name} 移除「${roomName(state, p.roomId)}」的一个核心标记（现有 ${(state.coreMarkers ?? []).length} 个）。`,
+                'survivor',
+            );
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -9049,7 +9083,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             useFirstAidKit(state, p, target);
             p.mainActionUsed = true;
             p.moveLeft = 0;
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -9120,14 +9153,15 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 state.killerDiscard.push(id);
             }
             /** 拆掉大门（操作者标记跟着一起清） */
-            const tornOwner = state.leverGateOwnerId
-                ? state.players[state.leverGateOwnerId]?.name
-                : null;
             state.leverGateDoorId = null;
             state.leverGateOwnerId = null;
+            /**
+             * ⚠ **不写"是谁放的那道"**（用户口径：「杀手不知道谁放的门」）——
+             * 这条 `'all'` 的战报双方都看得到，带上名字就把操作者泄给杀手了。
+             */
             log(
                 state,
-                `杀手弃置 ${LEVER_GATE_COST} 张手牌，机关大门被拆除${tornOwner ? `（${tornOwner} 放的那道）` : ''}。`,
+                `杀手弃置 ${LEVER_GATE_COST} 张手牌，机关大门被拆除。`,
                 'all',
                 true,
             );
@@ -9444,7 +9478,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             searchDrawMultiple(state, p.id, 2);
             p.mainActionUsed = true;
             p.moveLeft = 0;
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -9550,7 +9583,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              */
             k2.roomId = action.roomId;
             log(state, `傳送聚合：杀手传送到「${roomName(state, action.roomId)}」（双方地图同步移动）。`, 'all', true);
-            checkSurvivorWin(state);
             resumeAfterKillerChoice(state);
             break;
         }
@@ -9727,8 +9759,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 actor.mainActionUsed = true;
                 actor.moveLeft = 0;
             }
-            log(state, `${p.name} 用十字弩消灭了 ${picked.length} 个僵尸。`, 'all', true);
-            checkSurvivorWin(state);
+            logSplit(
+                state,
+                `${p.name} 用十字弩消灭了 ${picked.length} 个僵尸。`,
+                /** 杀手只知道"哪里消灭了几个僵尸"，**不点名** */
+                p.roomId
+                    ? `十字弩在「${roomName(state, p.roomId)}」消灭了 ${picked.length} 个僵尸。`
+                    : `十字弩消灭了 ${picked.length} 个僵尸。`,
+            );
             if (actor)
                 advanceAfterSurvivor(state, actor.id);
             break;
@@ -9864,7 +9902,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 `${p.name} 发动「言语鼓励」：移除 ${target.name} 的所有恐惧，并在其身上放置一个鼓励标记。`,
                 'survivor',
             );
-            checkSurvivorWin(state);
             advanceAfterSurvivor(state, p.id);
             break;
         }
@@ -10475,6 +10512,24 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 const idx = state.killerHand.indexOf(action.cardId);
                 if (idx < 0)
                     throw new Error('手牌中没有此卡');
+                /**
+                 * ⚠⚠ **删手牌一律重新按 id 查下标，别用缓存的 `idx`。**
+                 *
+                 * 血案：这里原来先缓存 `idx`，然后**先删支付牌**（`atkPay`）——
+                 * 数组变短、下标前移，再用过期的 `idx` 去 `splice`，
+                 * 结果是**打出的那张牌留在手牌里、却又被推进了弃牌堆**
+                 * （用户报的「手牌里多了一张扼殺，弃牌堆也有一张扼殺，
+                 *   而扼殺只有一张」），或者**误删别的牌**
+                 * （同一份牌组里「狂亂枝條」就是这么不见的）。
+                 *
+                 * 这条流程**所有杀手共用**，所以影响面是全杀手。
+                 */
+                const takeFromHand = (id: string) => {
+                    const i = state.killerHand.indexOf(id);
+                    if (i >= 0)
+                        state.killerHand.splice(i, 1);
+                };
+                void takeFromHand;
                 const card = state.cardById[action.cardId];
                 /**
                  * **牌面写了使用条件的攻击牌要在这里拦**（毒液之觸 / 伏擊）。
@@ -10513,11 +10568,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 if (card && /^statue_execute$/.test(card.id)) {
                     /** 先付费用（和普通打牌一致：费用牌先进弃牌堆） */
                     for (const pid of atkPay) {
-                        const pi = state.killerHand.indexOf(pid);
-                        if (pi >= 0) state.killerHand.splice(pi, 1);
+                        takeFromHand(pid);
                         state.killerDiscard.push(pid);
                     }
-                    state.killerHand.splice(idx, 1);
+                    /** ⚠ 重新按 id 删（**不能**用上面缓存的 `idx`：支付牌已经删过了） */
+                    takeFromHand(action.cardId);
                     state.killerDiscard.push(action.cardId);
                     enc.executeArmed = true;
                     enc.executeStatueId = state.killerId;
@@ -10534,11 +10589,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     throw new Error('这张牌不能在遭遇中打出');
                 /** 先付费用牌（和普通打牌一致），再打出这张牌本身 */
                 for (const pid of atkPay) {
-                    const pi = state.killerHand.indexOf(pid);
-                    if (pi >= 0) state.killerHand.splice(pi, 1);
+                    takeFromHand(pid);
                     state.killerDiscard.push(pid);
                 }
-                state.killerHand.splice(idx, 1);
+                /** ⚠ 同样要重新按 id 删（`idx` 已经过期） */
+                takeFromHand(action.cardId);
                 state.killerDiscard.push(action.cardId);
                 state.encounterTailBonus = bonus;
                 enc.attackBoost = true;
@@ -11112,9 +11167,31 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             }
             break;
         }
+        /**
+         * 【重整旗鼓】**这次不切换主雕像**。
+         *
+         * 卡面写的是「你**可以**切换主雕像」，所以必须有"不切换"这条路
+         * （用户口径：「不切换 = 重整旗鼓到此结束，只留抽的那 1 张牌，不需要移封堵」）。
+         * 以前只有"选一尊 → 确认"，没有"不切换"，玩家被卡在这一步。
+         */
+        case 'skipStatueRallySwitch': {
+            if (p.faction !== 'killer')
+                throw new Error('仅杀手可执行');
+            if (!state.pendingStatueRally)
+                throw new Error('当前没有重整旗鼓要处理');
+            state.pendingStatueRally = false;
+            state.pendingStatueRallySwitched = false;
+            state.pendingStatueSwitch = null;
+            state.pendingStatueRallyMoveBlockade = false;
+            log(state, '重整旗鼓：不切换主雕像（只抽了 1 张牌）。', 'killer');
+            break;
+        }
         case 'pickMoveBlockade': {
             if (p.faction !== 'killer')
                 throw new Error('仅杀手可执行');
+            /** 只有"重整旗鼓·切了主雕像"那一步才允许搬封堵 */
+            if (!state.pendingStatueRallyMoveBlockade)
+                throw new Error('当前不是"重整旗鼓：移动封堵"这一步');
             state.pendingStatueMovedBlockadeFrom = action.doorId;
             log(state, '已选中要移动的封堵，请再点一扇没有封堵的门来放置它。', 'killer');
             break;
@@ -11122,6 +11199,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'placeMovedBlockade': {
             if (p.faction !== 'killer')
                 throw new Error('仅杀手可执行');
+            if (!state.pendingStatueRallyMoveBlockade)
+                throw new Error('当前不是"重整旗鼓：移动封堵"这一步');
             const from = state.pendingStatueMovedBlockadeFrom;
             if (!from)
                 throw new Error('还没有选择要移动的封堵');
@@ -11176,7 +11255,15 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             actor.mainActionUsed = true;
             /** 停滞后本大回合不能再做额外行动 / 交换 */
             actor.haltedThisRound = true;
-            log(state, `${actor.name} 停滞了雕像 ${target.statueIndex}。`, 'survivor');
+            /**
+             * 停滞雕像：**遭遇外的幸存者行动 → 杀手只知道"哪里的哪个雕像被停滞"，
+             * 不点名**（用户明确列举的现象之一）。
+             */
+            logSplit(
+                state,
+                `${actor.name} 停滞了雕像 ${target.statueIndex}。`,
+                `雕像 ${target.statueIndex}（在「${roomName(state, target.roomId)}」）被停滞了。`,
+            );
             break;
         }
         case 'guessMainStatue': {
@@ -12816,21 +12903,25 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         /** 场上的机关大门（门号 `"A|B"`；没有就 null）—— 双方都看得到 */
         leverGateDoorId: leverGateDoor(state),
         /**
-         * 这道机关大门是**谁**操作控制杆放的（名字，双方都看得到）。
-         * 用户要求：别只写"有一道门"，要说清楚是哪个幸存者动的机关。
+         * 这道机关大门是**谁**操作控制杆放的。
+         *
+         * ⚠ **只给幸存者**（用户口径：「**杀手不知道谁放的门**」）——
+         * 以前这里双方都下发，那是更早的要求（"要说清楚是哪个幸存者动的机关"），
+         * 已被新口径取代。
          */
-        leverGateOwnerName: state.leverGateOwnerId
+        leverGateOwnerName: viewerFaction === 'survivor' && state.leverGateOwnerId
             ? state.players[state.leverGateOwnerId]?.name ?? null
             : null,
-        /** 杀手要付 3 张手牌过门时的待选状态（只有杀手视角） */
+        /**
+         * 杀手要付 3 张手牌过门时的待选状态（只有杀手视角）。
+         *
+         * ⚠ **不带 `ownerName`** —— 杀手不该知道是谁放的门。
+         */
         pendingGatePay: viewerFaction === 'killer' && state.pendingGatePay
             ? {
                 toRoomId: state.pendingGatePay.toRoomId,
                 doorId: state.pendingGatePay.doorId,
                 cost: LEVER_GATE_COST,
-                ownerName: state.leverGateOwnerId
-                    ? state.players[state.leverGateOwnerId]?.name ?? null
-                    : null,
             }
             : null,
         /**
@@ -13120,6 +13211,18 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingStatueRally: viewerFaction === 'killer' ? state.pendingStatueRally : false,
         pendingStatueRallySwitched:
             viewerFaction === 'killer' ? state.pendingStatueRallySwitched : false,
+        /**
+         * **重整旗鼓的第二步：移动封堵**。
+         *
+         * ⚠ 以前这两个字段**没有下发** —— 服务端的 `pickMoveBlockade` /
+         * `placeMovedBlockade` 明明实现了，客户端却不知道"现在该移封堵"，
+         * 于是界面上**根本没有这一步**（用户报的「场上有封堵标记没有移动封堵的步骤」）。
+         */
+        pendingStatueRallyMoveBlockade:
+            viewerFaction === 'killer' ? state.pendingStatueRallyMoveBlockade : false,
+        /** 已经选中、准备搬走的那扇门（`"A|B"`；没选就是 null） */
+        pendingStatueMovedBlockadeFrom:
+            viewerFaction === 'killer' ? state.pendingStatueMovedBlockadeFrom : null,
         /**
          * 2对3：先后手信息。
          *  - `killerOrderDecided`：两人偏好是否已一致（未定就继续在大厅提示选）
