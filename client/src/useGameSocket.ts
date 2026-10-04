@@ -3,7 +3,7 @@
  * 建房、加入、点行动按钮、离开，都从这里发出去；
  * 服务器算完棋，会把新局面（state）送回来。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ClientAction, PublicSnapshot } from './types';
 
@@ -36,6 +36,12 @@ export function useGameSocket() {
   const [connected, setConnected] = useState(false);
   const [state, setState] = useState<PublicSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 最新快照的引用，给 `sendAction` 里的【诊断】日志用
+   * （`useCallback` 里读不到最新的 `state`，用 ref 才不会拿到过期值）。
+   */
+  const stateRef = useRef<PublicSnapshot | null>(null);
+  stateRef.current = state;
   /** 同队幸存者正在预选的地点（1对2 / 1对3 里用来互看鼠标预选） */
   const [cursors, setCursors] = useState<Array<{ playerId: string; roomId: string }>>([]);
 
@@ -62,13 +68,42 @@ export function useGameSocket() {
           if (res?.ok && res.state) {
             setState(res.state);
             setError(null);
+            return;
           }
+          /**
+           * ⚠ **重连之后回不到原来那桌**（服务器重启过 / 房间被解散 / 座位没了）。
+           *
+           * 以前这里**什么都不做**：界面继续显示那份过期快照，
+           * 点任何按钮服务端都回「你不在任何房间中」，看起来就是
+           * 「挂久了啥都点不了」。现在直接退回主界面 + 说清原因。
+           */
+          clearRoomSession();
+          setState(null);
+          setCursors([]);
+          setError(
+            `原来的房间（${sess.roomCode}）已经不在了` +
+              `${res?.error ? `：${res.error}` : '（服务器可能重启过）'} —— 请重新建房或加入。`,
+          );
         },
       );
     });
     s.on('disconnect', () => {
       if (cancelled) return;
       setConnected(false);
+      /**
+       * 断线要**说出来**：只把标题栏那个小字改成"断线"太容易被忽略，
+       * 玩家会以为"卡住了"。这里给一条明确提示（重连成功时会被清掉）。
+       */
+      setError('与服务器断线了，正在重连……（重连上会自动回到这一局）');
+    });
+    /**
+     * 连不上（服务器没开 / 端口不通）也要有话说 —— 否则界面一直是"正在连接…"，
+     * 玩家不知道是没开服务端还是自己点错了。
+     */
+    s.on('connect_error', (err: Error) => {
+      if (cancelled) return;
+      setConnected(false);
+      setError(`连不上服务器（${err?.message ?? '未知原因'}）—— 确认服务端在跑、地址端口对得上。`);
     });
     s.on('state', (snap: PublicSnapshot) => {
       if (cancelled) return;
@@ -99,13 +134,21 @@ export function useGameSocket() {
   }, []);
 
   /**
-   * 还没连上时不能用 socket?.emit —— 那样 Promise 永远不会 settle，
+   * 还没连上时不能用 `socket?.emit` —— 那样 Promise 永远不会 settle，
    * 调用方的 await 会一直挂着。这里统一拒绝并写进 error。
+   *
+   * ⚠ **光判 `socket` 不够**：socket 对象在挂载后就一直存在，
+   * 断线时它只是 `connected === false` —— 那时 `emit` 会被 socket.io **缓存**，
+   * 于是确认回调永远不来、`await sendAction` 永远挂着：
+   * 表现就是用户说的「挂久了啥都点不了」（点击像石沉大海，也没有报错）。
+   * 所以这里连 `connected` 一起判，断线时**立刻**给出提示。
    */
   const requireSocket = useCallback(
     (what: string) => {
-      if (socket) return socket;
-      const msg = `还没连上服务器，无法${what}`;
+      if (socket?.connected) return socket;
+      const msg = socket
+        ? `与服务器断线了，正在重连 —— 暂时不能${what}，稍等一下再点。`
+        : `还没连上服务器，无法${what}`;
       setError(msg);
       throw new Error(msg);
     },
@@ -171,12 +214,40 @@ export function useGameSocket() {
           reject(e as Error);
           return;
         }
-        s.emit('action', action, (res: { ok: boolean; error?: string }) => {
+        /**
+         * 【诊断】把"发出这一刻，界面以为的局面"**附在请求里**一起发出去，
+         * 同时打在浏览器控制台。
+         *
+         * 为什么要附在请求里：用户复现时只需要复制**服务器窗口**的日志，
+         * 不用开 F12。服务端只认 `action.type` 等已知字段，多出来的
+         * `__diag` 会被忽略，不影响任何规则。
+         */
+        const snap = stateRef.current;
+        const diag = snap
+          ? {
+              动作: action.type,
+              点到的地点: (action as { toRoomId?: string }).toRoomId ?? null,
+              phase: snap.phase,
+              遭遇步骤: snap.encounter?.step ?? null,
+              撤离队列: (snap.encounter?.fleeQueue ?? []).map(
+                (id) => `${snap.players.find((pl) => pl.id === id)?.name ?? '?'}(${id})`,
+              ),
+              界面里的我: `${snap.you.name}(${snap.you.id})`,
+              轮到我: snap.controllingActive,
+              可点地点: snap.legalMoves,
+            }
+          : null;
+        if (diag) console.log('[诊断] 发操作', diag);
+        const payload = (diag
+          ? { ...action, __diag: diag }
+          : action) as unknown as ClientAction;
+        s.emit('action', payload, (res: { ok: boolean; error?: string }) => {
           if (res?.ok) {
             setError(null);
             resolve();
           } else {
             const msg = res?.error ?? 'action failed';
+            console.warn('[诊断] 服务端拒绝', { 动作: action.type, 错误: msg });
             setError(msg);
             reject(new Error(msg));
           }

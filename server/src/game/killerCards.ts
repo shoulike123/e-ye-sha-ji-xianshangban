@@ -18,6 +18,7 @@ import {
   roomName,
   setKillerInfo,
   setStealth,
+  survivorActionVis,
   tryMove,
   killerAdjacentRooms,
 } from './effects.js';
@@ -129,6 +130,20 @@ export function hasPendingKillerChoice(state: GameState): boolean {
     Boolean(state.pendingCorePick) ||
     Boolean(state.pendingTeleportPick) ||
     Boolean(state.pendingAcidPick) ||
+    /**
+     * **「或」牌：等杀手在行动区二选一。**
+     *
+     * ⚠ 用户报的「杀手打快速行动卡牌，选择效果期间还能选择其他快速卡牌打，
+     * 应该上一张执行完才能打下一张」就是这个漏的 —— `applyQueued` 挂起
+     * `pendingEffectChoice` 之后，`playKillerCard` 开头那道闸门查不出"还在等"，
+     * 于是能连着打第二张，两张牌的效果还会**串在同一个待选上**。
+     */
+    Boolean(state.pendingEffectChoice) ||
+    /**
+     * **超听觉：多条并列最快路径，等杀手在行动区选一条。**
+     * 同上一类 —— 选中之前不许再打别的牌。
+     */
+    (state.pendingMoveChoices?.length ?? 0) > 0 ||
     /** 恐詭管道：潜行落点（空数组 = 没有待选，按长度判） */
     (state.pendingPassagePick?.length ?? 0) > 0 ||
     Boolean(state.pendingEvolutionCardPick) ||
@@ -360,9 +375,30 @@ export function interruptCurrentCardEffects(state: GameState): void {
 function applyQueued(state: GameState, k: PlayerState, fx: EffectDef): boolean {
   /**
    * 「或」牌：这条效果带了 alternatives，就先停下来让杀手二选一。
-   * 选完由 chooseEffectOption 把选中的那组塞回队列。
+   * 选完由 `chooseEffectOption` 把选中的那组塞回队列。
+   *
+   * ⚠ **【保護色】例外**（用户口径）：
+   * 拿了【保護色】之后「恐詭管道」的落点已经是**整张地图**，
+   * 另一个用法（潛行 + 移動 0-1）就是多余的了 ——
+   * 所以**不再问二选一**，直接按 `stealthToPassage` 走，
+   * 让玩家点地图选地点（选完还要确认）。
    */
   if (fx.alternatives?.length) {
+    /**
+     * ⚠ **【保護色】例外**（用户口径）：
+     * 「未命名选择了【保護色】后，【恐詭管道】**不需要二选一**，
+     *   但是选择了地点后要确认」。
+     *
+     * 【恐詭管道】的写法是 `stealthAndMove` + `alternatives: [stealthToPassage]`。
+     * 拿了【保護色】之后「潛行到任何地点」已经是更好的那条，
+     * 「潛行 + 移動 0-1」就是多余的 —— 所以**不问二选一**，
+     * 直接把 alternatives 里那条（`stealthToPassage`）当成本效果执行。
+     */
+    if (fx.op === 'stealthAndMove' && state.passageStealthAnywhere) {
+      const passageOnly = fx.alternatives.find((a) => a.op === 'stealthToPassage');
+      if (passageOnly)
+        return applyEffectNow(state, k, passageOnly as EffectDef);
+    }
     const options: EffectDef[][] = [];
     // 第一组 = 这条效果本身（去掉 alternatives）
     const self: EffectDef = { ...fx };
@@ -640,7 +676,12 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
         return false;
       }
       poisonSurvivor(state, targetId, (id, amount) =>
-        applyDamage(state, id, amount, state.killerId ?? k.id));
+        /**
+         * ⚠ 伤害来源用**正在行动的那尊雕像**（`k.id`），不要退回主雕像 ——
+         * 特性 11「恐惧迸发」认"当前遭遇中的那尊雕像"（用户口径），
+         * 写死主雕像会让非主雕像造成的伤害触发不了它。
+         */
+        applyDamage(state, id, amount, k.id));
       return false;
     }
     case 'sacrificeZombiePoisonRange': {
@@ -1131,7 +1172,12 @@ export function confirmAmuletUse(state: GameState, use: boolean): void {
     if (use) {
       removeRelic(p, 'relic_guard');
       discardRelic(state, 'relic_guard');
-      log(state, `${p.name} 出示遗物「守護之石」，防止了这次伤害（遗物进入弃牌堆）。`, 'all', true);
+      /** 遭遇中出示 → 杀手看得到；遭遇外（坍塌 / 直伤）→ 只给幸存者 */
+      log(
+        state,
+        `${p.name} 出示遗物「守護之石」，防止了这次伤害（遗物进入弃牌堆）。`,
+        survivorActionVis(state),
+      );
     } else {
       applyDamage(state, pending.playerId, pending.amount, pending.sourceId, { skipAmulet: true });
     }
@@ -1144,9 +1190,20 @@ export function confirmAmuletUse(state: GameState, use: boolean): void {
     p.items.amulet = (p.items.amulet ?? 1) - 1;
     if (p.items.amulet <= 0) delete p.items.amulet;
     discardConsumedItem(state, 'amulet', 1);
-    log(state, `${p.name} 出示古代护符，防止了这次伤害（护符进入弃牌堆）。`);
+    log(
+      state,
+      `${p.name} 出示古代护符，防止了这次伤害（护符进入弃牌堆）。`,
+      survivorActionVis(state),
+    );
   } else {
-    applyDamage(state, pending.playerId, pending.amount, pending.sourceId, { skipAmulet: true });
+    /**
+     * 护符**放弃**了 → 接着问守護之石（用户口径：「先询问古代护符再询问守护之石，
+     * 用了第一个就不用问第二个」）。所以这里不能传 `skipAmulet`（那会把
+     * 守護之石一起跳过），只标"护符已经问过、被放弃了"。
+     */
+    applyDamage(state, pending.playerId, pending.amount, pending.sourceId, {
+      amuletDeclined: true,
+    });
   }
   continueKillerQueue(state);
   maybePromptOverFearWound(state);
@@ -1271,8 +1328,14 @@ export function runAttackTimingExtras(state: GameState, card: CardDef | undefine
           log(state, `${card.name}：当前没有遭遇目标。`, 'killer');
           break;
         }
+        /**
+         * ⚠ 伤害来源 = **这场遭遇是哪尊雕像打的**（`encounterTriggerPieceId`），
+         * 没有记录才退回主雕像 —— 特性 11「恐惧迸发」认"当前遭遇中的那尊雕像"
+         * （用户口径），写死主雕像会让非主雕像打的伤害触发不了它。
+         */
+        const srcId = state.encounterTriggerPieceId ?? state.killerId ?? targetId;
         poisonSurvivor(state, targetId, (id, amount) =>
-          applyDamage(state, id, amount, state.killerId ?? targetId));
+          applyDamage(state, id, amount, srcId));
         break;
       }
       /** 戰鬥適應：永久 +1 力量 */

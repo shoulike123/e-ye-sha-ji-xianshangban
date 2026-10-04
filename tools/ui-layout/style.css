@@ -59,6 +59,19 @@ button.primary { background: #8a3b24; border-color: transparent; }
   min-height: 70vh;
   background: #182018;
 }
+/**
+ * 【变体3】计划卡：底图是**一张卡面**（萬能鑰匙，750×1039），
+ * 按卡片比例显示、居中，4 个进度行位照着它拖。
+ */
+.blank-bg.planCards {
+  aspect-ratio: 750 / 1039;
+  max-width: 520px;
+  margin: 0 auto;
+  background: #14100c;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
 .blank-bg[hidden],
 .stage img.map[hidden] { display: none; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; }

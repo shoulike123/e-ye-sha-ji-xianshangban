@@ -111,6 +111,27 @@ export interface SurvivorLayout {
     coreMarker: { dx: number; dy: number; size: number };
     /** 女王僵尸：圆心右侧（一个地点可以有多个） */
     zombie: { dx: number; dy: number; size: number };
+    /**
+     * 【变体3】地图上的**计划标记**：圆心**左侧**。
+     * 用户口径：「放在地图上对应位置圆圈左边就行」——所以只给一个默认偏移，
+     * 不要求校准（真不合适也能在这里调）。
+     */
+    planMarker: { dx: number; dy: number; size: number };
+  };
+  /**
+   * 【变体3】**计划卡**：进度标识（灯泡箭头标）放在卡面的哪里。
+   *
+   * 用户口径：标识放在**当前进度那一行的左侧**，每完成一条就下移一格；
+   * 整张计划完成后 —— 卡面能力文字右侧**有框**的才把标识顺时针转 90° 放到能力右边
+   * （用掉那条一次性能力后标识消失）；没框的直接消失。
+   *
+   * 坐标是**相对卡面**的百分比（卡面 750×1039）。
+   */
+  planCards: {
+    /** 最多 4 个进度行位（卡面行数不够的空着不用） */
+    lines: LayoutBox[];
+    /** 整张计划完成后，能力文字右侧那个标记位 */
+    abilityMarker: LayoutBox;
   };
 }
 
@@ -285,6 +306,24 @@ export const DEFAULT_SURVIVOR_LAYOUT: SurvivorLayout = {
     coreMarker: { dx: 0, dy: -34, size: 30 },
     // 女王僵尸：圆心右侧
     zombie: { dx: 34, dy: 0, size: 34 },
+    // 【变体3】计划标记：圆心左侧（用户口径："放在圆圈左边就行"）
+    planMarker: { dx: -34, dy: 0, size: 30 },
+  },
+  /** 【变体3】计划卡上的进度标识放哪（相对卡面的百分比） */
+  planCards: {
+    /**
+     * 4 个进度行位：卡面 750×1039，进度行大约每 10.2% 一行，
+     * 标识盖在该行**左侧**（图标那一片）。
+     * 行数不够的卡（2~3 条进度）后面的空着不用。
+     */
+    lines: [
+      { x: 25, y: 11.5, w: 18, h: 11 },
+      { x: 25, y: 21.7, w: 18, h: 11 },
+      { x: 25, y: 31.9, w: 18, h: 11 },
+      { x: 25, y: 42.1, w: 18, h: 11 },
+    ],
+    /** 整张计划完成后（卡面能力右侧有框的）：顺时针 90° 放到能力文字右侧 */
+    abilityMarker: { x: 76, y: 72, w: 14, h: 12 },
   },
 };
 
@@ -515,6 +554,17 @@ export function mergeSurvivorLayout(raw: Partial<SurvivorLayout> | null | undefi
         ...DEFAULT_SURVIVOR_LAYOUT.roomMarkerOffsets.zombie,
         ...(raw?.roomMarkerOffsets?.zombie ?? {}),
       },
+      planMarker: {
+        ...DEFAULT_SURVIVOR_LAYOUT.roomMarkerOffsets.planMarker,
+        ...(raw?.roomMarkerOffsets?.planMarker ?? {}),
+      },
+    },
+    /** 【变体3】计划卡：老存档没有这一栏，用默认值 */
+    planCards: {
+      lines: usableBoxes(raw?.planCards?.lines, DEFAULT_SURVIVOR_LAYOUT.planCards.lines),
+      abilityMarker: isUsableBox(raw?.planCards?.abilityMarker)
+        ? raw!.planCards!.abilityMarker
+        : DEFAULT_SURVIVOR_LAYOUT.planCards.abilityMarker,
     },
   };
 }

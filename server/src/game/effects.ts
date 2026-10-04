@@ -26,6 +26,24 @@ export function isSurvivorPrivatePhase(state: GameState): boolean {
 }
 
 /**
+ * **幸存者侧动作（技能 / 物品 / 遗物）的战报可见性** —— 用户口径：
+ *
+ * 「遭遇中，幸存者触发技能、物品啥的正常给杀手看，但是**不会显示遭遇之前
+ *   没显示的信息**」。
+ *
+ * 也就是：
+ *  - **遭遇中**做的 → `'all'`：事情就发生在杀手眼前（出示剛毅之盾、守護之石…）
+ *  - **遭遇之外**（幸存者大回合、大回合开始…）→ `'survivor'`：杀手看不到
+ *
+ * ⚠ 用它的时候注意：**只写"这一次动作"本身**，不要顺手把之前发生过的事
+ * （比如他什么时候、从哪儿得到这件遗物）一起写出来 —— 那些信息本来就是
+ * 幸存者私有的，写进来等于用遭遇把它带出去了。
+ */
+export function survivorActionVis(state: GameState): LogVis {
+  return state.phase === 'encounter' ? 'all' : 'survivor';
+}
+
+/**
  * 往战报本上写一行。
  *
  * `vis` 省略时**按阶段推断**：幸存者私有阶段 → `'survivor'`（杀手看不见），
@@ -35,8 +53,26 @@ export function isSurvivorPrivatePhase(state: GameState): boolean {
  * （见 `buildSnapshot` 里的 `killerFogPhase` 过滤）。
  */
 export function log(state: GameState, text: string, vis?: LogVis, needsCommon = false) {
+  /**
+   * ⚠ **空文本不写进战报**。
+   *
+   * 战报是按条目逐行渲染的（每条一个 `div`），空条目在界面上就是**一格空白** ——
+   * 用户报过"战报空了一块"。这里兜一道：哪次拼字符串拼出空串（或缺参数）
+   * 就直接跳过，别让空白进战报。
+   */
+  const body = typeof text === 'string' ? text : '';
+  if (!body.trim())
+    return;
   const v: LogVis = vis ?? (isSurvivorPrivatePhase(state) ? 'survivor' : 'all');
-  state.logs.push({ t: Date.now(), text, vis: v, needsCommon });
+  /**
+   * ⚠ **带上"第几个大回合"**（`state.round`）——
+   * 杀手界面地图旁边那块信息栏要显示「本大回合的全部战报」，
+   * 只能按这个字段筛（战报本身只有时间戳，跨回合分不出来）。
+   *
+   * 大厅/选人阶段还没有 `round`（开局时归 0），统一记 `0` —— 这样
+   * "本大回合"那块筛起来不会因为 `undefined` 而漏掉或误收。
+   */
+  state.logs.push({ t: Date.now(), text: body, vis: v, needsCommon, round: state.round ?? 0 });
   if (state.logs.length > 200) state.logs.shift();
 }
 
@@ -265,11 +301,40 @@ export function doorsAt(state: GameState, roomId: string): Array<{ id: string; o
   return out;
 }
 
+/**
+ * 这个地点上**还能封的门**（已经封掉的、以及机关大门都不算）。
+ *
+ * ⚠ 名字里的 "unblocked" 只说了"没被封"，但**机关大门也不能封** ——
+ * 见 `isBlockadableDoor`。所有调用点（封堵牌 / 就地封堵 / 留下 / 核心标记封堵）
+ * 问的都是"这里还有哪扇门能封"，所以把机关大门一起滤掉是对的。
+ */
 export function unblockedDoorsAt(
   state: GameState,
   roomId: string,
 ): Array<{ id: string; other: string }> {
-  return doorsAt(state, roomId).filter((d) => !isDoorBlocked(state, d.id));
+  return doorsAt(state, roomId).filter((d) => isBlockadableDoor(state, d.id));
+}
+
+/**
+ * **这扇门现在能不能被封堵。**
+ *
+ * 规则（用户口径）：「机关大门不能放在有封堵的位置」——
+ * **反过来也一样**：门上已经有机关大门时不能再封，两者不能共存
+ * （`placeLeverGate` 早就拒绝"往封堵上放闸门"，这里补上反方向）。
+ *
+ * 顺带把"到底有没有这扇门"也判了：传进来的门号在地图上找不到边就 false。
+ */
+export function isBlockadableDoor(state: GameState, door: string): boolean {
+  if (isDoorBlocked(state, door)) return false;
+  const id = canonicalDoorId(door);
+  if (isLeverGateDoor(state, id)) return false;
+  const pair = parseDoor(id);
+  if (!pair) return false;
+  return state.map.edges.some(
+    (e) =>
+      isDoorEdge(e.pathType) &&
+      ((e.from === pair[0] && e.to === pair[1]) || (e.to === pair[0] && e.from === pair[1])),
+  );
 }
 
 export function injuredSurvivorIds(state: GameState): string[] {
@@ -358,11 +423,33 @@ export function passageNeighbors(map: MapDef, from: string): string[] {
   return out;
 }
 
+/**
+ * 【变体3】通道調查 ①「**所有秘密通道互相連接**」。
+ *
+ * 这条计划已完成时，`map.passages` 的**所有端点互相直连** ——
+ * 也就是说：只要你在其中任意一个秘密通道地点，就可以去**任何一个**通道地点
+ * （原本只能沿着地图上画的那几条通道走）。
+ *
+ * 判定走 `planImplActive`（注入的），所以 effects.ts 不用认识计划卡。
+ */
+export function passageNeighborsFor(state: GameState, from: string | null | undefined): string[] {
+  if (!from) return [];
+  if (!planImplActive(state, 'passagesLinked')) return passageNeighbors(state.map, from);
+  const all = new Set<string>();
+  for (const e of state.map.passages ?? []) {
+    all.add(e.from);
+    all.add(e.to);
+  }
+  /** 自己不在通道网络上 → 还是按原样（互相連接不改变"你得先站在通道口"） */
+  if (!all.has(from)) return passageNeighbors(state.map, from);
+  return [...all].filter((id) => id !== from).sort();
+}
+
 export function trySecretPassage(state: GameState, playerId: string, toRoomId: string): void {
   const p = actor(state, playerId);
   if (p.faction !== 'survivor' || !p.alive) throw new Error('只有幸存者可通过秘密通道');
   if (!p.roomId) throw new Error('不在地图上');
-  if (!passageNeighbors(state.map, p.roomId).includes(toRoomId)) {
+  if (!passageNeighborsFor(state, p.roomId).includes(toRoomId)) {
     throw new Error('该地点没有通往目标的秘密通道');
   }
   p.roomId = toRoomId;
@@ -462,11 +549,8 @@ function neighborsOpen(
   }
   /** 【未命名 1 级】秘密通道当成一条可走的路（传送式的，不看门/封堵） */
   if (passagesFor && killerUsesSecretPassages(state, passagesFor)) {
-    for (const e of state.map.passages ?? []) {
-      let other: string | null = null;
-      if (e.from === from) other = e.to;
-      else if ((e.bidirectional ?? true) && e.to === from) other = e.from;
-      if (!other || isRoomGone(state, other)) continue;
+    for (const other of passageNeighborsFor(state, from)) {
+      if (isRoomGone(state, other)) continue;
       if (!out.includes(other)) out.push(other);
     }
   }
@@ -739,9 +823,35 @@ export function applyDefenseItem(state: GameState, playerId: string, itemId: str
           : '（保留）';
     log(state, `${p.name} 使用「${itemName(itemId)}」防御 +${def.bonus}${payNote}。`);
   } else if (def.requiresItem) {
-    log(state, `${p.name} 使用「${itemName(itemId)}」（需 ${itemName(def.requiresItem)}）。`, 'all', true);
+    /**
+     * 防御物品只在遭遇里用 → `survivorActionVis` 在这里同样是 `'all'`；
+     * 统一走它，免得以后有人在别处复用这个函数时把信息漏给杀手。
+     */
+    log(
+      state,
+      `${p.name} 使用「${itemName(itemId)}」（需 ${itemName(def.requiresItem)}）。`,
+      survivorActionVis(state),
+    );
   }
   return def.bonus;
+}
+
+/**
+ * 【变体3】**"某条计划能力现在生效吗"** —— 由 engine 注入。
+ *
+ * 为什么用注入：`plans.ts` 要 import 本模块（用 `log` / `shuffle`），
+ * 所以本模块**不能**反过来 import 它（成环）。engine 两者都能 import，
+ * 由它把"计划已完成且带这条 impl"的判定接过来。
+ */
+let planImplChecker: ((state: GameState, impl: string) => boolean) | null = null;
+
+export function setPlanImplChecker(fn: (state: GameState, impl: string) => boolean): void {
+  planImplChecker = fn;
+}
+
+/** 这条计划能力（按 `impl` 认）现在生效吗（没开变体3 / 没完成 / 注入缺失 → false） */
+export function planImplActive(state: GameState, impl: string): boolean {
+  return planImplChecker ? planImplChecker(state, impl) : false;
 }
 
 export function hasTenacity(state: GameState, p: PlayerState): boolean {
@@ -1146,30 +1256,41 @@ export function setGuardStoneChecker(fn: (p: PlayerState) => boolean): void {
 /**
  * 造成伤害。满血变受伤，已受伤就死亡（杀手立刻胜）。
  *
- * **免伤询问**有两套（优先级：守護之石 > 古代护符）：
- *  - 古代护符：只能挡**非遭遇**的伤害（遭遇里"一律不能出示"）
- *  - 守護之石（墓穴遗物）：连**遭遇中不经攻击防御流程的直接伤害**也能挡
- *    （例如杀手 5 级效果）；角标 ∞ 所以用了不弃牌、可以反复挡
- *  - 迪伦「坚毅」：不询问、强制生效，在下面单独处理
+ * **免伤询问**（用户口径的顺序）：
+ *  1. **非遭遇**的伤害：**先问古代护符**；护符出示了就免伤，不问了；
+ *     护符**放弃**才接着问守護之石。
+ *  2. **遭遇中**的伤害：护符"遭遇里一律不能出示"，所以只问守護之石
+ *     （墓穴遗物，连"不经攻击防御流程的直接伤害"也能挡，例如杀手 5 级效果）。
+ *  3. 迪伦「坚毅」：不询问、强制生效，在下面单独处理。
+ *
+ * ⚠ 改这一条之前是"守護之石 > 护符"（有守护之石就永远轮不到护符）——
+ * 用户要求反过来：「先询问古代护符再询问守护之石，用了第一个就不用问第二个」。
  */
 export function applyDamage(
   state: GameState,
   targetId: string,
   amount: number,
   sourceId: string,
-  opts?: { eliminate?: boolean; skipAmulet?: boolean; skipResilience?: boolean },
+  opts?: {
+    eliminate?: boolean;
+    /** 跳过**全部**免伤询问（护符和守護之石都不问） */
+    skipAmulet?: boolean;
+    /** 护符已经问过、并且被放弃了 → 这次只问守護之石 */
+    amuletDeclined?: boolean;
+    skipResilience?: boolean;
+  },
 ): void {
   const target = actor(state, targetId);
   if (!target.alive || target.faction !== 'survivor') return;
   if (!opts?.eliminate && !opts?.skipAmulet && amount > 0) {
+    if (!opts?.amuletDeclined && state.phase !== 'encounter' && (target.items.amulet ?? 0) > 0) {
+      state.pendingAmulet = { playerId: targetId, amount, sourceId, relic: null };
+      log(state, `${target.name} 可以出示古代护符来防止这次伤害。`, 'survivor');
+      return;
+    }
     if (hasGuardStone?.(target)) {
       state.pendingAmulet = { playerId: targetId, amount, sourceId, relic: 'guard' };
       log(state, `${target.name} 可以出示遗物「守護之石」来防止这次伤害。`, 'survivor');
-      return;
-    }
-    if (state.phase !== 'encounter' && (target.items.amulet ?? 0) > 0) {
-      state.pendingAmulet = { playerId: targetId, amount, sourceId, relic: null };
-      log(state, `${target.name} 可以出示古代护符来防止这次伤害。`, 'survivor');
       return;
     }
   }
@@ -1392,6 +1513,14 @@ export function tryPlaceBlockadeDoor(state: GameState, doorId: string): 'ok' | '
    */
   const id = canonicalDoorId(doorId);
   if (isDoorBlocked(state, id)) return 'skip';
+  /**
+   * **机关大门上不能封堵**（用户口径："机关大门不能放在有封堵的位置" ——
+   * 两者不能共存）。这里是最底层的落点守卫，所有封堵路径最后都会走到它。
+   */
+  if (isLeverGateDoor(state, id)) {
+    log(state, '那扇门上是机关大门，不能封堵（要先让杀手把大门拆掉）。');
+    return 'skip';
+  }
   const max = state.rules.blockadeTokenMax;
   if (state.blockades.length >= max) return 'full';
   state.blockades.push(id);
@@ -2286,8 +2415,7 @@ export function resolveSixthSense(state: GameState, keepId: string): void {
     log(
       state,
       `第六感：把「${backIds.map((id) => state.cardById[id]?.name ?? id).join('、')}」放回搜索牌库顶（不会触发警报）。`,
-      'all',
-      true,
+      survivorActionVis(state),
     );
   }
   const card = state.cardById[keepId];
@@ -2310,12 +2438,27 @@ export function doRepair(state: GameState, playerId: string): void {
   const before = state.repairProgress;
   state.repairedThisPhase = true;
   p.repairedThisTurn = true;
-  addRepairProgress(state, 1);
-  log(state, `${p.name} 修理无线电（${state.repairProgress}/${state.rules.repairNeeded}）。`, 'survivor');
+  /**
+   * 【变体3】**機械藍圖**：「每當放置一個修理標記，你可以額外放置一個修理標記」——
+   * 一次修理 = 放一个修理标记，所以这张计划完成后每次修理 **+2**。
+   */
+  const extraMarker = planImplActive(state, 'extraRepairMarker');
+  addRepairProgress(state, extraMarker ? 2 : 1);
+  log(
+    state,
+    `${p.name} 修理无线电（${state.repairProgress}/${state.rules.repairNeeded}）` +
+      `${extraMarker ? '——【变体3】機械藍圖：額外放置一個修理標記（+2）' : ''}。`,
+    'survivor',
+  );
   announceRepairIfJustFinished(state, before);
   maybeArmRescue(state);
-  /** 【变体1】特性 16「高度警觉」：修理算"其他来源"，距离杀手 1 以内时响声被压住 */
-  if (state.rules.repairMakesNoise && p.roomId)
+  /**
+   * 【变体1】特性 16「高度警觉」：修理算"其他来源"，距离杀手 1 以内时响声被压住。
+   *
+   * 【变体3】**謹慎修理**：「當你使用工具箱修理時，你不會發出響聲」——
+   * 这张计划完成后，修理本身的响声整个被压住（和特性 16 各管各的，都是"压住"）。
+   */
+  if (state.rules.repairMakesNoise && p.roomId && !planImplActive(state, 'repairSilent'))
     pushNoise(state, p.roomId, false, { byPlayerId: p.id, source: 'skill' });
   /**
    * 【分头行动】用户规则：「**修理 +1 抽一张搜索牌**」——
@@ -2349,18 +2492,22 @@ export function doRepair(state: GameState, playerId: string): void {
  */
 export function killerInRoom(state: GameState, roomId: string): boolean {
   if (state.mode === '2v3') return false;
+  /**
+   * ⚠ **雕像局里没有任何"杀手在场"**（用户口径：「雕像不再阻止搜索和修理 ——
+   * 应该所有的雕像都不会影响，**包括主雕像**」「主雕像也不能挡搜索，雕像是个特例」）。
+   *
+   * 为什么单靠 `statueIndex != null` 那一句不够：雕像局是**在原来的杀手棋子之外**
+   * 又建 4 尊雕像（`setupStatues`），而那个原始棋子的 `roomId` 一直停在
+   * **杀手起始房间**（墓穴/城堡/实验室 = 隐藏出口）。它代表主雕像的位置，
+   * 但按上面的口径**连主雕像都不算在场** —— 于是谁站在那儿就搜不了、修不了
+   * （用户报的「1对1、墓穴、杀手是雕像、乔治在 G1 没有显示搜索」）。
+   *
+   * 所以雕像局里直接为假：这一局所有 killer 阵营棋子都不阻止搜索/修理。
+   */
+  if ((state.statueIds?.length ?? 0) > 0) return false;
   return Object.values(state.players).some((pl) => {
     if (pl.faction !== 'killer' || !pl.alive) return false;
-    /**
-     * ⚠ **雕像一律不算"杀手在场"，主雕像也一样**（用户明确：
-     * 「雕像不再阻止搜索和修理 —— 应该所有的雕像都不会影响，**包括主雕像**」）。
-     *
-     * 雕像是摆在图上的死物：4 尊铺开之后要是都算"杀手在此"，
-     * 幸存者几乎哪儿都搜不了、修不了。所以雕像局里这条判定**永远为假**。
-     *
-     * 注意：这不影响遭遇 —— 遭遇是"杀手主动搜索/移动撞上幸存者"时开的，
-     * 走的是 `maybeStartEncounter` 那套，不经过这里。
-     */
+    /** 兜底：万一 `statueIds` 没建起来（旧存档），雕像本身也一律不算 */
     if (pl.statueIndex != null) return false;
     if (!pl.stealth && pl.roomId === roomId) return true;
     if (pl.stealth && pl.stealthOriginRoomId === roomId) return true;
@@ -2440,6 +2587,21 @@ export function splitEscapeKeysNeeded(state: GameState): number {
 }
 
 /**
+ * **主要出口是哪个地点**（集齐钥匙逃脱 / 分头行动单独逃脱 / 变体3 计划目标都用它）。
+ *
+ * ⚠ 用户口径：**以地图的「幸存者起始房间」为准**。
+ *
+ * 以前这里读 `rules.survivorExitRequiresAllAliveAt` —— 那是写在 rules.json 里的
+ * 一个固定房间号 `"R1"`（豪宅的主要出口）。可界面上的「主要出口」标的是
+ * **地图的 `survivorStartRoomId` / `entrance`**（见 `Board.tsx` 的 `roomSpecialLabels`），
+ * 两边各说各话：墓穴（起始 R3）、城堡（G1）、实验室（G1）站在真正的主要出口
+ * **永远不会胜利**（用户报的"5 把钥匙达成、主要出口条件满足，但没胜利"）。
+ */
+export function mainExitRoomId(state: GameState): string {
+  return state.map.survivorStartRoomId || state.rules.survivorExitRequiresAllAliveAt;
+}
+
+/**
  * 【分头行动】**大回合开始时**逐个检查"单独逃脱"（用户规则）。
  *
  * 条件满足其一即可，而且**不花行动**：
@@ -2454,7 +2616,7 @@ export function splitEscapeKeysNeeded(state: GameState): number {
  */
 export function checkSplitEscapes(state: GameState): void {
   if (!state.split) return;
-  const mainExit = state.rules.survivorExitRequiresAllAliveAt;
+  const mainExit = mainExitRoomId(state);
   const hidden = state.map.rooms.find((r) => r.tags.includes('hiddenExit'));
   for (const p of Object.values(state.players)) {
     if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
@@ -2556,7 +2718,7 @@ export function checkSurvivorWin(state: GameState): void {
 
   if (state.keysCollected < state.rules.keysNeeded) return;
 
-  const exitId = state.rules.survivorExitRequiresAllAliveAt;
+  const exitId = mainExitRoomId(state);
   if (survivors.every((s) => s.roomId === exitId)) {
     state.winner = 'survivors';
     state.winReason = '集齐钥匙，从入口逃脱。';

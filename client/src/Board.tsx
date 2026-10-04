@@ -23,6 +23,14 @@ interface BoardProps {
   viewerFaction: Faction | null;
   legalMoves: string[];
   highlightRoomIds?: string[];
+  /**
+   * 【封堵】**玩家已经点选、但还没确认**的那个地点。
+   *
+   * 候选格走 `legalMoves`（流动虚线圈，表示"能点"），
+   * 而这一格要画成**实心金圈**，一眼看出"我点的是它"
+   * （用户要求：「选择封堵时，被选择的地点要高亮」）。
+   */
+  pickedRoomIds?: string[];
   firecrackerRoomId?: string | null;
   suitcaseAvailable?: boolean;
   noises: string[];
@@ -129,6 +137,8 @@ interface BoardProps {
    * 画在**圆心上方**，一个地点可以有多个；双方地图都显示。
    */
   coreMarkers?: string[];
+  /** 【变体3】地图上的计划标记（地点 id；只有幸存者视角有） */
+  planMarkers?: string[];
   /**
    * 【女王僵尸】地图上的僵尸棋子（不是杀手棋子）。
    * 一个地点可以有多个；立绘按 `art`（1..3）取，3 张循环复用。
@@ -140,6 +150,8 @@ interface BoardProps {
     trapPart: { dx: number; dy: number; size: number };
     coreMarker: { dx: number; dy: number; size: number };
     zombie: { dx: number; dy: number; size: number };
+    /** 【变体3】计划标记：圆心左侧 */
+    planMarker: { dx: number; dy: number; size: number };
   };
   /** 已〔中毒〕的幸存者 id（立绘右上角显示中毒标记） */
   poisoned?: string[];
@@ -408,8 +420,24 @@ function cursorColor(index: number) {
 export function roomSpecialLabels(map: MapDef, room: RoomDef): string[] {
   const tags = room.tags ?? [];
   const out: string[] = [];
-  if (room.id === map.survivorStartRoomId || tags.includes('entrance')) out.push('主要出口');
-  if (room.id === map.killerStartRoomId || tags.includes('hiddenExit')) out.push('隐藏出口');
+  /**
+   * **「主要出口」= 地图的幸存者起始房间**（用户口径），和服务端胜利判定
+   * `effects.mainExitRoomId()` 完全同一个来源。
+   *
+   * 以前还 OR 了一句 `tags.includes('entrance')` —— 五张图里那个标签恰好就在
+   * 起始房间上，所以看不出差别；但那是**第二个来源**：哪天某张图把 `entrance`
+   * 标到别处，界面就会多标一格「主要出口」，而服务端不认 → 玩家站在那儿等胜利
+   * 等不到（就是用户报的"5 把钥匙、主要出口条件满足却不胜利"那个坑）。
+   */
+  if (room.id === map.survivorStartRoomId) out.push('主要出口');
+  /**
+   * ⚠ **「隐藏出口」只认 `hiddenExit` 标签**（用户口径）。
+   *
+   * 以前这里还 OR 了一句 `room.id === map.killerStartRoomId` ——
+   * 同样道理：现在五张图里"杀手起始房间"恰好就是隐藏出口，
+   * 但那是第二个来源，一旦杀手起点挪走，界面就会凭空多标一格「隐藏出口」。
+   */
+  if (tags.includes('hiddenExit')) out.push('隐藏出口');
   if (tags.includes('searchable')) out.push('搜索地点');
   if (tags.includes('repairable')) out.push('修理地点');
   /** 秘密通道：按它在 `map.passages` 里的**第几条**编号（1 起） */
@@ -496,6 +524,12 @@ function tokenTransform(x: number, y: number, w: number, h: number, rotation = 0
   return `translate(${cx} ${cy}) rotate(${rotation}) translate(${-w / 2} ${-h / 2})`;
 }
 
+/**
+ * 【城堡】机关大门和封堵挤在同一扇门上时，把**闸门**往下错开这么多像素
+ * （封堵不动 —— 它必须画在校准的那一格上）。
+ */
+const GATE_OVER_BLOCKADE_SHIFT = 12;
+
 const STANDEE_H = 68;
 const SURVIVOR_STANDEE_W = Math.round(STANDEE_H * (489 / 781));
 const KILLER_STANDEE_W = Math.round(STANDEE_H * (934 / 1040));
@@ -538,6 +572,7 @@ export function Board({
   viewerFaction,
   legalMoves,
   highlightRoomIds = [],
+  pickedRoomIds = [],
   firecrackerRoomId = null,
   suitcaseAvailable = true,
   noises,
@@ -577,6 +612,8 @@ export function Board({
   hunterTraps = [],
   trapPartRooms = [],
   coreMarkers = [],
+  /** 【变体3】地图上的计划标记（幸存者视角才有；杀手拿到的是空数组） */
+  planMarkers = [],
   zombies = [],
   poisoned = [],
   encounterRoomId = null,
@@ -590,6 +627,7 @@ export function Board({
     trapPart: { dx: 0, dy: 34, size: 28 },
     coreMarker: { dx: 0, dy: -34, size: 30 },
     zombie: { dx: 34, dy: 0, size: 34 },
+    planMarker: { dx: -34, dy: 0, size: 30 },
   },
 }: BoardProps) {
   const roomMap = new Map(map.rooms.map((r) => [r.id, r]));
@@ -850,11 +888,18 @@ export function Board({
           /**
            * 【城堡】机关大门：**位置、大小、角度全部跟封堵共用**，只换一张图
            * （竖金属闸门）。规则上两者可以同时存在（放门时会自动拆掉那个封堵，
-           * 但封堵也可能事后又被放上去），所以两张图各错开一点、互不遮挡。
+           * 但封堵也可能事后又被放上去），所以两张图要错开一点、互不遮挡。
+           *
+           * ⚠ **错开只加在机关大门上，封堵永远画在校准的那一格**。
+           *
+           * 用户报过：「地图编辑里的封堵位置都准了，游戏内全都**往上偏**、
+           * 露出底下白色的门」—— 原因就是这里以前写成
+           * `gateShift = blocked ? 7 : 0`：只要"有封堵"就把封堵上移 7px，
+           * **哪怕这扇门上根本没有机关大门**（非城堡地图永远没有）。
            */
           const hasGate = door && leverGateDoorId === key;
-          /** 两道标记重叠时错开一点，免得完全叠在一起看不清 */
-          const gateShift = blocked ? 7 : 0;
+          /** 两者同时存在时才错开（错开量只加在闸门上，封堵不动） */
+          const gateShift = blocked && hasGate ? GATE_OVER_BLOCKADE_SHIFT : 0;
           return (
             <g key={`${e.from}-${e.to}-${i}`}>
               <line
@@ -869,7 +914,7 @@ export function Board({
                   href={encodeURI(UI.blockade)}
                   width={bw}
                   height={bh}
-                  transform={tokenTransform(x, y - gateShift, bw, bh, angle)}
+                  transform={tokenTransform(x, y, bw, bh, angle)}
                   pointerEvents="none"
                 />
               )}
@@ -938,6 +983,8 @@ export function Board({
         {map.rooms.map((room) => {
           const legal = legalMoves.includes(room.id);
           const colorHit = highlightRoomIds.includes(room.id);
+          /** 已经点选、等确认的那一格（封堵选点用）→ 实心金圈 */
+          const picked = pickedRoomIds.includes(room.id);
           const noise = noises.includes(room.id);
           const firecrackerHere = firecrackerRoomId === room.id;
           const blocked = blockedRoomIds.has(room.id);
@@ -1020,7 +1067,7 @@ export function Board({
                   />
                 ))}
               <circle
-                className={`room-node${legal ? ' legal' : ' clickable'}${colorHit ? ' sense-color' : ''}${noise ? ' noise' : ''}${blocked ? ' blocked' : ''}${here ? ' here' : ''}${previewHere ? ' preview' : ''}${pathPicked ? ' path-picked' : ''}${trapSpotRooms.includes(room.id) ? ' trap-spot' : ''}`}
+                className={`room-node${legal ? ' legal' : ' clickable'}${colorHit ? ' sense-color' : ''}${noise ? ' noise' : ''}${blocked ? ' blocked' : ''}${here ? ' here' : ''}${previewHere ? ' preview' : ''}${pathPicked ? ' path-picked' : ''}${picked ? ' picked' : ''}${trapSpotRooms.includes(room.id) ? ' trap-spot' : ''}`}
                 cx={room.x}
                 cy={room.y}
                 r={ROOM_R}
@@ -1283,6 +1330,22 @@ export function Board({
                   </g>
                 );
               })}
+              {/**
+               * 【变体3】**计划标记**：跟着圆心走，画在**圆圈左侧**
+               * （用户口径：「放在地图上对应位置圆圈左边就行」）。
+               * 只有幸存者的地图上画（服务端也只给幸存者视角下发）。
+               */}
+              {planMarkers.includes(room.id) && (
+                <image
+                  href={encodeURI('/Image/UI/计划进度标识.png')}
+                  x={room.x + markerOffsets.planMarker.dx - markerOffsets.planMarker.size / 2}
+                  y={room.y + markerOffsets.planMarker.dy - markerOffsets.planMarker.size / 2}
+                  width={markerOffsets.planMarker.size}
+                  height={markerOffsets.planMarker.size * 0.84}
+                  className="plan-marker"
+                  pointerEvents="none"
+                />
+              )}
               {/**
                * 【陷阱零件】使用后留下的标记：**跟着圆心走**，画在圆心下方，
                * 只有幸存者看得到。和猎手陷阱标记（圆心左侧）天然错开。

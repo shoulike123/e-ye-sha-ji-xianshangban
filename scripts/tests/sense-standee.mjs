@@ -74,7 +74,15 @@ console.log('=== ① 普通〔感知〕（屠夫的「感知」）：不该动�
   );
   const logs = st.logs.slice(-3).map((l) => l.text);
   console.log(`   战报尾部：${logs.join(' | ')}`);
-  ok(logs.some((t) => t.includes('感知')), '感知照常报出结果（信息还是给了）');
+  /**
+   * ⚠ 别把文案写死成"感知"：屠夫的〔感知〕结果实际写的是
+   * 「地点：R1接待处；看到 3 名幸存者：…」——这里只要求"结果确实报出来了"。
+   */
+  ok(
+    logs.some((t) => t.includes('感知') || t.includes('看到')),
+    '感知照常报出结果（信息还是给了）',
+    logs.join(' | '),
+  );
   void survs;
 }
 

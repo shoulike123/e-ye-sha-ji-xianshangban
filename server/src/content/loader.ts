@@ -9,12 +9,14 @@ import {
   CardSchema,
   CharacterSchema,
   MapSchema,
+  PlanSchema,
   RulesSchema,
   SurvivorLayoutSchema,
   TraitSchema,
   type CardDef,
   type CharacterDef,
   type MapDef,
+  type PlanDef,
   type RulesDef,
   type SurvivorLayout,
   type TraitDef,
@@ -45,6 +47,8 @@ export interface GameContent {
   };
   /** 【变体1】特性卡（幸存者 20 + 杀手 20） */
   traits: TraitDef[];
+  /** 【变体3】计划卡（16 张，开局随机发 2 张给幸存者方） */
+  plans: PlanDef[];
 }
 
 /** 把一个 JSON 文件读成电脑能懂的数据 */
@@ -154,7 +158,19 @@ function loadTraits(): TraitDef[] {
   });
 }
 
-/** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 + 特性卡 */
+/**
+ * 【变体3】读取计划卡（`content/plans.json` 的 `plans` 数组）。
+ *
+ * 顺序按文件里的顺序（抽 2 张时用 `shuffle`，不依赖这个顺序）。
+ */
+function loadPlans(): PlanDef[] {
+  const file = path.join(CONTENT_ROOT, 'plans.json');
+  if (!fs.existsSync(file)) return [];
+  const data = readJson(file) as { plans?: unknown[] };
+  return (data.plans ?? []).map((p) => PlanSchema.parse(p));
+}
+
+/** 开局时一次读齐：规则 + 默认地图 + 角色 + 牌堆 + 特性卡 + 计划卡 */
 export function loadContent(): GameContent {
   const rulesPath = path.join(CONTENT_ROOT, 'rules.json');
   const rules = RulesSchema.parse(readJson(rulesPath));
@@ -169,7 +185,8 @@ export function loadContent(): GameContent {
   }
   const cards = loadCards();
   const traits = loadTraits();
-  return { rules, map, maps, characters, cards, traits };
+  const plans = loadPlans();
+  return { rules, map, maps, characters, cards, traits, plans };
 }
 
 /** 根据地图编号找到它存在硬盘上的哪个文件 */

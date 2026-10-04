@@ -37,8 +37,9 @@
     "test:timing": "npm run build -w server && node scripts/tests/card-timing.mjs",
     "test:disband": "npm run build -w server && node scripts/tests/build-menu.mjs && node scripts/tests/disband-room.mjs",
     "gen:maps": "node scripts/tests/build-new-maps.mjs",
-    "gen:gate": "node scripts/tests/build-gate-icon.mjs",
-    "gen:crypt": "node scripts/tests/build-crypt-assets.mjs",
+    "gen:gate": "node scripts/tests/build-gate-icon.mjs --force",
+    "gen:crypt": "node scripts/tests/build-crypt-assets.mjs --force",
+    "test:all": "node scripts/run-tests.mjs",
     "test": "npm run test:regress && npm run test:2v3 && npm run test:2v3-turns && npm run test:2v3-e2e && npm run test:menu && npm run test:standee && npm run test:sense && npm run test:maps && npm run test:maprules && npm run test:mapui && npm run test:marks && npm run test:crypt && npm run test:cryptui && npm run test:logvis && npm run test:defense && npm run test:kcards && npm run test:skills && npm run test:timing && npm run test:evo && npm run test:gateui && npm run test:crossbow && npm run test:traps && npm run test:disband"
   }
 }

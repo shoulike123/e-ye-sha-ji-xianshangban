@@ -3,6 +3,8 @@
  * 升级只多拿新一级，旧级一直留着。力量只有牌面写了才加。
  */
 import type { GameState, PlayerState } from './types.js';
+/** 特性查询（08 跳级要用） */
+import { hasTrait } from './traits.js';
 /**
  * 2对3 进化时要在两个杀手之间切换镜像（把谁的牌库读进顶层）。
  * 这些函数住在 `engine.ts`，而 `engine.ts` 已经 import 了本文件 ——
@@ -29,6 +31,7 @@ import {
   canonicalDoorId,
   clearTrapAfterEncounter,
   doorId,
+  isBlockadableDoor,
   isDoorBlocked,
   isDoorEdge,
   log,
@@ -262,7 +265,9 @@ function allUnblockedDoorIds(state: GameState): string[] {
   for (const e of state.map.edges) {
     if (!isDoorEdge(e.pathType)) continue;
     const id = doorId(e.from, e.to);
-    if (!isDoorBlocked(state, id)) seen.add(id);
+    /** 已封的、以及机关大门都不能再封（用户口径：两者不能共存） */
+    if (!isBlockadableDoor(state, id)) continue;
+    seen.add(id);
   }
   return [...seen];
 }
@@ -306,7 +311,7 @@ export function runUpgrade(state: GameState): void {
   if (!collapseAlreadySettled && evolutionCollapseGate?.(state, beforeLv, teamLevel)) {
     log(
       state,
-      `杀手进化到 **${teamLevel} 级**（在结算进化效果之前，先处理墓穴的坍塌）。`,
+      `杀手进化到 **${teamLevel} 级**：请先确认新效果，**确认之后**再结算墓穴的坍塌。`,
       'all',
       true,
     );
@@ -335,6 +340,19 @@ export function runUpgrade(state: GameState): void {
     return;
   }
 
+  /**
+   * ⚠ **记住"触发这次进化的那名杀手"**。
+   *
+   * 用户口径：「**当前触发进化的杀手**结算完自己的本次进化，再切给另一人确认进化效果，
+   * 再按流程进行」—— 也就是先手先走完自己的四段（确认 → 坍塌 → 特性 → 效果）。
+   *
+   * ⚠ 下面那个循环里的 `switchKillerTo` 会把 `state.killerId` **一路带到最后一名杀手**，
+   * 所以收尾必须切回触发者；否则升级后"该谁确认"会先落到**后手**头上，
+   * 而且 `settleConfirmedEvolution` 记的 `doneKillerIds` 也会记成后手
+   * （`evolution-order-2v3-crypt.mjs` 抓到的就是这个）。
+   */
+  const triggerId = state.killerId && state.killers[state.killerId] ? state.killerId : ids[0]!;
+
   for (const kid of ids) {
     if (!state.killers[kid]) continue;
     /** 切到他：他的牌库 / 秘密牌 / 手牌进镜像 */
@@ -344,11 +362,16 @@ export function runUpgrade(state: GameState): void {
     runUpgradeForCurrentKiller(state, beforeLv, teamLevel, ids.length > 1, ids);
     saveKillerMirror?.(state);
   }
-  /** 收尾：把镜像切回"当前行动的杀手"，等级按队伍值统一写回 */
-  const back = state.killerId && state.killers[state.killerId] ? state.killerId : ids[0]!;
-  loadKillerMirror?.(state, back);
+  /** 收尾：切回**触发者**（2对3 里就是先手），等级按队伍值统一写回 */
+  switchKillerTo?.(state, triggerId);
   state.killerLevel = teamLevel;
   saveKillerMirror?.(state);
+  /**
+   * ⚠ 记下"这一轮从谁开始"：08 跳级那一轮要**也从同一个人开始**
+   * （用户口径：「先手持 08，则是 k1，k2，k1，k2」）。
+   */
+  if (state.pendingEvolutionAck)
+    state.pendingEvolutionAck.startKillerId = triggerId;
 }
 
 /**
@@ -376,35 +399,19 @@ function runUpgradeForCurrentKiller(
   killerIds: string[],
 ): void {
   state.killerLevel = teamLevel;
+  /** 新的一级：允许 `advanceEvolutionChoices` 再挂一次"要你选的东西" */
+  state.evolutionChoiceIssuedAtLevel = 0;
+  /** 新的一级：③「进化相关的特性卡」也要重新结算（幂等守卫跟着等级走） */
+  state.evolutionTraitStageAtLevel = 0;
   /**
-   * **解锁二选一**（未命名「刺耳噪声 / 酸液喷吐」）：
-   * 同一个 `unlockChoice` 组到了 `unlockAtLevel`，就让杀手挑一张。
-   * 这是"确认前的选择"，所以留在这一步挂出来。
+   * ⚠ **这里不再挂任何"要你选的东西"**（用户口径）：
+   * 「选卡/选牌/选主雕像/选地点」都是**执行进化效果**的一部分，
+   * 必须发生在「确认新效果」**之后**，顺序是
+   *   确认 → 坍塌 → 变体1进化特性 → 执行进化效果。
+   *
+   * 所以本函数只做两件事：推等级 + 挂出「确认新效果」面板。
+   * 那些选择由 `advanceEvolutionChoices`（确认后调用）挂出。
    */
-  const groups = new Set<string>();
-  for (const id of state.killerLocked) {
-    const card = state.cardById[id];
-    if (card?.unlockChoice && card.unlockAtLevel != null && card.unlockAtLevel <= state.killerLevel) {
-      groups.add(card.unlockChoice);
-    }
-  }
-  if (groups.size) {
-    const pool: string[] = [];
-    for (const id of state.killerLocked) {
-      const card = state.cardById[id];
-      if (card?.unlockChoice && groups.has(card.unlockChoice))
-        pool.push(id);
-    }
-    if (pool.length > 1) {
-      state.pendingUnlockChoice = pool;
-      log(
-        state,
-        `进化 ${state.killerLevel} 级：请从「${pool.map((id) => state.cardById[id]?.name ?? id).join(' / ')}」里选 1 张解锁。`,
-        'killer',
-      );
-    }
-    /** `pool.length === 1` 的"只有一张、没得选"也留到确认时再入手（见下方 settle） */
-  }
   if (!state.pendingEvolutionAck) {
     state.pendingEvolutionAck = {
       fromLevel: beforeLv,
@@ -418,57 +425,161 @@ function runUpgradeForCurrentKiller(
     state.pendingEvolutionAck.killerIds = [...killerIds];
   }
   /**
-   * 雕像「等级 1：每当你升级时，你都可以转换主雕像」——
-   * 这是**每次升级首先要执行**的一步：停下来问要不要切换，
-   * 选完（切换或不切）才继续结算这一级的其它效果。
+   * ⚠ 雕像「转换主雕像」、未命名「选进化卡牌」、女王「选 2 个生成丧尸的地点」
+   * 这些**也是进化效果**，都挪到确认之后了 —— 见 `advanceEvolutionChoices`。
    */
-  if (killerKindOf(state) === 'statue' && state.statueIds?.length) {
-    state.pendingStatueEvoSwitch = true;
-    log(state, '雕像进化 1 级：你可以转换主雕像（也可以不切）。', 'killer');
-  }
+}
+
+/**
+ * **确认「新效果」之后，按顺序挂出这一级"要你选的东西"**（用户口径）。
+ *
+ * 顺序：确认 → （engine 先做坍塌 / 变体1特性）→ 这里挂出选择 → 选完由
+ * `advanceEvolutionChoices` 再问下一项，全都问完才由调用方做实际结算。
+ *
+ * @returns 是否挂出了"还要等玩家选"的东西；false = 没有可选的，可以直接结算
+ */
+export function advanceEvolutionChoices(state: GameState): boolean {
+  const kind = killerKindOf(state);
+  const level = state.killerLevel;
   /**
-   * 未命名「等级 2 / 4：获得任意 1 张进化卡牌」——
-   * 从候选池里挑一张，**没选过的**。
-   * 候选池在开局时由引擎写进 state（`unEvolutionPool`），这里不依赖 content。
+   * ⚠ **同一级的"选择"只挂一次。**
+   *
+   * 每选完一项都会再调本函数问"还有没有下一项"；如果这里每次都重新挂，
+   * 就会"选完卡又把剩下的卡再挂一遍"（死循环、永远确认不完）。
+   * 所以用 `evolutionChoiceIssuedAtLevel` 记住"这一级已经问过了"。
    */
-  if (killerKindOf(state) === 'unidentified' && (state.killerLevel === 2 || state.killerLevel === 4)) {
+  if (state.evolutionChoiceIssuedAtLevel === level)
+    return false;
+  /** 雕像 1 级「每次升级首先执行」：先问要不要转换主雕像 */
+  if (kind === 'statue' && state.statueIds?.length && !state.pendingStatueEvoSwitch && !state.pendingStatueEvoTarget) {
+    state.pendingStatueEvoSwitch = true;
+    state.evolutionChoiceIssuedAtLevel = level;
+    log(state, '雕像进化 1 级：你可以转换主雕像（也可以不切）。', 'killer');
+    return true;
+  }
+  /** 未命名 2 / 4 级：从没选过的进化卡里挑一张 */
+  if (kind === 'unidentified' && (level === 2 || level === 4) && !state.pendingEvolutionCardPick) {
     const chosen = new Set(state.chosenEvolutionCards ?? []);
     const pool = (state.unEvolutionPool ?? []).filter((id) => !chosen.has(id));
     if (pool.length) {
       state.pendingEvolutionCardPick = pool;
-      log(
-        state,
-        `未命名进化 ${state.killerLevel} 级：请从 ${pool.length} 张进化卡牌里选 1 张。`,
-        'killer',
-      );
+      state.evolutionChoiceIssuedAtLevel = level;
+      log(state, `未命名进化 ${level} 级：请从 ${pool.length} 张进化卡牌里选 1 张。`, 'killer');
+      return true;
     }
   }
-  /**
-   * 女王「等级 1」是被动（回合结束生成僵尸，见 closeKillerTurn），这里不用停。
-   * 女王「等级 4：在任意 2 个地点各生成一个丧尸（不能是同一地点）」——
-   * 停下来让杀手点 2 个不同地点。
-   */
-  if (killerKindOf(state) === 'queen' && state.killerLevel === 4) {
-    state.pendingQueenSpawnRooms = [];
-    log(state, '女王进化 4 级：请在任意 2 个不同地点各生成一个丧尸（点两个地点）。', 'killer');
+  /** 解锁二选一（未命名「刺耳噪声 / 酸液喷吐」） */
+  if (!state.pendingUnlockChoice) {
+    const groups = new Set<string>();
+    for (const id of state.killerLocked) {
+      const card = state.cardById[id];
+      if (card?.unlockChoice && card.unlockAtLevel != null && card.unlockAtLevel <= level)
+        groups.add(card.unlockChoice);
+    }
+    if (groups.size) {
+      const pool: string[] = [];
+      for (const id of state.killerLocked) {
+        const card = state.cardById[id];
+        if (card?.unlockChoice && groups.has(card.unlockChoice))
+          pool.push(id);
+      }
+      if (pool.length > 1) {
+        state.pendingUnlockChoice = pool;
+        state.evolutionChoiceIssuedAtLevel = level;
+        log(state, `进化 ${level} 级：请从「${pool.map((id) => state.cardById[id]?.name ?? id).join(' / ')}」里选 1 张解锁。`, 'killer');
+        return true;
+      }
+      /** `pool.length === 1` 的"只有一张、没得选"由结算阶段直接入手 */
+    }
   }
+  /** 女王 4 级：点 2 个不同地点各生成一个丧尸 */
+  if (kind === 'queen' && level === 4 && !state.pendingQueenSpawnRooms) {
+    state.pendingQueenSpawnRooms = [];
+    state.evolutionChoiceIssuedAtLevel = level;
+    log(state, '女王进化 4 级：请在任意 2 个不同地点各生成一个丧尸（点两个地点）。', 'killer');
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 这一项选择做完了 → 问下一项；全都问完就返回 false（调用方去做实际结算）。
+ */
+export function evolutionChoicesPending(state: GameState): boolean {
+  if (state.pendingStatueEvoSwitch) return true;
+  if (state.pendingEvolutionCardPick) return true;
+  if (state.pendingUnlockChoice) return true;
+  if (state.pendingQueenSpawnRooms) return true;
+  return false;
+}
+
+/**
+ * **【变体1】特性 08「压抑怒火」的跳级判定**（纯查询，不改任何状态）。
+ *
+ * 卡面：「当你升级到等级 3 时，立刻升级到等级 4」。
+ *
+ * 用户口径：「杀手在 3 级时，就执行 3 级进化效果，然后由于 08，
+ * **再确认 4 级进化效果**，再坍塌，再特性牌（此时等级 4 级，不触发 08），
+ * 再执行进化效果」。
+ *
+ * 所以它要在"**3 级的进化效果结算完**"之后才发起跳级，
+ * 由 `settleConfirmedEvolution` 的末尾调用 —— 不能提前到坍塌/特性那一步。
+ *
+ * ⚠ **2对3：必须按"这次升级涉及的所有杀手"来查，不能只看当前那名。**
+ *
+ * 两名杀手**共用队伍等级**，而 2对3 的流程是"先手走完自己的四段 → 切给后手"：
+ * 跳级判定跑在**最后一名**杀手结算完的那一刻，那时 `state.killerId` 是**后手**。
+ * 如果只查他，就成了"只有后手抽到 08 才会跳级"，
+ * 「先手持 08」会整条特性失效（`evolution-trait08-2v3.mjs` 的 (a) 抓到的）。
+ *
+ * 只有等**两人都做完 3 级那一轮**才跳级 —— 否则先手一跳级，
+ * 后手就再也没机会结算他自己的 3 级效果了（时机本身是对的，只是判定范围错了）。
+ *
+ * @param ownerIds 这次升级涉及哪些杀手（2对3 传两名；不传就退回"当前这名"）
+ * @returns 要跳到的等级（不跳就是 undefined）
+ */
+export function evolutionLevelJump(
+  state: GameState,
+  level: number,
+  ownerIds?: string[],
+): number | undefined {
+  if (!state.variant1)
+    return undefined;
+  const ids = ownerIds?.length
+    ? [...ownerIds]
+    : (state.killerId ? [state.killerId] : []);
+  if (!ids.length)
+    return undefined;
+  if (level === 3 && ids.some((id) => hasTrait(state, id, 'trait_k08')))
+    return 4;
+  return undefined;
 }
 
 /**
  * **杀手点「确认新效果」时才真正结算这一级。**
  *
- * 对本次进化涉及的每个杀手各结算一次（2对3 是两个），内容：
+ * ⚠ **2对3 是"各自确认、各自结算"**（用户口径：两名杀手处理完升级效果后
+ * 都要等对方完成本次升级再继续）：所以这里默认只结算
+ * **当前轮到的那名杀手**（`state.killerId`）。
+ * 传 `onlyId` 可以显式指定结算谁（例如 2v3 里刚确认完的那一个）。
+ *
+ * 每次结算的内容：
  *  1. `applyNewEvolutionLevel` —— 力量 +N、解锁副作用等
  *  2. 锁定牌（`unlockLevel` 到期、以及二选一里只剩一张的）加入手牌
  *  3. 手牌超上限 → 让杀手自选弃置
  */
-export function resolveDeferredEvolution(state: GameState): void {
+export function resolveDeferredEvolution(state: GameState, onlyId?: string | null): void {
   const ack = state.pendingEvolutionAck;
   if (!ack?.deferred) return;
-  const ids = ack.killerIds?.length
-    ? ack.killerIds.filter((id) => Boolean(state.killers[id]))
+  const ids = onlyId
+    ? (state.killers[onlyId] ? [onlyId] : [])
     : (state.killerId && state.killers[state.killerId] ? [state.killerId] : []);
-  const multi = ids.length > 1;
+  if (!ids.length) return;
+  /**
+   * `multi` 只是日志里的前缀（"「某某」锁定牌…加入手牌"），
+   * 用"这次升级涉及几个杀手"来判断，而不是"这次结算几个"。
+   */
+  const multi = (ack.killerIds?.length ?? 0) > 1;
   for (const kid of ids) {
     switchKillerTo?.(state, kid);
     state.killerLevel = ack.toLevel;
@@ -476,7 +587,7 @@ export function resolveDeferredEvolution(state: GameState): void {
     saveKillerMirror?.(state);
   }
   const back = state.killerId && state.killers[state.killerId] ? state.killerId : ids[0];
-  if (back && ids.length) loadKillerMirror?.(state, back);
+  if (back) loadKillerMirror?.(state, back);
   state.killerLevel = ack.toLevel;
   saveKillerMirror?.(state);
 }
@@ -558,35 +669,30 @@ export function applyNewEvolutionLevel(state: GameState, newLevel: number): void
   /** 雕像「等级 2：力量 +1」 */
   if (kind === 'statue' && newLevel === 2) addPermanentPower(state, 1);
   /**
-   * 雕像「等级 4：力量 +2；将「圍困」从弃牌堆加入你的手牌」。
+   * 雕像「等级 4：力量 +2；将『圍困』从弃牌堆加入你的手牌」。
    *
-   * 「圍困」`unlockLevel` 是 3，所以到 4 级时它**通常已经在弃牌堆**（打出去过）。
-   * 为了不因为「提前解锁」而永远拿不到，这里兜底也接受它还在锁定区或已经在手里的情况。
+   * ⚠ **只在弃牌堆里找**（用户口径）：
+   * 「不在弃牌堆就直接跳过拿围困的流程，力量仍然加」。
+   * 「圍困」的 `unlockLevel` 是 3，正常打出去之后就在弃牌堆里；
+   * 它还在锁定区 / 还在手牌里时**不兜底**，跳过取回、只加力量。
    */
   if (kind === 'statue' && newLevel === 4) {
     addPermanentPower(state, 2);
     const SIEGE = 'statue_siege';
-    if (state.killerHand.includes(SIEGE)) {
-      log(state, '雕像进化 4 级：力量 +2。「圍困」已经在手牌里。');
-    } else if (state.killerLocked.includes(SIEGE)) {
-      state.killerLocked = state.killerLocked.filter((x) => x !== SIEGE);
+    const i = state.killerDiscard.indexOf(SIEGE);
+    if (i >= 0) {
+      state.killerDiscard.splice(i, 1);
       state.killerHand.push(SIEGE);
-      log(state, '雕像进化 4 级：力量 +2，把「圍困」从锁定区加入手牌。');
+      log(state, '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。');
     } else {
-      const i = state.killerDiscard.indexOf(SIEGE);
-      if (i >= 0) {
-        state.killerDiscard.splice(i, 1);
-        state.killerHand.push(SIEGE);
-        log(state, '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。');
-      } else {
-        log(state, '雕像进化 4 级：力量 +2。「圍困」既不在弃牌堆也不在锁定区，无法取回。');
-      }
+      log(state, '雕像进化 4 级：力量 +2。弃牌堆里没有「圍困」，跳过取回。');
     }
+    /** 取回了才可能超上限（没取回就不会因为这一步超） */
     const maxSiege = state.rules.killerHandMax ?? 5;
-    if (state.killerHand.length > maxSiege) {
+    if (i >= 0 && state.killerHand.length > maxSiege) {
       state.pendingUnlockDiscard = true;
       state.pendingKillerDiscards = state.killerHand.length - maxSiege;
-      state.justUnlockedCards = state.killerHand.includes(SIEGE) ? [SIEGE] : [];
+      state.justUnlockedCards = [SIEGE];
       log(state, `雕像进化 4 级取回「圍困」后手牌超过 ${maxSiege}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
     }
   }
@@ -961,6 +1067,12 @@ export function pickAnyDoorRoom(state: GameState, roomId: string): void {
   );
   if (!edge) throw new Error('这两个地点之间没有可封的门');
   if (isDoorBlocked(state, id)) throw new Error('这扇门已经封上了');
+  /** 机关大门上不能封（用户口径：机关大门和封堵不能共存） */
+  if (!isBlockadableDoor(state, id)) {
+    throw new Error(
+      `「${roomName(state, job.firstRoomId)}」–「${roomName(state, roomId)}」那扇门上是机关大门，不能封堵。`,
+    );
+  }
   job.secondRoomId = roomId;
   log(state, `已选「${roomName(state, job.firstRoomId)}」与「${roomName(state, roomId)}」，请在行动区确认封堵。`);
 }
@@ -1021,8 +1133,42 @@ export function roomsForBlockadeRemove(state: GameState): string[] {
   return [...rooms];
 }
 
+/**
+ * 「任选门封堵」（进化 4 级 / 特性 13、18）现在**能点哪些地点**。
+ *
+ * ⚠ 以前一律返回整张地图 —— 于是每一格都一样亮，玩家既看不出"该点哪一格"，
+ * 也看不出"我已经点了哪一格"（用户报的「谋杀者 4 级放四个封堵预选时
+ * 为什么地点没高亮」）。现在跟着当前进度收窄，和服务端真正接受的点法一致：
+ *  - 还没点第一格 → 只给**至少有一扇可封的白门**的地点
+ *  - 点了第一格 → 只给**与它以可封的白门相连**的地点
+ *    （外加已经点过的那两格 —— 再点同一格是"取消"）
+ */
 export function roomsForAnyDoorPick(state: GameState): string[] {
-  return state.map.rooms.map((r) => r.id);
+  const job = state.pendingBlockadeJob;
+  const first = job?.kind === 'anyDoors' ? job.firstRoomId : null;
+  const out = new Set<string>();
+  if (!first) {
+    for (const e of state.map.edges) {
+      if (!isDoorEdge(e.pathType)) continue;
+      if (!isBlockadableDoor(state, doorId(e.from, e.to))) continue;
+      out.add(e.from);
+      out.add(e.to);
+    }
+  }
+  else {
+    out.add(first);
+    if (job?.secondRoomId) out.add(job.secondRoomId);
+    for (const e of state.map.edges) {
+      if (!isDoorEdge(e.pathType)) continue;
+      const other =
+        e.from === first ? e.to : (e.bidirectional ?? true) && e.to === first ? e.from : null;
+      if (!other) continue;
+      if (!isBlockadableDoor(state, doorId(first, other))) continue;
+      out.add(other);
+    }
+  }
+  /** 按地图顺序返回：高亮稳定，也不会有已经塌掉的地点混进来 */
+  return state.map.rooms.map((r) => r.id).filter((id) => out.has(id));
 }
 
 export function doorLabel(state: GameState, id: string): string {

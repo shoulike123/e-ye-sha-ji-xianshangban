@@ -46,10 +46,10 @@ export const ITEM_CARD: Record<string, string> = {
   relic_shield: '/Image/Relic/03_剛毅之盾.png',
   relic_guard: '/Image/Relic/04_守護之石.png',
   relic_insight: '/Image/Relic/05_洞察之球.png',
-  // 替换牌（开启「替换鸿运当骰等牌」后进搜索牌堆）
-  lamp: '/Image/Search/煤油灯.png',
-  parcel: '/Image/Search/神秘包裹.png',
-  lucky_dice: '/Image/Search/鸿运当骰.png',
+  // 替换牌（开启「替换鸿运当骰等牌」后进搜索牌堆）—— 图片放在 `Image/Promo/`
+  lamp: '/Image/Promo/煤油灯.png',
+  parcel: '/Image/Promo/神秘包裹.png',
+  lucky_dice: '/Image/Promo/鸿运当骰.png',
   /**
    * 狼人宝藏（开宝箱抽到的物品，占背包格）。
    * ⚠ 以前这里没登记 —— 抽到宝藏后背包里只显示原始 id「silver_dagger」，
@@ -66,10 +66,10 @@ const SEARCH_BY_NAME: Record<string, string> = {
   威士忌酒瓶: '/Image/Key/07_威士忌酒瓶.png',
   草药: '/Image/Key/08_草药.png',
   工具箱: '/Image/Key/09_工具箱.png',
-  // 替换牌
-  煤油灯: '/Image/Search/煤油灯.png',
-  神秘包裹: '/Image/Search/神秘包裹.png',
-  鸿运当骰: '/Image/Search/鸿运当骰.png',
+  // 替换牌（`Image/Promo/`）
+  煤油灯: '/Image/Promo/煤油灯.png',
+  神秘包裹: '/Image/Promo/神秘包裹.png',
+  鸿运当骰: '/Image/Promo/鸿运当骰.png',
 };
 
 const DISCOVERY_BY_NAME: Record<string, string> = {

@@ -367,9 +367,26 @@ export function applySonarReveal(state: GameState): void {
   if (!state.sonarRevealActive) return;
   const k = killerActor(state);
   if (!k?.roomId) return;
+  /**
+   * ⚠ **爆竹 = 全场都有响声**（引擎自己的口径，见响声阶段那句
+   * 「响声阶段：全场都有响声（爆竹）」）。
+   *
+   * 所以这里**不能只看 `state.noises`**：爆竹回合里那里面只有
+   * "杀手所在地点"一个标记（`placeFirecrackerMarker` 放的），于是音波感知
+   * 要么走"有响声"只点杀手那一格、要么（标记被清掉时）走"无响声"去点距离 1 内的人 ——
+   * 两种都不是"全场"（用户报的「爆竹为什么显示无响声」）。
+   */
+  const firecracker = state.firecrackerThisRound === true;
   const noises = state.noises ?? [];
   const targets: PlayerState[] = [];
-  if (!noises.length) {
+  if (firecracker) {
+    /** 全场都在响 → **所有**存活幸存者都算"位于带响声的地点" */
+    for (const p of Object.values(state.players)) {
+      if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
+      targets.push(p);
+    }
+    log(state, '音波感知（爆竹：全场都在响）：**所有**幸存者必须揭示地点。', 'killer');
+  } else if (!noises.length) {
     for (const p of Object.values(state.players)) {
       if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
       const d = mapDist(state, k.roomId, p.roomId, false);
@@ -712,7 +729,16 @@ export function beginRemoveFromDiscardPermanent(
     remaining: want,
     excludeCardIds: [...excludeCardIds],
     options: [...options],
-    optionsNamed: options.map((id) => ({ id, name: state.cardById[id]?.name ?? id })),
+    /**
+     * ⚠ `uid` = **每一份**的唯一键：牌组里同一张卡有多份（爬行×3），
+     * 全都只用 `id` 当 key 的话，界面上点一份会两份一起高亮
+     * （React 也会报重复 key）。
+     */
+    optionsNamed: options.map((id, i) => ({
+      id,
+      name: state.cardById[id]?.name ?? id,
+      uid: `${id}#${i}`,
+    })),
     cardName,
   };
   log(
@@ -844,7 +870,13 @@ export function stealthToPassage(state: GameState): boolean {
   return true;
 }
 
-/** 落点：潜行到秘密通道地点 */
+/**
+ * 落点：潜行到秘密通道地点。
+ *
+ * ⚠ **只"选中"，不立刻移动**（用户口径：「选择了地点后要确认」）：
+ * 真正的移动在 `confirmPassagePick`（点「确认潜入」）时才做。
+ * 再点同一格 = 取消选择。
+ */
 export function resolveStealthToPassage(state: GameState, roomId: string): void {
   const k = killerActor(state);
   const allowed = state.pendingPassagePick ?? [];
@@ -856,10 +888,35 @@ export function resolveStealthToPassage(state: GameState, roomId: string): void 
    */
   if (!allowed.length) {
     state.pendingPassagePick = null;
+    state.pendingPassageRoom = null;
     return;
   }
-  if (!allowed.includes(roomId)) throw new Error('那个地点没有秘密通道');
+  if (!allowed.includes(roomId))
+    throw new Error(state.passageStealthAnywhere ? '那个地点不存在' : '那个地点没有秘密通道');
+  if (!k) return;
+  /** 再点同一格 = 取消选择 */
+  if (state.pendingPassageRoom === roomId) {
+    state.pendingPassageRoom = null;
+    log(state, `恐詭管道：已取消「${roomName(state, roomId)}」。`, 'killer');
+    return;
+  }
+  state.pendingPassageRoom = roomId;
+  log(state, `恐詭管道：已选「${roomName(state, roomId)}」，点「确认潜入」才移动。`, 'killer');
+}
+
+/**
+ * **确认潜入**：把选中的落点真正落下去（用户口径：选了地点要确认）。
+ */
+export function confirmStealthToPassage(state: GameState): void {
+  const k = killerActor(state);
+  const roomId = state.pendingPassageRoom;
+  if (!roomId)
+    throw new Error('请先点一个地点');
+  const allowed = state.pendingPassagePick ?? [];
+  if (allowed.length && !allowed.includes(roomId))
+    throw new Error('那个地点不在可选范围里');
   state.pendingPassagePick = null;
+  state.pendingPassageRoom = null;
   if (!k) return;
   k.roomId = roomId;
   log(state, `恐詭管道：潜入「${roomName(state, roomId)}」。`, 'killer');

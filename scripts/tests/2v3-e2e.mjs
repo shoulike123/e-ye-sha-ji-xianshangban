@@ -209,7 +209,20 @@ console.log('=== 端到端：女王 + 扼杀者的专属资源互不干扰 ===')
   const coresBefore = (st.coreMarkers ?? []).length;
   const { runUpgrade } = await import('../../server/dist/game/evolution.js');
   runUpgrade(st);
-  st.pendingEvolutionAck = null;
+  /**
+   * ⚠ **必须走真实确认流程**（用户口径：确认 → 坍塌 → 特性 → 执行进化效果）。
+   *
+   * 以前这里是 `st.pendingEvolutionAck = null` 硬清掉 —— 那是"确认之前就结算"
+   * 的旧流程写法；现在清掉面板等于**什么都没结算**，于是扼杀者少拿一个核心标记。
+   * 2对3 里两名杀手各自确认、各自结算，都做完才放行。
+   */
+  let ackGuard = 0;
+  while (st.pendingEvolutionAck && ackGuard < 6) {
+    ackGuard += 1;
+    try { handleAction(st, st.killerId, { type: 'ackEvolution' }, content); }
+    catch (e) { console.log(`     确认失败：${e.message}`); break; }
+  }
+  ok(st.pendingEvolutionAck == null, '两名杀手都确认完，进化收尾');
   console.log(`   进化到 2 级：等级=${st.killerLevel} 核心标记 ${coresBefore} → ${(st.coreMarkers ?? []).length}`);
   ok(st.killerLevel === 2, '队伍等级 = 2', `${st.killerLevel}`);
   ok((st.coreMarkers ?? []).length === coresBefore + 1,

@@ -251,6 +251,53 @@ export const TraitSchema = z.object({
 });
 export type TraitDef = z.infer<typeof TraitSchema>;
 
+/**
+ * 【变体3】**计划卡**（`content/plans.json`）。
+ *
+ * 判定只看两类条件（用户口径：**只检查人物位置**）：
+ *  - `icon`：四类地点图标 —— `gear`=修理地点 / `hammer`=锤子地点 / `book`=书本地点 / `spiral`=螺旋地点
+ *  - `place`：整句位置条件 —— `killerRoom`=杀手地点 / `allSame`=所有幸存者同一地点 /
+ *    `allDifferent`=所有幸存者不同地点 / `hiddenExit`=隐藏出口
+ *
+ * 能力里：
+ *  - `oncePerGame` **只认卡面文字写明的「每場遊戲僅限一次」**（和有没有标记框无关）
+ *  - `hasBox` = 卡面能力文字**右侧有没有那个标记框**（有框的用掉后标记消失，代表已使用）
+ *  - `mapMarker` = 这条能力要在地图上放计划标记
+ *  - `impl` = 引擎里的实现键（`plans.ts` 按它 switch）
+ */
+export const PlanStepSchema = z.object({
+  icon: z.enum(['gear', 'hammer', 'book', 'spiral']).optional(),
+  place: z.enum(['killerRoom', 'allSame', 'allDifferent', 'hiddenExit', 'mainExit']).optional(),
+  /** 进度名（风味文字，判定不看它） */
+  label: z.string(),
+});
+
+export const PlanAbilitySchema = z.object({
+  text: z.string(),
+  impl: z.string(),
+  kind: z.enum(['passive', 'special', 'extra', 'onComplete', 'win']),
+  /** 「在主要出口 / 在螺旋地点」这类**使用地点**限制 */
+  place: z.enum(['mainExit', 'spiral']).optional(),
+  /** 发动代价（弃物品） */
+  cost: z.object({ item: z.string(), count: z.number().int().positive() }).optional(),
+  oncePerGame: z.boolean().optional(),
+  hasBox: z.boolean().optional(),
+  mapMarker: z.boolean().optional(),
+  /** 需要玩家选一名幸存者（例如情报分享的"选一人抽 1 张"） */
+  pickTarget: z.boolean().optional(),
+});
+
+export const PlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  art: z.string(),
+  progress: z.array(PlanStepSchema).min(1),
+  abilities: z.array(PlanAbilitySchema).min(1),
+});
+export type PlanDef = z.infer<typeof PlanSchema>;
+export type PlanStep = z.infer<typeof PlanStepSchema>;
+export type PlanAbility = z.infer<typeof PlanAbilitySchema>;
+
 export const CardSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -683,6 +730,23 @@ export const SurvivorLayoutSchema = z.object({
       trapPart: MarkerOffsetSchema,
       coreMarker: MarkerOffsetSchema,
       zombie: MarkerOffsetSchema,
+      /** 【变体3】计划标记：圆心左侧 */
+      planMarker: MarkerOffsetSchema,
+    })
+    .partial()
+    .optional(),
+  /**
+   * 【变体3】**计划卡**上进度标识的位置（相对卡面的百分比）。
+   *
+   * `lines` = 最多 4 个进度行位（标识放在"当前进度那一行"）；
+   * `abilityMarker` = 整张计划完成后、能力文字右侧那个"已用"标记位。
+   *
+   * ⚠ 同样**必须在这里声明**，否则校准页保存时会被 zod 剥掉。
+   */
+  planCards: z
+    .object({
+      lines: z.array(LayoutBoxSchema).min(1),
+      abilityMarker: LayoutBoxSchema,
     })
     .partial()
     .optional(),

@@ -1,6 +1,13 @@
 /**
  * 生成【墓穴】素材的**占位图** → `Image/UI/坍塌板块.png`、`Image/UI/遗物_*.png`、`Image/Relic/牌背.png`
  *
+ * ⚠⚠ **这是生成器，不是测试！别把它塞进测试扫描里跑**（`npm run gen:crypt` 才是入口）。
+ *
+ * 血的教训：有一次"跑全部测试"的脚本把 `scripts/tests/*.mjs` 一股脑执行了，
+ * 这个生成器就把用户**已经替换好的正式素材**又盖回了占位图
+ * （表现是"坍塌位置/遗物标记的图片没加载出来"）。
+ * 所以下面加了**覆盖保护**：目标已存在就拒绝写，除非显式带 `--force`。
+ *
  * 为什么要有这个：地图/牌堆是按**固定文件名**去读图的，
  * 素材没到位时浏览器会显示破图（SVG `<image>` 甚至什么都不画），
  * 看起来像"功能没做"。先放一张"明显是占位图"的图顶着，
@@ -13,8 +20,26 @@
  *
  * 手写 PNG 编码（Node 自带 zlib，无第三方依赖）。
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
+
+/** 这个脚本会覆盖的文件（**都是正式素材**，不是临时文件） */
+const TARGETS = [
+  'Image/UI/坍塌板块.png',
+  'Image/UI/遗物_正面.png',
+  'Image/UI/遗物_背面.png',
+  'Image/Relic/牌背.png',
+];
+{
+  const existing = TARGETS.filter((p) => existsSync(p));
+  if (existing.length && !process.argv.includes('--force')) {
+    console.error('⚠ 这些素材已经存在，**拒绝覆盖**（它们是正式素材，不是占位图）：');
+    for (const p of existing) console.error(`   - ${p}`);
+    console.error('确实要重新生成占位图，请显式加 --force：');
+    console.error('   node scripts/tests/build-crypt-assets.mjs --force');
+    process.exit(1);
+  }
+}
 
 const CRC_TABLE = (() => {
   const t = new Int32Array(256);

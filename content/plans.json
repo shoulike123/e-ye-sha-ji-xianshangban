@@ -1,0 +1,327 @@
+{
+  "_comment": "【变体3】计划卡（16 张）。判定只看两类条件：四类地点图标（gear=修理地点 / hammer=锤子地点 / book=书本地点 / spiral=螺旋地点），或整句位置条件（place）。能力里 oncePerGame 只认卡面文字写明的「每場遊戲僅限一次」；hasBox = 卡面能力文字右侧有没有那个标记框（有框的用完标记就消失）。",
+  "plans": [
+    {
+      "id": "plan_careful_repair",
+      "name": "謹慎修理",
+      "art": "/Image/Plan/谨慎修理.png",
+      "progress": [
+        { "icon": "gear", "label": "診斷故障" },
+        { "icon": "hammer", "label": "尋找工具" },
+        { "icon": "gear", "label": "移除噪音源" }
+      ],
+      "abilities": [
+        {
+          "text": "當你使用工具箱修理時，你不會發出響聲。",
+          "impl": "repairSilent",
+          "kind": "passive"
+        }
+      ]
+    },
+    {
+      "id": "plan_master_key",
+      "name": "萬能鑰匙",
+      "art": "/Image/Plan/万能钥匙.png",
+      "progress": [
+        { "icon": "hammer", "label": "搜索原料" },
+        { "icon": "hammer", "label": "搜索模具" },
+        { "icon": "book", "label": "設計鑰匙" },
+        { "icon": "book", "label": "制作鑰匙" }
+      ],
+      "abilities": [
+        {
+          "text": "（在主要出口）特殊行動：棄掉一個工具箱來獲得線索牌庫底部的鑰匙。",
+          "impl": "spendToolboxForKey",
+          "kind": "special",
+          "place": "mainExit",
+          "cost": { "item": "toolbox", "count": 1 },
+          "oncePerGame": true
+        }
+      ]
+    },
+    {
+      "id": "plan_blueprint",
+      "name": "機械藍圖",
+      "art": "/Image/Plan/机械蓝图.png",
+      "progress": [
+        { "icon": "book", "label": "搜索藍圖" },
+        { "icon": "hammer", "label": "收集遺失部件" },
+        { "icon": "book", "label": "閱讀使用手冊" }
+      ],
+      "abilities": [
+        {
+          "text": "每當放置一個修理標記，你可以額外放置一個修理標記。",
+          "impl": "extraRepairMarker",
+          "kind": "passive"
+        }
+      ]
+    },
+    {
+      "id": "plan_intel_share",
+      "name": "情報分享",
+      "art": "/Image/Plan/情报分享.png",
+      "progress": [
+        { "place": "allDifferent", "label": "獨自搜索" },
+        { "place": "allDifferent", "label": "繼續搜索" },
+        { "place": "allSame", "label": "交換並拼湊情報" }
+      ],
+      "abilities": [
+        {
+          "text": "完成計劃時：選擇一名倖存者從搜索牌庫抽取一張牌。",
+          "impl": "onCompleteDrawOneForOne",
+          "kind": "onComplete",
+          "pickTarget": true
+        }
+      ]
+    },
+    {
+      "id": "plan_field_study",
+      "name": "現場研究",
+      "art": "/Image/Plan/现场研究.png",
+      "progress": [
+        { "place": "hiddenExit", "label": "調查外圍" },
+        { "place": "allSame", "label": "交換發現" }
+      ],
+      "abilities": [
+        {
+          "text": "額外行動：【移動】×1–2。",
+          "impl": "extraMove12",
+          "kind": "extra",
+          "oncePerGame": true,
+          "hasBox": true
+        }
+      ]
+    },
+    {
+      "id": "plan_herbs",
+      "name": "秘術草藥",
+      "art": "/Image/Plan/秘术草药.png",
+      "progress": [
+        { "icon": "spiral", "label": "尋找秘術草藥" },
+        { "icon": "spiral", "label": "收割草藥" }
+      ],
+      "abilities": [
+        {
+          "text": "（在螺旋地點）額外行動：【治療】並移除目標身上所有「恐懼」。",
+          "impl": "healClearFear",
+          "kind": "extra",
+          "place": "spiral",
+          "oncePerGame": true,
+          "hasBox": true
+        }
+      ]
+    },
+    {
+      "id": "plan_radio",
+      "name": "自製無線電",
+      "art": "/Image/Plan/自制无线电.png",
+      "progress": [
+        { "icon": "book", "label": "收集信息" },
+        { "icon": "gear", "label": "收集配件" },
+        { "icon": "book", "label": "安裝天線" },
+        { "icon": "hammer", "label": "接通線路" }
+      ],
+      "abilities": [
+        {
+          "text": "特殊行動：棄掉三個工具箱，立刻完成修理無線電！在你的地點發出響聲。",
+          "impl": "finishRepairNow",
+          "kind": "special",
+          "cost": { "item": "toolbox", "count": 3 },
+          "hasBox": true
+        }
+      ]
+    },
+    {
+      "id": "plan_buzzer",
+      "name": "蜂鳴器",
+      "art": "/Image/Plan/蜂鸣器.png",
+      "progress": [
+        { "place": "killerRoom", "label": "觀察殺手" },
+        { "place": "killerRoom", "label": "分析殺手能力" },
+        { "icon": "hammer", "label": "設計裝置" }
+      ],
+      "abilities": [
+        {
+          "text": "特殊行動：棄掉一個工具箱來在你的地點放置計劃標記。",
+          "impl": "placePlanMarker",
+          "kind": "special",
+          "cost": { "item": "toolbox", "count": 1 },
+          "oncePerGame": true,
+          "hasBox": true,
+          "mapMarker": true
+        },
+        {
+          "text": "額外行動：在帶有計劃標記的地點發出響聲。",
+          "impl": "noiseOnPlanMarker",
+          "kind": "extra"
+        }
+      ]
+    },
+    {
+      "id": "plan_passage_survey",
+      "name": "通道調查",
+      "art": "/Image/Plan/通道调查.png",
+      "progress": [
+        { "icon": "spiral", "label": "翻開老舊檔案" },
+        { "icon": "book", "label": "分析地圖" },
+        { "icon": "book", "label": "發現秘密通道" }
+      ],
+      "abilities": [
+        {
+          "text": "所有秘密通道互相連接。",
+          "impl": "passagesLinked",
+          "kind": "passive"
+        },
+        {
+          "text": "特殊行動：移動通過一條秘密通道。",
+          "impl": "moveThroughPassage",
+          "kind": "special"
+        }
+      ]
+    },
+    {
+      "id": "plan_molotov",
+      "name": "燃燒瓶",
+      "art": "/Image/Plan/燃烧瓶.png",
+      "progress": [
+        { "icon": "hammer", "label": "搜尋可燃物" },
+        { "icon": "hammer", "label": "學習制作方法" }
+      ],
+      "abilities": [
+        {
+          "text": "每次攻擊僅限一次，你可以棄掉一個威士忌酒瓶來 +2 防禦值。（如果可以，你還能如常使用其他物品來繼續增強自己的防禦）",
+          "impl": "whiskeyDefenseBonus",
+          "kind": "passive"
+        }
+      ]
+    },
+    {
+      "id": "plan_ambush",
+      "name": "反擊！暗中伏擊",
+      "art": "/Image/Plan/反击！暗中伏击.png",
+      "progress": [
+        { "icon": "book", "label": "收集信息" },
+        { "place": "allSame", "label": "分析殺手弱點" },
+        { "place": "killerRoom", "label": "準備伏擊" }
+      ],
+      "abilities": [
+        {
+          "text": "完成計劃時：立刻在倖存者地點放置計劃標記。",
+          "impl": "placePlanMarkerAtSurvivors",
+          "kind": "onComplete",
+          "mapMarker": true
+        },
+        {
+          "text": "在本地點攻擊中，當倖存者的防禦值高出殺手的力量至少 3 點時，倖存者立刻獲勝！",
+          "impl": "winOnDefenseOverPower3",
+          "kind": "win"
+        }
+      ]
+    },
+    {
+      "id": "plan_arcane_seal",
+      "name": "反擊！奧術封印",
+      "art": "/Image/Plan/反击！奥术封印.png",
+      "progress": [
+        { "icon": "spiral", "label": "解讀符文" },
+        { "place": "killerRoom", "label": "觀察殺手" },
+        { "icon": "spiral", "label": "準備儀式" },
+        { "icon": "spiral", "label": "吟唱法術" }
+      ],
+      "abilities": [
+        {
+          "text": "完成計劃時：在螺旋地點發出響聲。",
+          "impl": "noiseAtSpiral",
+          "kind": "onComplete"
+        },
+        {
+          "text": "當倖存者在螺旋地點使用長劍成功防禦攻擊時，倖存者立刻獲勝！",
+          "impl": "winOnSwordDefenseAtSpiral",
+          "kind": "win"
+        }
+      ]
+    },
+    {
+      "id": "plan_bomb_trap",
+      "name": "反擊！爆炸陷阱",
+      "art": "/Image/Plan/反击！爆炸陷阱.png",
+      "progress": [
+        { "place": "killerRoom", "label": "觀察殺手習慣" },
+        { "icon": "hammer", "label": "搜索爆炸物" },
+        { "place": "killerRoom", "label": "分析殺手弱點" },
+        { "icon": "hammer", "label": "組裝陷阱" }
+      ],
+      "abilities": [
+        {
+          "text": "特殊行動：棄掉一個工具箱來在你的地點放置計劃標記。",
+          "impl": "placePlanMarker",
+          "kind": "special",
+          "cost": { "item": "toolbox", "count": 1 },
+          "oncePerGame": true,
+          "hasBox": true,
+          "mapMarker": true
+        },
+        {
+          "text": "當殺手【搜索】該地點並且該地點沒有倖存者時，倖存者立刻獲勝！",
+          "impl": "winOnKillerSearchMarkedRoom",
+          "kind": "win"
+        }
+      ]
+    },
+    {
+      "id": "plan_rocket",
+      "name": "反擊！火箭發射器",
+      "art": "/Image/Plan/反击！火箭发射器.png",
+      "progress": [
+        { "icon": "hammer", "label": "回收火箭發射器" },
+        { "icon": "book", "label": "閱讀使用手冊" },
+        { "place": "killerRoom", "label": "分析殺手弱點" },
+        { "icon": "hammer", "label": "修復火箭發射器" }
+      ],
+      "abilities": [
+        {
+          "text": "當倖存者回合開始時，如果所有倖存者都位於同一個與殺手相鄰的地點，並且上一個回合中沒有發生遭遇，則倖存者立刻獲勝！",
+          "impl": "winOnAllAdjacentNoEncounter",
+          "kind": "win"
+        }
+      ]
+    },
+    {
+      "id": "plan_ancient_chest",
+      "name": "古代箱子",
+      "art": "/Image/Plan/古代箱子.png",
+      "progress": [
+        { "icon": "book", "label": "破解傳說" },
+        { "icon": "spiral", "label": "尋找迷失的寶藏" }
+      ],
+      "abilities": [
+        {
+          "text": "特殊行動：棄掉一個古代護符來從搜索牌庫抽取 3 張卡牌。（當你抽取卡牌時，不可以與其他倖存者交換物品）",
+          "impl": "spendAmuletDraw3",
+          "kind": "special",
+          "cost": { "item": "amulet", "count": 1 },
+          "oncePerGame": true,
+          "hasBox": true
+        }
+      ]
+    },
+    {
+      "id": "plan_sealed_portal",
+      "name": "被封印的傳送門",
+      "art": "/Image/Plan/被封印的传送门.png",
+      "progress": [
+        { "place": "hiddenExit", "label": "檢查出口" },
+        { "icon": "spiral", "label": "調查被封印的傳送門" },
+        { "icon": "spiral", "label": "研究封印機制" },
+        { "icon": "book", "label": "破解密碼" }
+      ],
+      "abilities": [
+        {
+          "text": "倖存者回合開始時，如果所有倖存者都位於螺旋地點，且其物品欄中擁有秘密地圖、手電筒和古代護符，倖存者立刻獲勝！",
+          "impl": "winOnSpiralWithItems",
+          "kind": "win"
+        }
+      ]
+    }
+  ]
+}

@@ -148,19 +148,27 @@ console.log('=== ⑤ 选完 → 确认按钮恢复可用 ===');
 {
   const st = mk('killer6');
   armEvolution(st);
-  st.pendingStatueEvoSwitch = true;
-  st.statues = [{ id: st.killerId, index: 1, main: true }];
+  /**
+   * ⚠ **走真实流程**：以前这里是手动 `pendingStatueEvoSwitch = true` 搭台，
+   * 于是"这一级已经问过要不要转主雕像"的标记（`evolutionChoiceIssuedAtLevel`）
+   * 没被记上 —— 点完「不转换」服务端又按"还没问过"重新挂了一次，
+   * 测试就报"待选没清掉"（其实是搭台方式不对，真实流程没这个问题）。
+   */
+  handleAction(st, 'h', { type: 'ackEvolution' }, content);
+  ok(st.pendingStatueEvoSwitch === true, '确认之后才挂出「要不要转换主雕像」',
+    String(st.pendingStatueEvoSwitch));
+
   /** 服务端：先决定"不转换" */
   handleAction(st, 'h', { type: 'skipStatueEvoSwitch' }, content);
   ok(st.pendingStatueEvoSwitch === false, '点「不转换」之后这个待选清掉');
+  ok(st.pendingStatueEvoSwitch !== true, '**不会又弹回来**（这一级已经问过了）');
   const html = await draw(buildSnapshot(st, 'h'));
   ok(
     !/<button[^>]*disabled[^>]*>确认新效果<\/button>/.test(html),
     '**待选清空后「确认新效果」恢复可用**',
   );
 
-  /** 服务端：确认进化 */
-  handleAction(st, 'h', { type: 'ackEvolution' }, content);
+  /** 真实流程里「确认新效果」就是上面那一步，确认之后整条进化已经收尾 */
   ok(!st.pendingEvolutionAck, '**确认之后进化待办清空，对局继续**', JSON.stringify(st.pendingEvolutionAck));
 }
 

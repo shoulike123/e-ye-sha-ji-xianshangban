@@ -226,6 +226,34 @@
         ),
       };
     }
+    /**
+     * 【变体3】计划卡：进度标识的 4 个行位 + 能力标记位。
+     *
+     * 老存档没有这一栏就补一份默认值（和客户端 `DEFAULT_SURVIVOR_LAYOUT.planCards`
+     * 保持一致，否则编辑器调一套、游戏用另一套）。
+     */
+    if (!state.layout.planCards) {
+      state.layout.planCards = {
+        lines: [
+          { x: 25, y: 11.5, w: 18, h: 11 },
+          { x: 25, y: 21.7, w: 18, h: 11 },
+          { x: 25, y: 31.9, w: 18, h: 11 },
+          { x: 25, y: 42.1, w: 18, h: 11 },
+        ],
+        abilityMarker: { x: 76, y: 72, w: 14, h: 12 },
+      };
+    }
+    if (!state.layout.planCards.lines?.length) {
+      state.layout.planCards.lines = [
+        { x: 25, y: 11.5, w: 18, h: 11 },
+        { x: 25, y: 21.7, w: 18, h: 11 },
+        { x: 25, y: 31.9, w: 18, h: 11 },
+        { x: 25, y: 42.1, w: 18, h: 11 },
+      ];
+    }
+    if (!state.layout.planCards.abilityMarker) {
+      state.layout.planCards.abilityMarker = { x: 76, y: 72, w: 14, h: 12 };
+    }
   }
 
   function slotBoxes() {
@@ -449,6 +477,40 @@
       });
       return out;
     }
+    if (state.panel === 'planCards') {
+      /**
+       * 【变体3】计划卡：4 个进度行位 + 能力标记位。
+       *
+       * 背景用一张 **4 条进度**的卡（萬能鑰匙）作图 —— 4 个行位都能看到；
+       * 各卡的行距是一致的（750×1039 的卡面，每行约 10.2%）。
+       */
+      const P = L.planCards;
+      const MARK = '/Image/UI/计划进度标识.png';
+      const out = (P.lines ?? []).map((b, i) => ({
+        id: `plan-line-${i}`,
+        label: `进度第 ${i + 1} 行`,
+        kind: 'hand',
+        box: b,
+        src: MARK,
+      }));
+      out.push({
+        id: 'plan-ability',
+        label: '能力标记（完成后，有框的才用 · 顺时针 90°）',
+        kind: 'hand',
+        box: P.abilityMarker,
+        src: MARK,
+        /**
+         * ⚠ **游戏里这个标记是顺时针转 90° 画的**（`GameViews.tsx` 里
+         * `transform: 'rotate(90deg)'`）—— 校准预览必须跟着转，
+         * 不然这里看着是横的、进游戏却是竖的，怎么调都对不上。
+         *
+         * 只转**图案**，不转外框：外框（虚线框/四个角的手柄）保持轴对齐，
+         * 才方便拖动改位置和大小。
+         */
+        rotate: 90,
+      });
+      return out;
+    }
     return slotBoxes().map((b, i) => ({
       id: `slot-${i}`,
       label: `物品格 ${i + 1}`,
@@ -466,8 +528,13 @@
     overlay.innerHTML = list
       .map((p) => {
         const on = p.id === state.selected;
+        /**
+         * ⚠ `rotate`（度数，正 = 顺时针）：**只转图案**，外框和手柄不转 ——
+         * 校准的时候要拖的是外框，转了会跟着歪。
+         */
+        const rot = Number.isFinite(p.rotate) ? `transform:rotate(${p.rotate}deg);` : '';
         const fill = p.src
-          ? `<img class="piece-art" src="${encodeURI(p.src)}" alt="" />`
+          ? `<img class="piece-art" src="${encodeURI(p.src)}" alt="" style="${rot}" />`
           : '';
         /**
          * 【图层】`layer` 直接当 `z-index`（雕像 4 尊摆一起时要能调谁盖谁）。
@@ -625,11 +692,22 @@
       panel === 'killer' ||
       panel === 'hud' ||
       panel === 'killerInfo' ||
-      panel === 'survivorItems';
+      panel === 'survivorItems' ||
+      /** 【变体3】计划卡：背景是"卡面 + 标识"，用一张 4 行卡作图 */
+      panel === 'planCards';
     bgImg.hidden = blank;
     blankBg.hidden = !blank;
     blankBg.className = `blank-bg ${panel}`;
     if (!blank) bgImg.src = encodeURI(BGS[panel] || BGS.status);
+    if (panel === 'planCards') {
+      /**
+       * 计划卡面板的底图：一张 **4 条进度**的卡面（萬能鑰匙）——
+       * 4 个行位都能看到，各卡行距一致，照着调就行。
+       */
+      blankBg.style.backgroundImage = `url("${encodeURI('/Image/Plan/万能钥匙.png')}")`;
+    } else {
+      blankBg.style.backgroundImage = '';
+    }
     const hint = $('hint');
     if (hint) {
       hint.textContent =
@@ -637,7 +715,9 @@
           ? '这是「查看杀手信息」大面板。拖进化牌、效果文字、锁定牌、行动牌、特殊规则、进化卡牌的色块改位置。切「预览杀手」可看不同杀手的特殊规则/进化卡牌。'
           : panel === 'survivorItems'
             ? '这是「求生者相关物品」弹窗。每行对应一名幸存者（从上往下 3 行），拖色块改专属物品的位置。'
-            : '拖单个色块改位置，角点缩放。顶栏三块、钥匙格、警车格都可以单独拖。保存后刷新对局即可看到。';
+            : panel === 'planCards'
+              ? '【变体3】计划卡：底图是一张 4 条进度的卡面。拖 4 个「进度第 N 行」色块，把标记摆到那一行的位置上（各卡行距一致）；「能力标记」是整张计划完成后、能力右侧有框时那个转 90° 的标记位。'
+              : '拖单个色块改位置，角点缩放。顶栏三块、钥匙格、警车格都可以单独拖。保存后刷新对局即可看到。';
     }
     render();
   }

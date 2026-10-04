@@ -368,7 +368,7 @@ console.log('=== ⑧ 城堡：杀手过机关大门要弃 3 张手牌；潜行�
   ok(st.killerDiscard.length >= 3, '弃掉的 3 张进了弃牌堆', `${st.killerDiscard.length}`);
   ok(st.killerMainActionsLeft === 1, '消耗了一次普通行动', `${st.killerMainActionsLeft}`);
 
-  /** ⑦ 幸存者绝对不能过机关大门 */
+  /** ⑦ 幸存者绝对不能**穿过**机关大门 */
   {
     const surv = Object.values(st.players).find((p) => p.faction === 'survivor');
     /** ⚠ 上面付费时门已经被拆了 —— 这里要**重新放一个**再测 */
@@ -377,11 +377,24 @@ console.log('=== ⑧ 城堡：杀手过机关大门要弃 3 张手牌；潜行�
     ok(st.leverGateDoorId === gate, '门重新放好了', st.leverGateDoorId ?? 'null');
     putSurvivorAt(st, from, surv.id);
     st.blockades = [];
-    const { tryMove: tm } = await import('../../server/dist/game/effects.js');
-    const crossed = tm(st, surv.id, gateTo, 5);
-    console.log(`   幸存者 ${from} → ${gateTo}（门上有机关大门）：${crossed ? '通过了！' : '被挡住'}`);
-    ok(crossed === false, '幸存者无法通过机关大门', crossed ? '（竟然通过）' : '');
+    const { tryMove: tm, pathRooms: pr } = await import('../../server/dist/game/effects.js');
+    /**
+     * ⚠ **范围压到 1 步**：R4 → R3 除了那扇门，还有 `R4→R5→B5→R3` 这条 3 步的绕路
+     * （寻路会把机关大门那扇门当"不通"、自动绕开）。所以"给 5 步"时他能正常绕过去
+     * —— 那是**正确行为**（他没穿门），不能拿它当"穿门"的证据。
+     * 只给 1 步，就只剩"穿过那扇门"这一条路，这才真正考验规则。
+     */
+    const crossed = tm(st, surv.id, gateTo, 1);
+    console.log(`   幸存者 ${from} → ${gateTo}（只给 1 步，只能穿门）：${crossed ? '通过了！' : '被挡住'}`);
+    ok(crossed === false, '**幸存者无法穿过机关大门**', crossed ? '（竟然通过）' : '');
     ok(surv.roomId === from, '幸存者没有移动');
+    /** 反过来：有多步时他**绕路**过去，那条路径里不该出现机关大门那扇门 */
+    const roundabout = pr(st, from, gateTo, false, false, null);
+    const crossesGate = Boolean(roundabout) && roundabout
+      .slice(1)
+      .some((r, i) => `${roundabout[i]}|${r}`.split('|').sort().join('|') === gate);
+    ok(!crossesGate, '**幸存者绕路时不会走那扇门**（宁可我多走两步）',
+      JSON.stringify(roundabout));
   }
 
   /** ⑧ 取消付费 */

@@ -2,7 +2,7 @@
  * 服务器心里的“棋盘长什么样”。
  * GameState = 整桌的秘密真相；PublicSnapshot = 发给某个人看的删节版。
  */
-import type { CardDef, CharacterDef, EffectDef, MapDef, RulesDef, TraitDef } from '../content/schema.js';
+import type { CardDef, CharacterDef, EffectDef, MapDef, PlanDef, RulesDef, TraitDef } from '../content/schema.js';
 
 /** 现在棋局走到哪一页：大厅、选角、幸存者、发现、噪音、杀手、遭遇、结束 */
 export type Phase =
@@ -279,6 +279,13 @@ export interface LogEntry {
    * 发现翻牌与留牌）一律只能等该大回合结束后才随战报历史开放。
    */
   needsCommon?: boolean;
+  /**
+   * 这条战报写于**第几个大回合**（`state.round` 的值）。
+   *
+   * ⚠ 杀手界面地图旁边那块信息栏要显示「**本大回合全部战报**」——
+   * 光有时间戳跨回合分不出来，所以落库时就带上这个字段。
+   */
+  round?: number;
 }
 
 export type StealthRevealKind = 'vanishScare' | 'lurkPick' | 'bloomKill';
@@ -336,8 +343,34 @@ export interface EncounterState {
    * 勾了盾照样能再选一件防御物品（用户要求）。
    */
   shieldUsed?: Record<string, boolean>;
+  /**
+   * 【变体3】燃燒瓶：本次防御**已经弃掉**一个威士忌酒瓶（+2）。
+   *
+   * 用户口径：酒瓶是**弃置**、不是"使用物品" —— 所以
+   * **不占防御物品名额、不算使用物品**（不影响威廉「坚韧不拔」/ 特性 05 / 乔治笔记）。
+   */
+  whiskeyUsed?: Record<string, boolean>;
+  /**
+   * 【变体3】燃燒瓶的**第二段选择**：防御物品确认之后，单独问一次
+   * "要不要弃一个威士忌酒瓶 +2"（用户要求放在确认之后）。
+   * 挂着的时候**先不掷骰**，等 `confirmWhiskeyDefense`。
+   */
+  whiskeyOffer?: { playerId: string } | null;
   defenseOptions: Record<string, string[]>;
+  /**
+   * **撤离名单：还没撤离的幸存者**。
+   *
+   * ⚠ （甲）撤离是"先选人再撤离"：`targetId` 才是**当前正在撤离**的那一个；
+   * `fleeQueue` 只表示"还有谁需要撤离"。`targetId = null` 表示正在等玩家点名单。
+   */
   fleeQueue: string[];
+  /**
+   * 只在**快照**里出现（`buildSnapshot` 现算）：还没撤离、**还能被点**的幸存者名单。
+   * 客户端用它画"谁来撤离"的名单面板。
+   */
+  fleeReadyIds?: string[];
+  /** 只在**快照**里出现：已经被选中、正在撤离的那一个（= `targetId`，便于客户端直读） */
+  fleeTargetId?: string | null;
   /** 遭遇开始时被发现的幸存者，战后可移 1 格 */  discoveredIds: string[];
   /** 开战时该地有陷阱：本场遭遇必触发（防御 +2 一次） */
   trapArmed: boolean;
@@ -360,6 +393,11 @@ export interface EncounterState {
 
 export interface GameState {
   roomCode: string;
+  /**
+   * **这一局的唯一标识**（每次"开始新一局 / 重新开始"都换一个）。
+   * 客户端拿它区分"这是新的一局"，例如杀手手动摆放立绘的本地缓存。
+   */
+  matchId: string;
   hostId: string;
   mode: GameMode;
   /**
@@ -455,6 +493,45 @@ export interface GameState {
    */
   variant1: boolean;
   /**
+   * 【变体3】**计划卡开关**（所有模式都能开，也能和变体1 / 变体2 同开）。
+   *
+   * 开启后开局给**幸存者方**随机发 2 张计划卡；**杀手看不到**（快照只发幸存者视角）。
+   * 具体规则与判定都在 `plans.ts`。
+   */
+  variant3: boolean;
+  /** 【变体3】计划卡定义表（开局从 `content/plans.json` 灌进来，快照要查名字/图片） */
+  planById: Record<string, PlanDef>;
+  /** 【变体3】本局发给幸存者方的 2 张计划卡 */
+  planHand: string[];
+  /** 【变体3】当前进行中的计划（还没确认任何计划时是 null） */
+  planCurrentId: string | null;
+  /** 【变体3】当前计划做到第几条进度（0 = 还没推进；等于 progress.length = 全部完成） */
+  planStep: number;
+  /** 【变体3】本大回合是否已经推进过进度（每轮重置；**每回合最多推进一个**） */
+  planAdvancedThisRound: boolean;
+  /** 【变体3】本大回合是否**换过**计划（进发现阶段检查时据此把原计划进度清零） */
+  planChangedThisRound: boolean;
+  /** 【变体3】确认 / 改变计划的多人确认（每个幸存者玩家各自同意） */
+  pendingPlanSwitch: {
+    toId: string;
+    fromId: string | null;
+    requestedBy: string;
+    votes: string[];
+  } | null;
+  /** 【变体3】已完成的计划（完成后另一张计划卡隐藏、能力对全队生效） */
+  planCompletedId: string | null;
+  /** 【变体3】已经用掉的"每场一次"能力（键 = `计划id#能力序号`，先到先得） */
+  planUsedAbilities: string[];
+  /** 【变体3】地图上的计划标记（地点 id；坍塌会清掉该地点的标记） */
+  planMarkers: string[];
+  /**
+   * 【变体3】**本大回合发生过几次遭遇**。
+   *
+   * 只在 `startRound`（幸存者大回合开头）读一次、然后归零 ——
+   * 「火箭發射器」要判的是「**上一个回合中**没有发生遭遇」。
+   */
+  encountersThisRound?: number;
+  /**
    * 【变体1】**生存难度等级** —— 四种难度**幸存者侧完全一样**（每人抽 2 选 1），
    * 差别只在杀手侧：简单不抽 / 普通 2选1 / 困难 4选2 / 噩梦 6选3。
    */
@@ -531,6 +608,14 @@ export interface GameState {
    * （靠这个标记），第二次才照常进响声阶段 —— 否则会推进两次。
    */
   discoveryKeepBoth: boolean;
+  /**
+   * 【变体1】特性 18「拾物妙手」：**还没结算完的那几张**（两张都留时用）。
+   *
+   * 为什么要记队列：第一张结算时可能因为**背包满**挂起 `pendingItemDiscard`
+   * （或"安静搜查"要问一句），这时必须停下来等玩家处理；处理完要**接着结算第二张** ——
+   * 否则那两张候选就一直挂在 `discoveryOptions` 上，流程再也不往前走。
+   */
+  discoveryKeepQueue?: string[] | null;
   /**
    * 【变体1】特性 02「玩弄猎物」：遭遇爆发时**先问杀手**要不要取消这次遭遇。
    *
@@ -855,6 +940,29 @@ export interface GameState {
    * 结完把它设回 `false`，**再**继续升级本身的效果。
    */
   pendingCollapse: boolean;
+  /**
+   * 【墓穴】**这次进化的坍塌要等"确认进化效果"之后再结算**（用户口径：
+   * 「先确认进化效果 → 再执行双方坍塌结算 → 特性卡 → 进化效果」）。
+   *
+   * `interceptEvolutionForCollapse` 第一次拦下升级时只置这个标记，
+   * 真正的 `beginCollapse` 由 `ackEvolution`（点「确认新效果」）触发。
+   */
+  pendingCollapseAfterEvolution?: boolean;
+  /**
+   * **已经为哪一级挂过"进化时要你选的东西"**（0 = 没有）。
+   *
+   * 为什么需要：确认之后每选完一项都会再问"还有没有下一项"，
+   * 若每次都重新挂就会"选完卡又把剩下的卡再挂一遍"，永远确认不完。
+   */
+  evolutionChoiceIssuedAtLevel?: number;
+  /**
+   * **③「进化相关的特性卡」已经为哪一级结算过**（0 = 没有）。
+   *
+   * 为什么需要：这一步在两处被调用 —— `ackEvolution`（正常路径）和
+   * `advanceEvolutionAfterChoice`（确认时被坍塌的"轮流走一步"打断之后的补跑）。
+   * 没有这道守卫，补跑会把特性**再结算一遍**（09 慢热杀手重复 +1 力量）。
+   */
+  evolutionTraitStageAtLevel?: number;
   /** 【墓穴】本次升到几级（用于提示词「杀手进化到 N 级」） */
   pendingCollapseLevel: number;
   /**
@@ -994,6 +1102,14 @@ export interface GameState {
    */
   pendingUnlockChoice: string[] | null;
   /**
+   * **二选一里被放弃的锁定牌**（本局作废，永远不会加入手牌）。
+   *
+   * 用户口径：「未命名 3 级只有解锁的锁定牌加入手牌，**另一张不加入**」。
+   * 记下来是为了让"二选一里只剩一张 → 直接入手"那条兜底逻辑
+   * （`settleEvolutionForCurrentKiller`）不会再把它捡回来。
+   */
+  abandonedLockedCards?: string[];
+  /**
    * 【超听觉】自动寻路时，若有多条并列最快路径，就停下来让杀手选一条。
    * 每项 = 一条完整路径。
    */
@@ -1011,6 +1127,14 @@ export interface GameState {
   killerLevelPowerGain?: number;
   /** 恐詭管道：等杀手点一个有秘密通道的地点 */
   pendingPassagePick: string[] | null;
+  /**
+   * **恐詭管道：已经点选、但还没确认的落点**（用户口径：
+   * 「选择了地点后要确认」）。
+   *
+   * 点地图只是选中它，按「确认潜入」才真的潜行过去 ——
+   * 免得手一抖就飞走（潜行落点是不可逆的）。
+   */
+  pendingPassageRoom: string | null;
   /**
    * **本回合杀手"重现"过**（主动现身、公开所在格）。
    *
@@ -1048,8 +1172,16 @@ export interface GameState {
   pendingDiscardRemove: {
     remaining: number;
     excludeCardIds: string[];
+    /**
+     * 候选（**多重集**）：牌组里同一张卡有多份（爬行×3），所以同一个 id
+     * 会出现多次 —— 判"还能不能选"必须按份数，不能按去重后的集合。
+     */
     options: string[];
-    optionsNamed: Array<{ id: string; name: string }>;
+    /**
+     * 给界面用的候选：`uid` 是**每一份**的唯一键。
+     * 没有它的话，同一张卡的两份在界面上 key 重复 —— 点一份会两份一起高亮。
+     */
+    optionsNamed: Array<{ id: string; name: string; uid: string }>;
     cardName: string;
   } | null;
   /** 酸液喷吐：等杀手点一个相邻地点 */
@@ -1082,6 +1214,18 @@ export interface GameState {
    * 没写「可以」的效果一律直接执行，不会进这里。
    */
   pendingOptionalEffect: { fx: import('../content/schema.js').EffectDef; label: string } | null;
+  /**
+   * 【变体3】**通道調查 ②**（`moveThroughPassage`）挂着的时候：
+   * 等幸存者点一个秘密通道出口。里面是**可选的目的地**（空 = 当前没有待选）。
+   */
+  pendingPlanPassage?: string[] | null;
+  /**
+   * 【变体3】「情報分享」完成时**等选一名幸存者抽牌**。
+   * `chooserId` = 谁来选（完成计划时在场的那个幸存者）。
+   */
+  pendingPlanTarget?: { planId: string; index: number; chooserId: string; candidates: string[] } | null;
+  /** 【变体3】目标选完之后要不要**回到** `enterNoiseReport` 继续收尾 */
+  pendingPlanResume?: boolean;
   /**
    * **等玩家点门封堵**时，门所在的地点。
    *
@@ -1238,6 +1382,26 @@ export interface GameState {
     deferred?: boolean;
     /** 本次进化要结算的杀手（2对3 是两个）；不写 = 就当前那个 */
     killerIds?: string[];
+    /**
+     * **2对3 的同步升级门槛：已经把自己的升级效果做完的杀手**。
+     *
+     * 用户口径：「2v3 中两个杀手同步升级。两名杀手处理完升级效果后
+     * 都要**等待对方完成本次升级**再继续」。
+     *
+     * 两名杀手共用同一次升级（队伍等级一起涨），但**各自确认、各自结算**：
+     * 一个确认完只是把自己记进来，还要切给另一个；两人都在这里了，
+     * 才清掉 `pendingEvolutionAck` 放行回合流程。
+     */
+    doneKillerIds?: string[];
+    /**
+     * **这一轮进化是从谁开始的**（2对3 = 先手；其余模式就是本人）。
+     *
+     * 用户口径：「先手持 08，则是 k1，k2，k1，k2」—— 也就是**每一轮的确认顺序
+     * 都从同一个人开始**。08 跳级那一轮是由"3 级最后结算的那名"触发的，
+     * 如果没有这个字段，4 级那轮就会从**后手**开始（k2，k1），
+     * 与"从先手开始"不一致。
+     */
+    startKillerId?: string | null;
   } | null;
   /** 幽魂 2 级：呼啸而过结算完，可选弃 2 张搜索当前格 */
   pendingWhizSearch: boolean;
@@ -1291,6 +1455,29 @@ export type ClientAction =
    * 【变体1】**特性卡开关**（所有模式都能开，房主在大厅勾；可与变体2 同开）。
    */
   | { type: 'setVariant1'; on: boolean }
+  /** 【变体3】**计划卡开关**（房主在大厅勾；可与变体1 / 变体2 同开） */
+  | { type: 'setVariant3'; on: boolean }
+  /** 【变体3】确认 / 改变计划（要所有幸存者玩家各自同意） */
+  | { type: 'pickPlan'; planId: string }
+  /** 【变体3】计划确认的投票 */
+  | { type: 'votePlan'; accept: boolean }
+  /** 【变体3】发动计划能力（完成后才有） */
+  | {
+      type: 'usePlanAbility';
+      planId: string;
+      index: number;
+      /** 谁发动（单人热座 / 共享操控下一个操控者管多名幸存者时必须传） */
+      actorPlayerId?: string;
+      /** 【变体3】要选目的地的能力（通道調查 ②）：秘密通道出口 */
+      toRoomId?: string | null;
+      /** 【变体3】要选人的能力（情報分享）：目标幸存者 */
+      targetPlayerId?: string | null;
+    }
+  | {
+      /** 【变体3】「情報分享」完成时选一名幸存者抽 1 张 */
+      type: 'pickPlanTarget';
+      playerId: string;
+    }
   /**
    * 【变体1】**生存难度等级**（房主在大厅选；开了变体1 才有意义）。
    * 四档难度幸存者侧一样，差别只在杀手侧抽几张。
@@ -1418,6 +1605,8 @@ export type ClientAction =
    *   所以玩家点了地点也没反应。）
    */
   | { type: 'pickPassageRoom'; roomId: string }
+  /** 恐詭管道：**确认潜入**（点地图只是选中，用户口径：选了地点要确认） */
+  | { type: 'confirmPassagePick' }
   /**
    * 【女猎手】**重置陷阱放置**：最终确认之前，把已点好的陷阱全清、重新选。
    */
@@ -1615,6 +1804,17 @@ export type ClientAction =
       shield?: boolean;
     }
   | {
+      /**
+       * 【变体3】**燃燒瓶的第二段**：防御物品确认之后，单独回答
+       * "要不要弃掉一个威士忌酒瓶来 +2 防御值"。
+       *
+       * 用户口径：酒瓶是**弃置**（进弃牌堆），不是"使用物品"，
+       * 所以这不占防御物品名额、也不影响威廉「坚韧不拔」/ 剛毅之盾。
+       */
+      type: 'confirmWhiskeyDefense';
+      use: boolean;
+    }
+  | {
       type: 'encounterFlee';
       moveToRoomId: string | null;
       /**
@@ -1624,6 +1824,11 @@ export type ClientAction =
       fleeSteps?: 1 | 2;
     }
   | { type: 'pickEncounterTarget'; targetPlayerId: string }
+  /**
+   * **（甲）撤离先选人**：在"谁来撤离"的名单上点一个幸存者，选中谁谁才走
+   * （和 `pickEncounterTarget` 同一种做法）。
+   */
+  | { type: 'pickFleeSurvivor'; targetPlayerId: string }
   | { type: 'relocateBlockade'; fromDoorId: string }
   | { type: 'removeBoardBlockade'; doorId: string }
   | { type: 'ackEvolution' }
@@ -1639,6 +1844,8 @@ export type ClientAction =
 
 export interface PublicSnapshot {
   roomCode: string;
+  /** 这一局的标识（"重新开始"后会变）—— 客户端用它区分新的一局 */
+  matchId: string;
   hostId: string;
   mode: GameMode;
   /**
@@ -1706,6 +1913,14 @@ export interface PublicSnapshot {
   isSpiralRoomHere?: boolean;
   /** 这名观看者现在能不能在自己地点搜索（含神秘狂热粉的螺旋地点） */
   canSearchHere?: boolean;
+  /**
+   * **有杀手（或他的潜行入口）就在观看者这个地点吗**。
+   *
+   * 服务端 `killerInRoom` 的结论，客户端直接用它禁用"搜索/修理"那类按钮 ——
+   * 以前客户端自己遍历棋子判一次，漏了"雕像不算在场"这条，
+   * 于是雕像局里站在隐藏出口的幸存者搜不了（用户报的墓穴 G1）。
+   */
+  killerInYourRoom?: boolean;
   /** 欧菲莉亚「第六感」：待选的 2 张牌 */
   pendingSixthSense?: { cards: Array<{ id: string; name: string }> } | null;
   phase: Phase;
@@ -1733,6 +1948,14 @@ export interface PublicSnapshot {
   splitEscapeKeys?: number;
   /** 【变体1】开关（界面显示变体状态、决定要不要画特性卡区） */
   variant1?: boolean;
+  /**
+   * 【变体3】**计划卡开关**。
+   *
+   * ⚠ 大厅 / 选人界面那颗「【变体3】计划卡：开 / 关」按钮靠它回显。
+   * 以前**没下发这个字段** → 客户端拿到的永远是 `undefined`：
+   * 点一下服务端其实开了，但按钮一直显示"关"，看起来就像"点了没反应"。
+   */
+  variant3?: boolean;
   /** 【变体1】生存难度等级（显示用） */
   traitDifficulty?: TraitDifficulty;
   /**
@@ -1903,6 +2126,13 @@ export interface PublicSnapshot {
    */
   killerIntel?: Array<{ title: string; lines: string[] }>;
   /**
+   * 【杀手界面】**本大回合的全部战报**（地图旁边那块信息栏里，用户要求）。
+   *
+   * 范围 = `state.round` 这一整个大回合（幸存者大回合 + 本轮杀手回合），
+   * 内容按"杀手本来就看得见"过滤；**只有杀手视角有**（幸存者那边有完整战报栏）。
+   */
+  roundLogs?: string[];
+  /**
    * **杀手当前打出的牌 id**（双方都下发）——
    * 幸存者在地图右边看到它的卡面，知道杀手打了什么。
    */
@@ -1922,6 +2152,13 @@ export interface PublicSnapshot {
     label: string;
     rooms: Array<{ id: string; name: string }>;
   }> | null;
+  /**
+   * **还有没有"打到一半、等杀手做选择"的牌**（服务端 `hasPendingKillerChoice` 的答案）。
+   *
+   * 客户端据此把别的牌置灰。以前客户端自己抄了一份判定，闸门每加一个字段
+   * 两边就会漏一次 —— 所以现在由服务端下发，两边永远一致。
+   */
+  pendingKillerChoice?: boolean;
   /** 雕像进化 1 级：等杀手决定是否转换主雕像 */
   pendingStatueEvoSwitch?: boolean;
   /** 已点、待确认的那尊雕像（选择要确认，点完不会立刻切换） */
@@ -2016,6 +2253,8 @@ export interface PublicSnapshot {
   pendingCoreNeighbors?: string[];
   pendingTeleportPick?: string[];
   pendingPassagePick?: string[];
+  /** 恐詭管道：已选中、等确认的落点（只给杀手） */
+  pendingPassageRoom?: string | null;
   pendingAcidPick?: boolean;
   pendingReturnToDeckTop?: boolean;
   /** 可选效果（牌面写了「可以」）：等杀手决定执行或跳过 */
@@ -2050,6 +2289,66 @@ export interface PublicSnapshot {
   firecrackerThisRound?: boolean;
   firecrackerRoomId?: string | null;
   suitcaseAvailable?: boolean;
+  /**
+   * 【变体3】**计划卡** —— **只有幸存者视角有**（杀手看不到幸存者的计划）。
+   *
+   * 两张卡的进度完成情况、能力是否已用、地图上的计划标记、
+   * 以及"确认 / 改变计划"的多人确认进度都算好放在这里。
+   */
+  plans?: {
+    cards: Array<{
+      id: string;
+      name: string;
+      art: string;
+      progress: Array<{ label: string; text: string; done: boolean; current: boolean }>;
+      abilities: Array<{
+        text: string;
+        kind: string;
+        /** 【变体3】能力的实现键（客户端用它认"要先在地图上选目标"的能力） */
+        impl?: string;
+        /** 要先选秘密通道出口（通道調查 ②） */
+        needsPassage?: boolean;
+        hasBox: boolean;
+        oncePerGame: boolean;
+        used: boolean;
+        /** 主动能力（能点「发动」） */
+        active?: boolean;
+        /** 现在能不能发动（服务端算好的） */
+        usable?: boolean;
+        blockReason?: string | null;
+      }>;
+      completed: boolean;
+      active: boolean;
+      candidate: boolean;
+    }>;
+    currentId: string | null;
+    step: number;
+    completedId: string | null;
+    markers: string[];
+    canPick: boolean;
+    voterIds: string[];
+    /** 这名观众自己是不是投票人（客户端据此决定要不要弹"同意/不同意"） */
+    myVoterId: string | null;
+    pendingSwitch: {
+      toId: string;
+      fromId: string | null;
+      requestedBy: string;
+      confirmed: string[];
+      waiting: string[];
+      confirmedIds: string[];
+      waitingIds: string[];
+    } | null;
+    /** 【通道調查】当前这名观众能走的秘密通道出口 */
+    passageEnds?: string[];
+    /** 【通道調查 ②】正在等选通道出口（候选） */
+    pendingPassage?: string[];
+    /** 【情報分享】完成计划后等选一名幸存者抽 1 张 */
+    pendingTarget?: {
+      chooserId: string;
+      chooserName: string | null;
+      candidates: Array<{ id: string; name: string }>;
+    } | null;
+  } | null;
   // —— 地图特殊规则（实验室 / 城堡）——
   /** 【实验室】G3 的急救箱标记是否还在 */
   firstAidKit?: boolean;
@@ -2082,8 +2381,7 @@ export interface PublicSnapshot {
   pendingGatePay?: { toRoomId: string; doorId: string; cost: number; ownerName?: string | null } | null;
   /** 【城堡】当前观众能不能在 R1 放机关大门 */
   canPlaceLeverGate?: boolean;
-  /** 【城堡】B4 的"第一次有人进入"是否已触发 */
-  castleHallFirstEnterDone?: boolean;
+  /** 【城堡】B4 的"第一次有人进入"是否已触发 */  castleHallFirstEnterDone?: boolean;
   // —— 【墓穴】——
   /** 已经坍塌的地点（双方都看得到） */
   collapsedRooms?: string[];
@@ -2101,6 +2399,12 @@ export interface PublicSnapshot {
     waiting: boolean;
     /** 轮到的是杀手（要额外弃光手牌） */
     isKiller?: boolean;
+    /**
+     * 轮到的这个人是哪一方的。
+     * 客户端用它把"离开废墟"的面板**只画在该走的那一方的界面上**
+     * （用户要求：杀手别看到幸存者的界面、幸存者别看到杀手的界面）。
+     */
+    faction?: Faction;
   } | null;
   /**
    * 【墓穴】遗物室所在地点。

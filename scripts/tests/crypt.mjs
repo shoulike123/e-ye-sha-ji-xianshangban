@@ -29,6 +29,7 @@ const { upgradeKiller, tryMove, netLockedRoom } = await import('../../server/dis
 const {
   RELIC_ROOM,
   canDrawRelic,
+  collapseMoveOptions,
   collapsibleRooms,
   drawRelic,
   isRoomGone,
@@ -108,8 +109,31 @@ function reset(st) {
   }
 }
 
-/** 把行动权交给某个幸存者（一般行动那套资源复位） */
-function giveTurn(st, id) {
+/**
+ * 触发一次升级，并**走真实确认流程**。
+ *
+ * ⚠ 用户口径：「先确认进化效果 → 再执行双方坍塌结算 → 再执行特性 →
+ * 再执行进化效果」。所以 `upgradeKiller` 只是挂出「确认新效果」面板，
+ * **坍塌要等确认之后才发生**。
+ *
+ * 这组测试以前写的是
+ *   `upgradeKiller(st); st.pendingEvolutionAck = null;`
+ * ——那是"确认之前就结算"的旧流程写法：现在把面板硬清掉等于**什么都没做**，
+ * 于是"R4 塌了""核心标记清掉了"这些断言全都看不到结果。
+ */
+function upgradeAndAck(st, socketId = 'h') {
+  upgradeKiller(st);
+  /**
+   * 只点**一次**「确认新效果」：坍塌本身、坍塌那 1 点伤害（护符 / 坚毅的询问）、
+   * 以及"屋里的人轮流走一步"的队列，全都是在这一步里发起的。
+   * 之后的收尾由各用例自己按需驱动（有的专门要测"队列还挂着"）。
+   */
+  try { handleAction(st, socketId, { type: 'ackEvolution' }, content); }
+  catch (e) { console.log(`   （确认进化被别的待办拦住：${e.message}）`); }
+  return st;
+}
+
+/** 把行动权交给某个幸存者（一般行动那套资源复位） */function giveTurn(st, id) {
   st.phase = 'survivorMain';
   st.pendingSurvivorPick = false;
   st.encounter = null;
@@ -149,12 +173,12 @@ console.log('=== ① 墓穴地图上的坍塌配置 ===');
 }
 
 /* ═══════════════════════════════ ② 坍塌触发时机 ═══════════════════════════════ */
-console.log('=== ② 升级 → 先坍塌、后进化 ===');
+console.log('=== ② 升级 → 先确认、再坍塌、再进化 ===');
 {
   const st = mkCrypt();
   const before = st.killerLevel;
   const logFrom = st.logs.length;
-  upgradeKiller(st);
+  upgradeAndAck(st);
   console.log(`   level ${before} → ${st.killerLevel}`);
   ok(!st.pendingCollapse, '坍塌已当场结算完（没留在待办里）');
   ok(st.collapsedRooms.length === 1, '塌掉 1 个地点', st.collapsedRooms.join(','));
@@ -164,21 +188,27 @@ console.log('=== ② 升级 → 先坍塌、后进化 ===');
     st.collapsedRooms[0],
   );
   /**
-   * 时机：日志顺序必须是
-   *   ①「进化到 N 级（在结算进化效果之前，先处理坍塌）」
-   *   ②「某某坍塌了」
-   *   ③「杀手进化！等级 1 → 2」
+   * 时机（用户口径）：**先确认进化效果 → 再执行双方坍塌结算 → 再特性 → 再执行进化效果**。
+   *
+   * 所以日志顺序是：
+   *   ①「杀手进化到 N 级：请先确认新效果…」（告知，面板同时挂出）
+   *   ②「已确认进化效果：…」（点确认）
+   *   ③「某某坍塌了」
+   *   ④ 进化结算（力量 +N 之类）
    */
   const mine = st.logs.slice(logFrom).map((l) => l.text);
-  const iAnnounce = mine.findIndex((t) => t.includes('在结算进化效果之前'));
+  const iAnnounce = mine.findIndex((t) => t.includes('请先确认新效果'));
+  const iConfirm = mine.findIndex((t) => t.includes('已确认进化效果'));
   const iCollapse = mine.findIndex((t) => t.includes('坍塌') && t.includes('了！'));
   const iEvolve = mine.findIndex((t) => t.includes('杀手进化！'));
-  console.log(`   本次升级日志：告知 @${iAnnounce} / 坍塌 @${iCollapse} / 进化 @${iEvolve}`);
-  ok(iAnnounce >= 0, '先有"进化到几级"的告知');
+  console.log(`   本次升级日志：告知 @${iAnnounce} / 确认 @${iConfirm} / 坍塌 @${iCollapse} / 进化 @${iEvolve}`);
+  ok(iAnnounce >= 0, '先有"进化到几级、请先确认"的告知');
+  ok(iConfirm >= 0, '有"已确认进化效果"');
   ok(iCollapse >= 0, '有坍塌公告');
   ok(iEvolve >= 0, '有进化公告');
-  ok(iAnnounce < iCollapse, '告知 → 坍塌（顺序正确）');
-  ok(iCollapse < iEvolve, '坍塌 → 进化（顺序正确）');
+  ok(iAnnounce < iConfirm, '告知 → 确认（顺序正确）');
+  ok(iConfirm < iCollapse, '**确认 → 坍塌**（用户口径：确认完才结算坍塌）');
+  ok(iEvolve < iCollapse, '坍塌排在原来的进化公告之后（不是"当场就塌"）');
   ok(st.killerLevel === before + 1, '进化本身也照常发生了', `${st.killerLevel}`);
 }
 
@@ -187,8 +217,7 @@ console.log('=== ③ 4 次升级 = 4 个地点，各塌一次、不会重复 ===
   const st = mkCrypt();
   const seen = [];
   for (let i = 0; i < 4; i += 1) {
-    upgradeKiller(st);
-    st.pendingEvolutionAck = null;
+    upgradeAndAck(st);
     st.pendingUnlockChoice = null;
     st.pendingUnlockDiscard = false;
     /** 这组只关心"塌哪几个"，队列直接清掉（下一组专门测队列） */
@@ -203,7 +232,7 @@ console.log('=== ③ 4 次升级 = 4 个地点，各塌一次、不会重复 ===
   /** 第 5 次升级时没有可塌的了 —— 不能再塌，也不该报错 */
   st.killerLevel = 5;
   st.pendingEvolutionAck = null;
-  upgradeKiller(st);
+  upgradeAndAck(st);
   ok(st.collapsedRooms.length === 4, '没有可用地点时不会多塌', `${st.collapsedRooms.length}`);
 }
 
@@ -233,8 +262,7 @@ console.log('=== ④ 坍塌：清光标记 / 仆从，立绘保留 ===');
   st.firecrackerRoomId = 'R4';
 
   const hpBefore = st.players[survs[0]].hp;
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
 
   ok(st.collapsedRooms.includes('R4'), 'R4 塌了', st.collapsedRooms.join(','));
   ok(st.coreMarkers.filter((r) => r === 'R4').length === 0, '核心标记清掉了');
@@ -279,8 +307,7 @@ console.log('=== ⑤ 坍塌：潜行的杀手暴露 ===');
   k.stealth = true;
   /** 女猎手「屏息」这类**非揭露类**加成，暴露后要留着 */
   st.killerTurnPowerBonus = 3;
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
   ok(k.stealth === false, '潜行被解除（暴露了）');
   ok(st.killerTurnPowerBonus === 3, '非"揭露时"的加成不受影响（+3 力量还在）', `${st.killerTurnPowerBonus}`);
 }
@@ -295,8 +322,7 @@ console.log('=== ⑥ 坍塌收尾：轮流走一步，杀手必须弃光手牌 =
   const survs = survivorIds(st);
   k.roomId = 'R4';
   survs.forEach((id) => { st.players[id].roomId = 'R4'; });
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
   /** 手牌补满好观察"弃光" */
   st.killerHand = ['c1', 'c2', 'c3'];
 
@@ -372,8 +398,7 @@ console.log('=== ⑥b 坍塌伤害遇到古代护符：要能问得出来、答�
   const guarded = st.players[survs[0]];
   guarded.items = { ...guarded.items, amulet: 1 };
 
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
   /**
    * 护符必须**还能答**：如果收尾期间把 `confirmAmulet` 也冻住，
    * 玩家就没法回应，整个对局卡死在坍塌里。
@@ -409,8 +434,7 @@ console.log('=== ⑥c 坍塌时被捕网的幸存者：网直接解除，然后�
   ok(netLockedRoom(st, caught.id) === 'R4', '前提：他被捕网锁在 R4');
 
   const hpBefore = caught.hp;
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
 
   ok(st.collapsedRooms.includes('R4'), 'R4 塌了');
   ok(netLockedRoom(st, caught.id) === null, '坍塌把他的捕网效果直接移除了');
@@ -434,8 +458,7 @@ console.log('=== ⑥c 坍塌时被捕网的幸存者：网直接解除，然后�
   k2.roomId = 'R4';
   survs2.forEach((id) => { st2.players[id].roomId = 'R2'; });
   st2.netLocks = [{ roomId: 'R2', playerId: survs2[0], round: st2.round }];
-  upgradeKiller(st2);
-  st2.pendingEvolutionAck = null;
+  upgradeAndAck(st2);
   ok(netLockedRoom(st2, survs2[0]) === 'R2', '别处的捕网不受影响');
 }
 
@@ -501,8 +524,7 @@ console.log('=== ⑧ 快照字段 ===');
   const s = st.players[survivorIds(st)[0]];
   k.roomId = 'R4';
   s.roomId = 'R4';
-  upgradeKiller(st);
-  st.pendingEvolutionAck = null;
+  upgradeAndAck(st);
   const snap = buildSnapshot(st, s.controllerId);
   ok(Array.isArray(snap.collapsedRooms) && snap.collapsedRooms.includes('R4'), '快照有 collapsedRooms', JSON.stringify(snap.collapsedRooms));
   ok(snap.relicRoomId === RELIC_ROOM, '快照有 relicRoomId', String(snap.relicRoomId));
@@ -807,11 +829,16 @@ console.log('=== ⑩ 1对1 下的坍塌收尾 ===');
   const k = killerPiece(st);
   const caught = survs[0];
   st.players[caught].roomId = crashRoom;
-  k.roomId = 'B5';
+  /**
+   * ⚠ 杀手也放进废墟：下面要验证"幸存者走完**接着轮到杀手**"，
+   * 杀手不在废墟里的话队列就只有一个人（这段以前在第一步就崩了，
+   * 所以这条断言一直没被真正验证过）。
+   */
+  k.roomId = crashRoom;
   ok(st.players[caught].controllerId === 's', '1对1 里幸存者的操控者是 s（不是棋子 id）', st.players[caught].controllerId);
   ok(Boolean(st.players[caught]), '**棋子 id 才是 players 的键** —— 所以 collapseMove 必须解析成棋子 id');
 
-  upgradeKiller(st);
+  upgradeAndAck(st, 'h3');
   ok(Boolean(st.pendingCollapseMoves), '坍塌收尾起来了', String(st.pendingCollapseMoves?.currentId));
   ok(st.pendingCollapseMoves.currentId === caught, '先轮到被压到的幸存者');
 
@@ -826,11 +853,14 @@ console.log('=== ⑩ 1对1 下的坍塌收尾 ===');
 
   /** 轮到杀手，也要能走 */
   ok(st.pendingCollapseMoves?.currentId === k.id, '接着轮到杀手', String(st.pendingCollapseMoves?.currentId));
+  /** 目的地必须从"离废墟一步"的候选里挑（写死 'B3' 会报"只能走到相邻的地点"） */
+  const killerDest = collapseMoveOptions(st, k)[0];
   err = '';
   try {
-    handleAction(st, st.players[k.id].controllerId, { type: 'collapseMove', toRoomId: 'B3' }, content);
+    handleAction(st, st.players[k.id].controllerId, { type: 'collapseMove', toRoomId: killerDest }, content);
   } catch (e) { err = e.message; }
   ok(err === '', '杀手用操控者 id 也能走', err);
+  ok(k.roomId === killerDest, `杀手走到了 ${killerDest}`, String(k.roomId));
   ok(st.pendingCollapseMoves === null, '收尾结束');
 }
 

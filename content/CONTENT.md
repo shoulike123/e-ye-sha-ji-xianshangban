@@ -29,7 +29,7 @@ content/
 | `searchMakesNoise` / `repairMakesNoise` | 是否自动产生噪音 |
 | `keysNeeded` / `repairNeeded` / `rescueWaitRounds` | 胜负相关数值 |
 | `killerWinsOnAnyKill` | 击杀任意幸存者即胜 |
-| `survivorExitRequiresAllAliveAt` | 入口撤离所在房间 id |
+| `survivorExitRequiresAllAliveAt` | 入口撤离房间 id —— **只是兜底**：主要出口以地图的 `survivorStartRoomId` 为准（`effects.mainExitRoomId()`），只有地图没写时才用这个 |
 | `hiddenExitRequiresMapItem` | 隐藏出口需要持有 `map` 物品 |
 | `killerSeesSurvivorPositions` | 杀手是否看见幸存者位置 |
 | `survivorSeesKillerPosition` | 幸存者是否看见杀手（潜行仍可隐藏） |

@@ -1,6 +1,10 @@
 /**
  * 生成【机关大门】地图标记图标 → `Image/UI/机关大门.png`
  *
+ * ⚠⚠ **这是生成器，不是测试！别把它塞进测试扫描里跑**（入口是 `npm run gen:gate`）。
+ * 同目录的 `build-crypt-assets.mjs` 就因为被误当成测试跑，把用户的正式素材
+ * 盖成了占位图。所以这里也加了**覆盖保护**：目标已存在就拒绝写，除非带 `--force`。
+ *
  * 设计意图：和 `封堵.png`（暖色木条 + 铁钉）**明显区别**开 ——
  *  - 冷色金属（钢灰 + 蓝灰）而不是木头
  *  - 竖铁栅（闸门/吊闸造型）而不是横木条
@@ -12,8 +16,17 @@
  *
  * 用 3× 超采样再降采样做抗锯齿，然后手写 PNG 编码（Node 自带 zlib，无第三方依赖）。
  */
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
+
+/** 这个脚本会覆盖的文件（**正式素材**） */
+const GATE_TARGET = 'Image/UI/机关大门.png';
+if (existsSync(GATE_TARGET) && !process.argv.includes('--force')) {
+  console.error(`⚠ ${GATE_TARGET} 已经存在，**拒绝覆盖**（那是正式素材）。`);
+  console.error('确实要重新生成，请显式加 --force：');
+  console.error('   node scripts/tests/build-gate-icon.mjs --force');
+  process.exit(1);
+}
 
 /* ------------------------------------------------------------- 画布 ---- */
 const SS = 3;                 // 超采样倍数

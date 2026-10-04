@@ -88,6 +88,45 @@ export function setTraitSetupHandler(fn: (state: GameState) => void): void {
   onTraitSetup = fn;
 }
 
+let killerScopeOf: ((state: GameState) => string[]) | null = null;
+
+/**
+ * engine 注入：**当前这名杀手手上有哪些棋子**（2对3 要按"这一个杀手"算）。
+ *
+ * 为什么需要：特性卡是**按棋子**存的，而雕像局里特性挂在**主雕像**那一个棋子上
+ * （一局只发一份，常驻效果只结算一次，不会 4 尊各加一次力量）。
+ * 一旦要问"某尊雕像有没有某特性"，就必须落到这一份卡上 —— 但**不能顺带
+ * 把另一名杀手的特性也算进来**（用户明确：2对3 里两个杀手的特性不能弄混）。
+ */
+export function setKillerScopeHandler(fn: (state: GameState) => string[]): void {
+  killerScopeOf = fn;
+}
+
+/** 当前这名杀手的所有棋子 id（没有注入时退回主雕像） */
+export function killerPieceIdsOf(state: GameState): string[] {
+  if (killerScopeOf) return killerScopeOf(state);
+  return state.killerId ? [state.killerId] : [];
+}
+
+/**
+ * **当前这名杀手**（含他的全部雕像）有没有这张特性。
+ *
+ * ⚠ 与 `killerHasTrait` 的区别：那个是"**桌上任意**杀手棋子有就算"，
+ * 在 2对3 里会把对手杀手的特性也算进来 —— 需要判断"我这名杀手"时必须用这个。
+ */
+export function hasTraitForKiller(state: GameState, traitId: string): boolean {
+  return killerPieceIdsOf(state).some((id) => hasTrait(state, id, traitId));
+}
+
+/** **当前这名杀手**的这张特性还能不能用（每场一次的类型，用过就不能再用） */
+export function traitAvailableForKiller(state: GameState, traitId: string): boolean {
+  if (!hasTraitForKiller(state, traitId)) return false;
+  const def = traitDef(state, traitId);
+  if (!def) return false;
+  if (def.oncePerGame && traitIsUsed(state, traitId)) return false;
+  return true;
+}
+
 /** 查一张特性的定义（`traitById` 是开局时从 content 灌进来的） */
 export function traitDef(state: GameState, id: string): TraitDef | undefined {
   return state.traitById?.[id];

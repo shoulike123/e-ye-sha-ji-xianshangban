@@ -245,11 +245,72 @@ console.log('=== ④ 恐詭管道落点 ===');
     ok(true, '（这张图所有地点都有通道，跳过非法地点测试）');
   }
 
-  /** 合法落点：真的走过去 */
-  const target = allowed[0];
+  /**
+   * 合法落点：**点地图只是"选中"，按「确认潜入」才真的走过去**
+   * （用户口径：「选择了地点后要确认」）。
+   *
+   * ⚠ 落点要挑一个**和当前所在地不同**的，否则"没移动"看不出来。
+   */
+  const target = allowed.find((id) => id !== k.roomId) ?? allowed[0];
+  const from = k.roomId;
   handleAction(st, 'h', { type: 'pickPassageRoom', roomId: target }, content);
-  ok(k.roomId === target, `潜行到「${target}」`, String(k.roomId));
-  ok((st.pendingPassagePick ?? []).length === 0, '选完清空待选');
+  ok(st.pendingPassageRoom === target, `选中了「${target}」`, String(st.pendingPassageRoom));
+  ok(k.roomId === from,
+    `**只看选中、还没移动**（仍在 ${from}，等确认）`, String(k.roomId));
+  /** 再点同一格 = 取消选择 */
+  handleAction(st, 'h', { type: 'pickPassageRoom', roomId: target }, content);
+  ok(st.pendingPassageRoom == null, '再点同一格取消选中', String(st.pendingPassageRoom));
+  /** 重新选中并确认 */
+  handleAction(st, 'h', { type: 'pickPassageRoom', roomId: target }, content);
+  handleAction(st, 'h', { type: 'confirmPassagePick' }, content);
+  ok(k.roomId === target, `确认后潜入「${target}」`, String(k.roomId));
+  ok((st.pendingPassagePick ?? []).length === 0, '确认后清空待选');
+  ok(st.pendingPassageRoom == null, '确认后清空"已选中"');
+}
+
+/* ═══════════ ④-b 【保護色】之后恐詭管道不再二选一 ═══════════ */
+console.log('=== ④-b 【保護色】→ 恐詭管道直接进选地点 ===');
+{
+  /** 对照：没有保護色 → 打出恐詭管道会挂二选一 */
+  const stA = mk('mansion', 'killer7');
+  const kA = killerSlow(stA);
+  kA.roomId = 'B1';
+  /** 恐詭管道费用 1，要另带一张手牌付得起 */
+  stA.killerHand = ['un_pipe_1', 'un_infrared_1'];
+  handleAction(stA, 'h', { type: 'playKillerCard', cardId: 'un_pipe_1', payCardIds: ['un_infrared_1'] }, content);
+  ok(stA.pendingEffectChoice != null, '**没有保護色时**仍然问二选一',
+    JSON.stringify(stA.pendingEffectChoice?.options?.length ?? null));
+
+  /** 有保護色 → **不问二选一**，直接挂出"点地点" */
+  const stB = mk('mansion', 'killer7');
+  const kB = killerSlow(stB);
+  kB.roomId = 'B1';
+  stB.passageStealthAnywhere = true;
+  stB.killerHand = ['un_pipe_1', 'un_infrared_1'];
+  handleAction(stB, 'h', { type: 'playKillerCard', cardId: 'un_pipe_1', payCardIds: ['un_infrared_1'] }, content);
+  console.log(`  有保護色时：pendingEffectChoice=${stB.pendingEffectChoice ? '挂了二选一' : 'null'}；` +
+    `待选落点数=${(stB.pendingPassagePick ?? []).length}/${stB.map.rooms.length}`);
+  ok(stB.pendingEffectChoice == null, '**有保護色时不问二选一**');
+  ok((stB.pendingPassagePick ?? []).length === stB.map.rooms.length,
+    '**直接挂出整张地图当落点**',
+    `${(stB.pendingPassagePick ?? []).length} / ${stB.map.rooms.length}`);
+  ok(stB.pendingPassageRoom == null, '还没选中任何地点（等玩家点）');
+  /**
+   * ⚠ **客户端高亮就是照快照的 `legalMoves` 画的** ——
+   * 只查服务端字段不够，必须确认快照真的把它发下去了
+   * （用户报的"有些点地图没高亮"就是这一类）。
+   */
+  const snapB = buildSnapshot(stB, 'h');
+  console.log(`  快照 legalMoves=${(snapB.legalMoves ?? []).length} 个；` +
+    `pendingPassagePick=${(snapB.pendingPassagePick ?? []).length} 个；` +
+    `controllingActive=${snapB.controllingActive} phase=${snapB.phase}`);
+  ok((snapB.legalMoves ?? []).length > 1,
+    '**快照里下发了可点地点（地图会高亮）**',
+    `${(snapB.legalMoves ?? []).length} 个`);
+  ok(
+    (snapB.pendingPassagePick ?? []).every((id) => (snapB.legalMoves ?? []).includes(id)),
+    '每个候选落点都在 legalMoves 里',
+  );
 }
 
 /* ═══════════ ⑤ 變形 / 戰鬥適應：自己选要移除的牌 ═══════════ */

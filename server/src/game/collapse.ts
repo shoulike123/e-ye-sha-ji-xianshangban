@@ -22,6 +22,8 @@ import {
 } from './effects.js';
 /** 遗物各张牌的规则在 `relic.ts`（本文件只管牌堆与标记） */
 import { applyRelicKey, discardRelic, giveRelic, relicKindOf } from './relic.js';
+/** 【变体3】坍塌要把该地点的计划标记一起清掉 */
+import { clearPlanMarkersIn } from './plans.js';
 
 /* ------------------------------------------------------------ 基本 ---- */
 export const MAP_CRYPT = 'crypt';
@@ -67,12 +69,21 @@ export function interceptEvolutionForCollapse(state: GameState, fromLevel: numbe
   /**
    * 已经记下"待坍塌"了 —— 说明这次进化**已经被拦过一次**。
    * 此时必须放行，否则"结算完坍塌再跑一次进化"会又被拦住，卡成死循环。
-   * （`beginCollapse` 会在结算时把它清掉，所以正常流程不会走到这里。）
    */
   if (state.pendingCollapse) return false;
+  /**
+   * ⚠ **坍塌排在"确认进化效果"之后**（用户口径）：
+   * 「先确认进化效果 → 再执行双方坍塌结算 → 再执行特性卡里与进化有关的特性
+   *   → 再执行进化效果」。
+   *
+   * 所以第一次拦下来时**不立刻塌**，只记一个"确认之后要塌"的标记；
+   * 由 `ackEvolution`（点「确认新效果」）去消费它。
+   * 已经记过标记就直接放行 —— 否则 `ackEvolution` 里再跑一次升级会被重复拦。
+   */
+  if (state.pendingCollapseAfterEvolution) return false;
   if (toLevel <= fromLevel) return false;
   if (!standingCollapsibleRooms(state).length) return false;
-  state.pendingCollapse = true;
+  state.pendingCollapseAfterEvolution = true;
   state.pendingCollapseLevel = toLevel;
   return true;
 }
@@ -224,6 +235,16 @@ function clearRoomMarkers(state: GameState, roomId: string): string[] {
     gone.push('爆竹标记');
   }
 
+  /**
+   * 【变体3】计划标记：**坍塌会把它一起清掉**（用户口径：
+   * 「地图上的计划标记就留着（墓穴的坍塌会清除坍塌地点的标记，注意）」）。
+   */
+  const planMarks = (state.planMarkers ?? []).filter((r) => r === roomId).length;
+  if (planMarks) {
+    clearPlanMarkersIn(state, roomId);
+    gone.push(`计划标记 ×${planMarks}`);
+  }
+
   /** 捕网「本回合不能离开」的效果（人都被赶走了，锁也没意义） */
   state.netLocks = (state.netLocks ?? []).filter((l) => l.roomId !== roomId);
 
@@ -296,7 +317,13 @@ export function resolveCollapseMove(state: GameState, playerId: string, toRoomId
 
   if (p.faction === 'killer') {
     /**
-     * 杀手：弃光所有手牌。
+     * **杀手弃光所有手牌**（用户口径：**不判断砸到的是不是主雕像** ——
+     * 任意一尊雕像被砸，手牌就弃光；而且**每次**坍塌砸到都会弃，
+     * 没有"一局一次"这种限制）。
+     *
+     * 雕像的手牌本来就挂在主雕像上，所以"受影响的这尊把杀手手牌清空"
+     * 就等于"主雕像弃光手牌"；一局里被砸多次就弃多次（手牌空了自然没得弃）。
+     *
      * **只公布"弃光了全部手牌 + 弃了几张"，不公布具体是哪几张** ——
      * 所以这条战报是 `'all'`，但文案里不出现任何牌名。
      */
@@ -360,6 +387,28 @@ export function advanceCollapseMoves(state: GameState): void {
   pend.currentId = null;
   state.pendingCollapseMoves = null;
   log(state, '坍塌的收尾结束。', 'all', true);
+  /**
+   * ⚠ **坍塌全部走完之后，才轮到下一步**（用户口径：
+   * 「坍塌结算后才执行进化效果」）。
+   *
+   * 双人/单人热座里，进化流程可能在坍塌还没走完时就等在这里 ——
+   * 由 engine 注入的 `onCollapseDone` 接着往下走（选卡 / 结算）。
+   */
+  onCollapseDone?.(state);
+}
+
+let onCollapseDone: ((state: GameState) => void) | null = null;
+
+/**
+ * engine 注入：**坍塌的逐人走位全部结束**时的回调。
+ *
+ * 为什么需要：坍塌会挂出"谁先走、谁后走"的队列，而进化流程
+ * （确认 → 坍塌 → 特性 → 执行进化效果）必须**等它走完**才能继续 ——
+ * 否则会出现"一边问幸存者移动、一边弹出进化选卡"两个待办打架
+ * （用户报的"杀手界面里问幸存者移动 + 同时开始问进化卡牌"）。
+ */
+export function setCollapseDoneHandler(fn: (state: GameState) => void): void {
+  onCollapseDone = fn;
 }
 
 /* ------------------------------------------------- ② 遺物室（R6）---- */
@@ -434,7 +483,16 @@ export function onSurvivorRoundStart(state: GameState): void {
   if (!hasRelicRoom(state)) return;
   if (state.relicMarkerFaceUp) return;
   state.relicMarkerFaceUp = true;
-  log(state, `新的大回合：遗物标记翻回正面，可以在「${roomName(state, RELIC_ROOM)}」抽取遗物了。`, 'all', true);
+  /**
+   * ⚠ 用户口径：**这条不给杀手看**（它属于幸存者侧的节奏信息，
+   * 和"抽遗物"那条一样）。以前标的是 `'all', true`，于是杀手战报里
+   * 会冒出「新的大回合：遗物标记翻回正面…」这一行。
+   */
+  log(
+    state,
+    `新的大回合：遗物标记翻回正面，可以在「${roomName(state, RELIC_ROOM)}」抽取遗物了。`,
+    'survivor',
+  );
 }
 
 /**

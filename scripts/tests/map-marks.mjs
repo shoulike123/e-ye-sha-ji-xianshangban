@@ -52,6 +52,13 @@ function mk(mapId) {
 }
 
 const { Board } = await import('../../client/_ssrbuild/Board.js');
+/**
+ * 渲染成字符串。
+ *
+ * ⚠ `renderToStaticMarkup` 把 SVG 的 `<image>` 输出成 **`<image …></image>`**
+ * （不是自闭合的 `<image … />`），而下面那些坐标断言用的正则都按 `/>` 写。
+ * 这里统一归一化一次，免得每条断言都要兼容两种写法。
+ */
 function render(st, viewer) {
   const snap = buildSnapshot(st, viewer);
   return renderToStaticMarkup(
@@ -68,7 +75,7 @@ function render(st, viewer) {
       firstAidKit: snap.firstAidKit === true,
       firstAidRoomId: snap.firstAidRoomId ?? null,
     }),
-  );
+  ).replace(/<image([^>]*)><\/image>/g, '<image$1/>');
 }
 
 const AID_SRC = encodeURI('/Image/UI/急救箱.png');
@@ -82,9 +89,14 @@ console.log('=== ① 急救箱 = 地图上的一个道具 ===');
   ok(Boolean(tok), '**实验室地图的 tokens 里有一条急救箱**', JSON.stringify(tok));
   ok(tok?.src === '/Image/UI/急救箱.png', '用的是急救箱那张图', String(tok?.src));
   ok(tok?.roomId === 'G3', '记着它在 G3（规则判"能不能用"靠这个）', String(tok?.roomId));
+  /**
+   * ⚠ 地图数据里**不一定**写 `side` —— 渲染层 `zoneVisible` 的兜底是
+   * `zone.side ?? 'survivor'`（缺省 = 只有幸存者看得到），所以行为是对的。
+   * "杀手看不到"由下面的 ②b 段用真渲染验证，这里只确认数据没写反。
+   */
   ok(
-    tok?.side === 'survivor',
-    '**只有幸存者的地图上画**（用户要求：杀手看不到急救箱）',
+    tok?.side === 'survivor' || tok?.side === undefined,
+    '**只有幸存者的地图上画**（用户要求：杀手看不到急救箱；不写 side 也按 survivor 兜底）',
     String(tok?.side),
   );
   ok(typeof tok?.x === 'number' && typeof tok?.y === 'number', '有绝对坐标（这样才能拖）');
@@ -151,6 +163,15 @@ console.log('=== ④ 机关大门与封堵共用位置 ===');
   placeLeverGate(st, 'R5', 'G4');
   const gateDoor = st.leverGateDoorId;
   console.log(`   大门门号 = ${gateDoor}`);
+  /**
+   * ⚠ **这扇门上再放一个封堵**。
+   *
+   * 下面要验证的是"机关大门和封堵**共用同一份坐标**、只按 dy 错开 7px"
+   * （规则上放门时会拆掉门上的封堵，但封堵也可能事后又被放上去）。
+   * 只在场上有封堵时，渲染出来的才是"封堵 image → 机关大门 image"这一对 ——
+   * 不放封堵的话，`gateT` 那个正则永远锚不到（这段以前就是这么挂的）。
+   */
+  st.blockades = [...(st.blockades ?? []), gateDoor];
 
   /** 找到那扇门，把它的封堵标记改成一个好认的位置 */
   const edge = st.map.edges.find(

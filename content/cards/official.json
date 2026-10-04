@@ -61,7 +61,7 @@
       { "id": "relic_key", "name": "鑰匙", "type": "relic", "text": "立刻将本卡放入钥匙立牌。", "makesNoise": true, "effects": [] },
       { "id": "relic_mirror", "name": "鏡之門戶", "type": "relic", "text": "额外行动：传送到 🌀 地点。", "effects": [] },
       { "id": "relic_shield", "name": "剛毅之盾", "type": "relic", "text": "+1 防禦值，你能够使用一个额外武器。（使用后不进入弃牌堆）", "effects": [] },
-      { "id": "relic_guard", "name": "守護之石", "type": "relic", "text": "你可以向杀手出示本卡牌，以防止一次伤害（遭遇中的直接伤害也可以）。（使用后不进入弃牌堆）", "effects": [] },
+      { "id": "relic_guard", "name": "守護之石", "type": "relic", "text": "你可以向杀手出示本卡牌，以防止一次伤害。", "effects": [] },
       { "id": "relic_insight", "name": "洞察之球", "type": "relic", "text": "（在搜索地点）特殊行动：搜索两次。", "effects": [] }
     ]
   }

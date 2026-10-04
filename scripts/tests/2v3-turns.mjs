@@ -208,15 +208,41 @@ console.log('=== ⑬ 进化：队伍等级共享，各自套用自己的效果 =
   const powB0 = sliceB.power;
   console.log(`   初始：${st.players[a]?.name} 力量 ${powA0}，${st.players[b]?.name} 力量 ${powB0}`);
 
-  /** 直接触发一次进化 */
+  /**
+   * 直接触发一次进化。
+   *
+   * ⚠ **必须走真实确认流程**（用户口径：两名杀手各自确认、各自结算，
+   * 都做完才放行）。以前这里用 `st.pendingEvolutionAck = null` 硬清掉，
+   * 那是"确认前就结算"的旧流程写法 —— 新流程里**清掉面板等于什么都没做**，
+   * 力量与锁定牌都不会结算。
+   */
+  const ackBoth = () => {
+    let guard = 0;
+    while (st.pendingEvolutionAck && guard < 6) {
+      guard += 1;
+      const who = st.killerId;
+      /** 把这一级"要你选的东西"先做掉（这里两个杀手都没有可选，直接确认即可） */
+      const err = (() => {
+        try { handleAction(st, who, { type: 'ackEvolution' }, content); return null; }
+        catch (e) { return e.message; }
+      })();
+      console.log(`     · 确认者=${who}（${st.players[who]?.name ?? '?'}）→ ${err ?? 'OK'}；` +
+        `之后 killerId=${st.killerId} ack=${st.pendingEvolutionAck ? '还在' : 'null'} ` +
+        `done=${JSON.stringify(st.pendingEvolutionAck?.doneKillerIds ?? null)} ` +
+        `切片力量 A=${st.killers[a]?.power} B=${st.killers[b]?.power} ` +
+        `顶层力量=${st.killerPower}`);
+      if (err) break;
+    }
+  };
+
   runUpgrade(st);
-  st.pendingEvolutionAck = null;
+  ackBoth();
   console.log(`   1 级：等级=${st.killerLevel} A力量=${st.killers[a].power} B力量=${st.killers[b].power}`);
   ok(st.killerLevel === 2, '队伍等级升到 2', `${st.killerLevel}`);
 
   /** 再升到 3 级：屠夫 2 级 +1；狼人 3 级 +1 */
   runUpgrade(st);
-  st.pendingEvolutionAck = null;
+  ackBoth();
   console.log(`   2 级：等级=${st.killerLevel} A力量=${st.killers[a].power} B力量=${st.killers[b].power}`);
   ok(st.killerLevel === 3, '队伍等级升到 3', `${st.killerLevel}`);
   ok(st.killers[a].power === powA0 + 1, '屠夫在 2 级拿到 +1 力量', `${powA0} → ${st.killers[a].power}`);

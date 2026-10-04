@@ -3,18 +3,21 @@
  *
  * 遗物和普通牌不一样：
  *  - **不打牌**：拿到的瞬间结算（抽遗物的那一步），不会进手牌、不占手牌上限
- *  - **摊在面前**：角标 ∞ 的（剛毅之盾 / 守護之石）一直留着，随时生效
- *  - **用完就走**：一次性的（鑰匙 / 鏡之門戶 / 洞察之球）结完就进**遗物弃牌堆**
+ *  - **摊在面前**：只有**剛毅之盾**是不弃置的（角标 ∞），一直留着随时生效
+ *  - **用完就走**：鑰匙 / 鏡之門戶 / 洞察之球 / **守護之石** 用完都进**普通弃牌堆**
  *
- * 牌面文字（用户提供）：
+ * 牌面文字（用户提供，与 `content/cards/official.json` 同步）：
  *  - 鑰匙     立刻将本卡放入钥匙立牌
  *  - 鏡之門戶 额外行动：传送到 🌀 地点
- *  - 剛毅之盾 +1 防禦值，你能够使用一个额外武器（∞）
- *  - 守護之石 你可以向杀手出示本卡牌，以防止一次伤害（∞）
+ *  - 剛毅之盾 +1 防禦值，你能够使用一个额外武器（使用后不进入弃牌堆）
+ *  - 守護之石 你可以向杀手出示本卡牌，以防止一次伤害
  *  - 洞察之球 （在搜索地点）特殊行动：搜索两次
+ *
+ * ⚠ 守護之石**不是 ∞**（用户口径：「遗物中只有剛毅之盾有无穷，其他都没有，
+ *   包括守護之石」）—— 出示后从背包移除、进普通弃牌堆，见 `killerCards.confirmAmuletUse`。
  */
 import type { GameState, PlayerState } from './types.js';
-import { addKeys, enforceInventory, log, roomName } from './effects.js';
+import { addKeys, enforceInventory, log, roomName, survivorActionVis } from './effects.js';
 
 /* --------------------------------------------------------- 识别 ---- */
 /**
@@ -61,7 +64,15 @@ export function hasRelic(p: PlayerState | undefined, kind: RelicKind): boolean {
  */
 export function giveRelic(state: GameState, p: PlayerState, cardId: string): void {
   p.items[cardId] = (p.items[cardId] ?? 0) + 1;
-  log(state, `${p.name} 获得遗物「${state.cardById[cardId]?.name ?? cardId}」。`, 'all', true);
+  /**
+   * 用户口径：**"获得遗物"不给杀手看**（除非正好发生在遭遇里）——
+   * 遗物牌堆是背面朝下的，"他拿到了哪一张"本来就是幸存者的私有信息。
+   */
+  log(
+    state,
+    `${p.name} 获得遗物「${state.cardById[cardId]?.name ?? cardId}」。`,
+    survivorActionVis(state),
+  );
   enforceInventory(state, p.id);
 }
 
@@ -149,8 +160,7 @@ export function useMirror(state: GameState, p: PlayerState, toRoomId: string): v
   log(
     state,
     `${p.name} 使用遗物「鏡之門戶」，从「${roomName(state, from)}」传送到「${roomName(state, toRoomId)}」（额外行动）。`,
-    'all',
-    true,
+    survivorActionVis(state),
   );
   discardRelic(state, RELIC_IDS.mirror);
 }

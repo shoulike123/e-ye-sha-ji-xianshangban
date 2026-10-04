@@ -263,10 +263,23 @@ export interface EncounterState {
   defenseItems?: Record<string, string | null>;
   /** **剛毅之盾**勾没勾（不占 `defenseItems` 的名额，所以单列） */
   shieldUsed?: Record<string, boolean>;
+  /**
+   * 【变体3】燃燒瓶：已经弃掉威士忌酒瓶 +2（弃置，不算使用物品、不占名额）。
+   */
+  whiskeyUsed?: Record<string, boolean>;
+  /**
+   * 【变体3】燃燒瓶的第二段：防御物品确认之后，**单独问一次**
+   * "要不要弃掉一个威士忌酒瓶 +2"。挂着时还没掷骰。
+   */
+  whiskeyOffer?: { playerId: string } | null;
   /** 荊棘纏繞：本次攻击中目标**不能使用任何物品**（含剛毅之盾） */
   blockItems?: boolean;
   defenseOptions: Record<string, string[]>;
   fleeQueue: string[];
+  /** 【（甲）撤离先选人】还没撤离、**还能被点**的幸存者名单 */
+  fleeReadyIds?: string[];
+  /** 【（甲）撤离先选人】已经被选中、正在撤离的那一个（null = 正在等人点名单） */
+  fleeTargetId?: string | null;
   discoveredIds?: string[];
   trapArmed?: boolean;
   trapApplied?: boolean;
@@ -274,6 +287,8 @@ export interface EncounterState {
 
 export interface PublicSnapshot {
   roomCode: string;
+  /** 这一局的标识（"重新开始"后会变）—— 客户端用它区分新的一局（本地缓存等） */
+  matchId?: string;
   hostId: string;
   mode: GameMode;
   /** 「分头行动」开关（1对3 / 2对3 专用）：顶栏换成模式标识、显示各自钥匙数 */
@@ -286,6 +301,66 @@ export interface PublicSnapshot {
   splitEscapeKeys?: number;
   /** 【变体1】特性卡开关（所有模式都能开，可与分头行动同开） */
   variant1?: boolean;
+  /** 【变体3】计划卡开关（所有模式都能开） */
+  variant3?: boolean;
+  /**
+   * 【变体3】计划卡（**只有幸存者视角有**）。
+   * 两张卡的进度完成情况、能力是否已用、地图上的计划标记、确认进度都在这里。
+   */
+  plans?: {
+    cards: Array<{
+      id: string;
+      name: string;
+      art: string;
+      progress: Array<{ label: string; text: string; done: boolean; current: boolean }>;
+      abilities: Array<{
+        text: string;
+        kind: string;
+        /** 【变体3】能力的实现键（认"要先在地图上选目标"的能力） */
+        impl?: string;
+        /** 要先选秘密通道出口（通道調查 ②） */
+        needsPassage?: boolean;
+        hasBox: boolean;
+        oncePerGame: boolean;
+        used: boolean;
+        /** 主动能力（能点「发动」） */
+        active?: boolean;
+        /** 现在能不能发动（服务端算好的） */
+        usable?: boolean;
+        blockReason?: string | null;
+      }>;
+      completed: boolean;
+      active: boolean;
+      candidate: boolean;
+    }>;
+    currentId: string | null;
+    step: number;
+    completedId: string | null;
+    markers: string[];
+    canPick: boolean;
+    voterIds: string[];
+    /** 这名观众自己是不是投票人（据此决定要不要弹"同意/不同意"） */
+    myVoterId: string | null;
+    pendingSwitch: {
+      toId: string;
+      fromId: string | null;
+      requestedBy: string;
+      confirmed: string[];
+      waiting: string[];
+      confirmedIds: string[];
+      waitingIds: string[];
+    } | null;
+    /** 【通道調查】当前这名观众能走的秘密通道出口 */
+    passageEnds?: string[];
+    /** 【通道調查 ②】正在等选通道出口（候选） */
+    pendingPassage?: string[];
+    /** 【情報分享】完成计划后等选一名幸存者抽 1 张 */
+    pendingTarget?: {
+      chooserId: string;
+      chooserName: string | null;
+      candidates: Array<{ id: string; name: string }>;
+    } | null;
+  } | null;
   /** 【变体1】生存难度等级（四档，差别只在杀手侧抽几张） */
   traitDifficulty?: 'easy' | 'normal' | 'hard' | 'nightmare';
   /** 【变体1】当前可见的特性卡定义（卡面/文字/图片路径） */
@@ -418,7 +493,11 @@ export interface PublicSnapshot {
   pendingDiscardRemove?: {
     remaining: number;
     cardName: string;
-    options: Array<{ id: string; name: string }>;
+    /**
+     * 候选（**多重集**）：牌组里同一张卡有多份，所以 `id` 可能重复。
+     * `uid` 是每一份的唯一键 —— 界面用它做 key / 判断"选中了哪一份"。
+     */
+    options: Array<{ id: string; name: string; uid?: string }>;
   } | null;
   /**
    * **遭遇防御阶段能选的防御物品**（服务端下发，客户端不再自己维护清单）。
@@ -451,6 +530,8 @@ export interface PublicSnapshot {
     mustMove: boolean;
     waiting: boolean;
     isKiller?: boolean;
+    /** 轮到的这个人是哪一方的（面板只画在该走的那一方界面上） */
+    faction?: Faction;
   } | null;
   /**
    * 【墓穴】遗物室所在地点。
@@ -644,6 +725,11 @@ export interface PublicSnapshot {
    */
   killerIntel?: Array<{ title: string; lines: string[] }>;
   /**
+   * 【杀手界面】**本大回合的全部战报**（地图旁边那块信息栏里）。
+   * 服务端按"本大回合 + 杀手本来就看得见"筛好，只有杀手视角有。
+   */
+  roundLogs?: string[];
+  /**
    * **杀手当前打出的牌 id**（双方都下发）——
    * 幸存者在地图右边看到它的卡面，知道杀手这回合打了什么。
    */
@@ -663,6 +749,13 @@ export interface PublicSnapshot {
     label: string;
     rooms: Array<{ id: string; name: string }>;
   }> | null;
+  /**
+   * **还有没有"打到一半、等杀手做选择"的牌**（服务端下发的答案）。
+   * 客户端据此把别的牌置灰（不再自己抄一份判定 —— 抄的那份漏过
+   * `pendingEffectChoice` / `pendingMoveChoices`，用户报的
+   * 「选择效果期间还能打别的快速牌」就是这么来的）。
+   */
+  pendingKillerChoice?: boolean;
   /** 雕像进化 1 级：等杀手决定是否转换主雕像 */
   pendingStatueEvoSwitch?: boolean;
   /** 已经点了、但还没确认的那尊雕像（选择要确认，点完不会立刻切换） */
@@ -774,6 +867,13 @@ export interface PublicSnapshot {
   isSpiralRoomHere?: boolean;
   /** 这名观看者现在能不能在自己地点搜索（含神秘狂热粉的螺旋地点） */
   canSearchHere?: boolean;
+  /**
+   * **有杀手（或他的潜行入口）就在观看者这个地点吗** —— 服务端 `killerInRoom` 的结论。
+   *
+   * 客户端用它禁用"搜索 / 修理"那类按钮。以前客户端自己遍历棋子判一遍，
+   * 漏了"雕像不算在场"，于是雕像局里站在隐藏出口的幸存者搜不了。
+   */
+  killerInYourRoom?: boolean;
   /** 欧菲莉亚「第六感」：待选的 2 张牌 */
   pendingSixthSense?: { cards: Array<{ id: string; name: string }> } | null;
   /** 扼杀者：地图上的核心标记（双方同步显示） */
@@ -787,6 +887,8 @@ export interface PublicSnapshot {
   pendingCoreNeighbors?: string[];
   pendingTeleportPick?: string[];
   pendingPassagePick?: string[];
+  /** 恐詭管道：已选中、等确认的落点（点地图只是选中，要按「确认潜入」） */
+  pendingPassageRoom?: string | null;
   pendingAcidPick?: boolean;
   pendingReturnToDeckTop?: boolean;
   /** 可选效果（牌面写了「可以」）：等杀手决定执行或跳过 */
@@ -828,6 +930,26 @@ export type ClientAction =
   | { type: 'setSplit'; split: boolean }
   /** 【变体1】特性卡开关（所有模式都能开，房主在大厅勾） */
   | { type: 'setVariant1'; on: boolean }
+  /** 【变体3】计划卡开关 */
+  | { type: 'setVariant3'; on: boolean }
+  /** 【变体3】确认 / 改变计划（要所有幸存者玩家同意） */
+  | { type: 'pickPlan'; planId: string }
+  /** 【变体3】计划确认投票 */
+  | { type: 'votePlan'; accept: boolean }
+  /** 【变体3】发动计划能力 */
+  | {
+      type: 'usePlanAbility';
+      planId: string;
+      index: number;
+      /** 谁发动（单人热座 / 共享操控下必须传） */
+      actorPlayerId?: string;
+      /** 通道調查 ②：要穿过的秘密通道出口 */
+      toRoomId?: string | null;
+      /** 情報分享：选中的幸存者 */
+      targetPlayerId?: string | null;
+    }
+  /** 【变体3】情報分享：完成计划后选一名幸存者抽 1 张 */
+  | { type: 'pickPlanTarget'; playerId: string }
   /** 【变体1】生存难度等级（房主选；开了变体1 才有意义） */
   | { type: 'setTraitDifficulty'; difficulty: 'easy' | 'normal' | 'hard' | 'nightmare' }
   /** 【变体1】选特性卡（开局弹窗里确认；`traitIds` 张数必须正好等于要选的张数） */
@@ -901,7 +1023,10 @@ export type ClientAction =
    */
   | { type: 'pickStatueStep'; statueId: string }
   /** 【恐詭管道】点一个有秘密通道的地点作为潜行落点 */
+  /** 恐詭管道：点地图选中落点（要再按「确认潜入」才移动） */
   | { type: 'pickPassageRoom'; roomId: string }
+  /** 恐詭管道：确认潜入 */
+  | { type: 'confirmPassagePick' }
   /** 【女猎手】重置陷阱放置（确认之前可以重选） */
   | { type: 'resetTrapPlacement' }
   /** 【變形 / 戰鬥適應】从弃牌堆里选一张永久移除的牌 */
@@ -1050,6 +1175,8 @@ export type ClientAction =
       /** **剛毅之盾**：不占"一次只能选一件"的名额，所以单独一个开关 */
       shield?: boolean;
     }
+  /** 【变体3】燃燒瓶第二段：防御物品确认之后，回答要不要**弃置**一个威士忌酒瓶 +2 */
+  | { type: 'confirmWhiskeyDefense'; use: boolean }
   | {
       type: 'encounterFlee';
       moveToRoomId: string | null;
@@ -1057,6 +1184,8 @@ export type ClientAction =
       fleeSteps?: 1 | 2;
     }
   | { type: 'pickEncounterTarget'; targetPlayerId: string }
+  /** 【（甲）撤离先选人】在"谁来撤离"的名单上点一个幸存者 */
+  | { type: 'pickFleeSurvivor'; targetPlayerId: string }
   | { type: 'relocateBlockade'; fromDoorId: string }
   | { type: 'removeBoardBlockade'; doorId: string }
   | { type: 'ackEvolution' }

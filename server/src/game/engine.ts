@@ -34,6 +34,10 @@ import {
   drawKillerCards,
   drawSearchCard,
   enforceInventory,
+  /** 【变体3】"某条计划能力现在生效吗"（修理不响 / 额外修理标记 / 燃燒瓶） */
+  planImplActive,
+  /** 【变体3】把"某条计划能力生效吗"注入给 effects（修理不响 / 额外修理标记） */
+  setPlanImplChecker,
   generalAdjacentRooms,
   georgeDefenseNoteBonus,
   georgeInPlay,
@@ -65,6 +69,7 @@ import {
   moveAdjacentRooms,
   netLockedRoom,
   parseDoor,
+  passageNeighborsFor,
   personalItemBlockReason,
   placeBlockade,
   pushNoise,
@@ -92,6 +97,7 @@ import {
   setKillerInfo,
   splitEscapeKeysNeeded,
   survivorDiscardHasItem,
+  survivorActionVis,
   survivorsInRoom,
   takeEarliestFromSurvivorDiscard,
   takeItem,
@@ -127,6 +133,24 @@ import {
   useFirstAidKit,
 } from './mapEffects.js';
 import {
+  addPlanMarker,
+  applyPlanAbility,
+  beginPlanSwitch,
+  canPickPlan,
+  checkPlanProgress,
+  onPlanRoundStart,
+  planAbilityBlockReason,
+  planDefaults,
+  planHasImpl,
+  planMarkersAt,
+  planSwitchProgress,
+  planViewFor,
+  planVoters,
+  setPlanAbilityEffectHandler,
+  setupPlanCards,
+  votePlanSwitch,
+} from './plans.js';
+import {
   RELIC_ROOM,
   beginCollapse,
   canDrawRelic,
@@ -139,6 +163,7 @@ import {
   onSurvivorRoundStart as onCryptSurvivorRoundStart,
   resolveCollapseMove,
   resolveRelicCard,
+  setCollapseDoneHandler,
   setupRelicRoom,
 } from './collapse.js';
 import {
@@ -166,6 +191,7 @@ import {
   isStranglerKiller,
   placeCoreAt,
   removeCoreAt,
+  beginRemoveFromDiscardPermanent,
   removeFromDiscardPermanent,
   requestBlockadeAt,
   resolveCoreOverflow,
@@ -178,6 +204,7 @@ import { isQueenKiller, zombiesIn, zombieCount, moveZombie, removeZombie, hordeM
 import {
   EVOLUTION_TEXT,
   activeEvolutionLines,
+  advanceEvolutionChoices,
   afterOneDoorPlaced,
   applyEncounterOpenEffects,
   applyMurdererRevealPower,
@@ -185,6 +212,7 @@ import {
   doorLabel,
   effectiveKillerPower,
   emptyEvolutionFields,
+  evolutionLevelJump,
   formatKillerPowerLabel,
   huntressCostDiscount,
   killerKindOf,
@@ -207,20 +235,23 @@ import {
   startPendingEvoFourIfNeeded,
 } from './evolution.js';
 /** 恐詭管道的落点选择（以前是死代码，没有任何 action 调它） */
-import { resolveStealthToPassage } from './killerSpecials.js';
+import { confirmStealthToPassage, resolveStealthToPassage } from './killerSpecials.js';
 import {
   KILLER_TRAIT_PAY,
   KILLER_TRAIT_PLAN,
   TRAIT_DIFFICULTY_LABEL,
   beginTraitDraft,
   hasTrait,
+  hasTraitForKiller,
   killerHasTrait,
   markTraitUsed,
   pickTraits,
+  setKillerScopeHandler,
   setTraitDraftDoneHandler,
   setTraitSetupHandler,
   setupTraitsOf,
   traitAvailable,
+  traitAvailableForKiller,
   traitDef,
 } from './traits.js';
 setOverFearHandler(queueOverFearWound);
@@ -307,17 +338,25 @@ export function killerTurnPieceIds(state: GameState): string[] {
  */
 setOnSurvivorDownHandler(onSurvivorDown);
 /**
- * 进化的注入入口。
+ * **升级的统一入口**（engine 内部一律用它，别直接调 `runUpgrade`）。
  *
- * **【墓穴】坍塌插在中间**：规则要求"先告诉杀手进化到几级 → 结算坍塌 → 再结算进化"。
- * `runUpgrade` 一进来看见要坍塌就会打住（`pendingCollapse = true`），
- * 这里当场把坍塌结掉，然后**再调一次** `runUpgrade` 让它把升级走完 ——
- * 整个过程还是同步的，回到调用方（摸牌）手里时状态已经一致。
+ * **【墓穴】坍塌排在"确认进化效果"之后**（用户口径）：
+ * 「先确认进化效果 → 再执行双方坍塌结算 → 再执行特性卡里与进化有关的特性
+ *   → 再执行进化效果」。
+ *
+ * 所以这里**不当场坍塌**：`runUpgrade` 第一次被拦下时只记
+ * `pendingCollapseAfterEvolution`（等级**没涨**、确认面板**也没挂**），
+ * 必须**补跑一次**才会挂出「确认新效果」；坍塌本身等玩家确认时才发生
+ * （`ackEvolution`）。
+ *
+ * ⚠ 以前只有"摸牌堆空了"那条路走这个补跑，`startRound`（特性 14 的开局升级）
+ * 和 `onSurvivorDown`（分头行动死人升级）都是**直接调 `runUpgrade`** ——
+ * 于是墓穴地图上这两条升级会停在"只记了标记"：等级不涨、面板不挂、整局卡住
+ * （`evolution-trait14-2v3.mjs` 的墓穴那一节抓到的）。
  */
-setUpgradeHandler((s) => {
+function upgradeKillerWithCollapse(s: GameState): void {
     runUpgrade(s);
-    if (!s.pendingCollapse) return;
-    beginCollapse(s);
+    if (!s.pendingCollapseAfterEvolution) return;
     /**
      * ⚠ 关键：**同一级进化只塌一次**。
      *
@@ -329,8 +368,9 @@ setUpgradeHandler((s) => {
     s.collapseConsumedForLevel = s.pendingCollapseLevel;
     runUpgrade(s);
     s.collapseConsumedForLevel = 0;
-    /** 坍塌若有"屋里的人轮流走一步"，此时 `pendingCollapseMoves` 会挡住双方操作，直到走完 */
-});
+    /** 到这里 `pendingEvolutionAck` 已经挂好，等玩家点「确认新效果」→ 那时才坍塌 */
+}
+setUpgradeHandler((s) => upgradeKillerWithCollapse(s));
 setEvolutionCollapseGate((s, fromLv, toLv) => interceptEvolutionForCollapse(s, fromLv, toLv));
 import { completeKillerCardMove, confirmPathDraft, finishKillerCardMove, confirmAmuletUse, continueKillerQueue, effectiveCardSpeed, finishLurkPick, forcedRevealAndSearch, encounterCardAttackBonus, canPlayAsEncounterAttack, runAttackTimingExtras, runOptionalEffect, hasPendingKillerChoice, resolveSenseColor, colorPrefixRooms, flushDeferredPlayedCard, queenSenseFear, setMoveSurvivorDoneHandler, setSearchFoundHandler, interruptCurrentCardEffects, pickStatueStepAction, fearAtRange, attackCardConditionBlockReason, cardRequirementBlockReason, } from './killerCards.js';
 /**
@@ -455,6 +495,32 @@ export function statuePieceIds(state: GameState): string[]
 }
 
 /**
+ * **某个杀手名下的全部棋子**。
+ *
+ *  - 雕像：4 尊全算他的（特性卡挂在主雕像那一份上，但"他的雕像"有 4 尊）
+ *  - 其他杀手：就是他自己那一个
+ *
+ * ⚠ 2对3 里必须**按名下的杀手**算，不能"桌上任一杀手棋子" ——
+ * 用户明确：两个杀手的特性不能弄混。
+ */
+function killerPieceIdsFor(state: GameState, killerId: string | null | undefined): string[]
+{
+    if (!killerId || !state.players[killerId])
+        return [];
+    if (isStatueKiller(state, killerId)) {
+        const statues = statuePieceIds(state).filter((id) => state.players[id]);
+        return statues.length ? statues : [killerId];
+    }
+    return [killerId];
+}
+
+/** 当前这名杀手（`state.killerId`）名下的全部棋子 */
+export function currentKillerPieceIds(state: GameState): string[]
+{
+    return killerPieceIdsFor(state, state.killerId);
+}
+
+/**
  * 这个杀手是不是「雕像」（看角色 id / 名字）。
  *
  * `killerId` 可选：2v3 有两名杀手，要能指定问的是哪一个 ——
@@ -507,6 +573,25 @@ export function switchMainStatue(state: GameState, toStatueId: string): boolean
      */
     state.killerId = to.id;
     return true;
+}
+
+/**
+ * 【雕像】**这个杀手棋子是雕像局里的"原始棋子"吗**（局里已经有它的雕像替身了）。
+ *
+ * 用户口径：「雕像局在幸存者视角就**只有 4 个杀手**，不应多一个」、
+ * 「主雕像就代表原始棋子，或者在雕像局把这个原始棋子**隐藏**」。
+ *
+ * 所以雕像局里：
+ *  - 原始棋子的 `roomId` 被置空（不在任何地点 → 不会被"遍历杀手棋子"的判定
+ *    当成"杀手在此"，也不会被画成立绘）；
+ *  - 状态（手牌 / 力量 / 等级）本来就挂在主雕像那一份上，原始棋子只是个空壳。
+ *
+ * ⚠ **只认这个棋子自己的雕像替身**（`${p.id}__statueN`）——
+ * 2v3 里另一名杀手的原始棋子**不受影响**。
+ */
+export function isStatueGhostPiece(state: GameState, p: PlayerState): boolean {
+    if (p.faction !== 'killer' || p.statueIndex != null) return false;
+    return (state.statueIds ?? []).some((id) => id.startsWith(`${p.id}__statue`));
 }
 
 /**
@@ -784,6 +869,15 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
     const host = createPlayer(hostId, hostName);
     return {
         roomCode,
+        /**
+         * **这一局的唯一标识**（每次"开始新一局"都换一个）。
+         *
+         * 用途：杀手视角的"手动摆放幸存者立绘"是按它对客户端本地缓存的 ——
+         * 「重新开始」时房间码和棋子 id 都不变，只按房间码缓存的话
+         * **上一局的摆放会被继承**（换地图时那些房间 id 甚至在新图上不存在），
+         * 表现就是用户报的"开局时幸存者立绘没摆在主要出口"。
+         */
+        matchId: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
         hostId,
         mode: 'multi',
         /** 「分头行动」默认关（大厅里由房主勾选，1对3 / 2对3 才有效） */
@@ -792,6 +886,8 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         splitOrderBase: [],
         /** 【变体1】特性卡：默认关；难度默认普通。所有模式都能开，和变体2 互不影响 */
         variant1: false,
+        /** 【变体3】计划卡：默认关（大厅里由房主勾选），相关字段见 `plans.ts` */
+        ...planDefaults(),
         traitDifficulty: 'normal',
         traitById: {},
         traitPool: { survivor: [], killer: [] },
@@ -879,7 +975,8 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         encounter: null,
         winner: null,
         winReason: null,
-        logs: [{ t: Date.now(), text: `房间 ${roomCode} 已创建。` }],
+        /** ⚠ 带上 `round: 0`（大厅阶段）—— 每条战报都有回合号，"本大回合"那块才好筛 */
+        logs: [{ t: Date.now(), text: `房间 ${roomCode} 已创建。`, round: 0 }],
         pendingMoveRange: null,
         pendingCardSpeed: null,
         pendingItemDiscard: null,
@@ -933,6 +1030,7 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         killerRemovedPermanently: [],
         killerLevelPowerGain: 0,
         pendingPassagePick: null,
+        pendingPassageRoom: null,
     pendingDiscardRemove: null,
         pendingAcidPick: false,
         coreMarkers: [],
@@ -1240,7 +1338,7 @@ export function activePlayerId(state: GameState) {
             return pending[0] ?? null;
         }
         if (enc.step === 'flee')
-            return enc.fleeQueue[0] ?? null;
+            return enc.targetId ?? pendingFleeIds(state)[0] ?? null;
     }
     return null;
 }
@@ -1356,6 +1454,15 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
             return action.actorPlayerId;
         }
         /**
+         * 【变体3】计划能力：也认 `actorPlayerId` ——
+         * 「額外行動」在额外行动窗口里是**按每名幸存者**列按钮的
+         * （单人热座 / 共享操控下一个人管多名幸存者），不认这个参数就会
+         * 一律算到行动顺序第一个幸存者头上。
+         */
+        if (action.type === 'usePlanAbility' && action.actorPlayerId && operatedBy(action.actorPlayerId)) {
+            return action.actorPlayerId;
+        }
+        /**
          * 女王的僵尸落点动作：由**杀手**的操控者执行。
          */
         if (action.type === 'confirmQueenMove' ||
@@ -1447,9 +1554,19 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
                 return pending;
         }
         if (action.type === 'encounterFlee' && state.encounter?.step === 'flee') {
-            const fid = state.encounter.fleeQueue[0];
+            /**
+             * ⚠ **（甲）撤离先选人**：只有**被选中那个人**的操控者能发撤离动作。
+             * 以前这里取的是 `fleeQueue[0]`，现在取 `targetId`（名单点出来的）。
+             */
+            const fid = state.encounter.targetId;
             if (fid && operatedBy(fid))
                 return fid;
+        }
+        /** （甲）撤离名单：点谁撤离就解析成"那个人"（权限交给 `pickFleeSurvivor` 那一支校验） */
+        if (action.type === 'pickFleeSurvivor' && state.encounter?.step === 'flee') {
+            const wanted = state.players[action.targetPlayerId];
+            if (wanted && operatedBy(wanted.id))
+                return wanted.id;
         }
         const active = activePlayerId(state);
         if (active && operatedBy(active))
@@ -1716,7 +1833,13 @@ export function advanceSplitFirst(state: GameState): void {
     state.splitFirstId = alive[(idx + 1) % alive.length] ?? null;
 }
 
-export function startRound(state: GameState) {    /**
+export function startRound(state: GameState) {
+    /**
+     * 【变体3】新的大回合开始：重置"本回合已经推进过进度"
+     * （规则：**每个大回合最多推进一个进度**）。
+     */
+    onPlanRoundStart(state);
+    /**
      * **开局准备步骤**（都在幸存者第一个大回合开始**之前**，顺序固定）：
      *   ① 雕像：选择主雕像（**选完就锁定，之后不能再改**）
      *   ② 女猎手：布下 4 个猎手陷阱
@@ -1771,7 +1894,11 @@ export function startRound(state: GameState) {    /**
          */
         state.pendingTraitBlockades <= 0
     ) {
-        runUpgrade(state);
+        /**
+         * ⚠ 走**统一入口**：墓穴地图下 `runUpgrade` 第一次只会记下"确认之后要坍塌"
+         * （等级不涨、确认面板也不挂），必须补跑一次 —— 见 `upgradeKillerWithCollapse`。
+         */
+        upgradeKillerWithCollapse(state);
         if (
             state.pendingEvolutionAck ||
             state.pendingStatueEvoSwitch ||
@@ -1833,6 +1960,12 @@ export function startRound(state: GameState) {    /**
         applySplitTurnOrder(state);
     }
     state.round += 1;
+    /**
+     * 【变体3】**幸存者回合开始时**的两条获胜条件（火箭發射器 / 被封印的傳送門）。
+     * 放在 `round += 1` 之后：那时候"上一回合的遭遇计数"还在（这一函数读完会归零）。
+     */
+    if (checkPlanRoundStartWins(state))
+        return;
     /**
      * **警车推进**（用户规则）：
      *  - 修理完成时已经**立即**放到 `rescueWaitRounds`（见 `maybeArmRescue`）
@@ -2163,6 +2296,15 @@ export function setupStatues(state: GameState, killerPiece: PlayerState) {
     }
     // 主雕像默认 = 1 号，并把杀手状态搬过去
     state.killerId = state.statueIds[0];
+    /**
+     * **把原始棋子藏起来**（用户口径：「主雕像就代表原始棋子，或者在雕像局
+     * 把这个原始棋子隐藏」）：位置清空 → 它不再算"杀手在此"、不画立绘，
+     * 幸存者视角就只剩 4 尊雕像。
+     *
+     * ⚠ 只动**传进来的这个杀手**的棋子 —— 2v3 里另一名杀手的原始棋子
+     * 没有自己的雕像替身，位置照旧。
+     */
+    if (isStatueGhostPiece(state, killerPiece)) killerPiece.roomId = null;
 }
 
 /**
@@ -2198,7 +2340,8 @@ export function onSurvivorDown(state: GameState, survivorId: string) {
     /** 已经 5 级了就不再喊"进化一级"（`runUpgrade` 到顶会直接返回） */
     if (state.killerLevel < 5)
         log(state, '有一名幸存者倒下，**杀手进化一级**（分头行动：死人就升级，不看死因）。', 'all', true);
-    runUpgrade(state);
+    /** ⚠ 统一入口：墓穴下要补跑一次才会挂出确认面板（分头行动也可能在墓穴里死人） */
+    upgradeKillerWithCollapse(state);
     /** ⚠ 顺序：先升级、再判收尾 —— 这样"最后一个被杀"时等级也照样记上 */
     checkSplitEnd(state);
 }
@@ -2441,6 +2584,12 @@ export function finishStartCommon(state: GameState, content: GameContent) {
     state.pendingCollapseMoves = null;
     setupRelicRoom(state, (content.cards.relic ?? []).map((c) => c.id));
     state.round = 0;
+    /**
+     * 【变体3】计划卡：**排在其它同时机的动作之后**给幸存者方发 2 张
+     * （用户口径："游戏开始时，排在其它同时机的动作之后"）。
+     * 必须在 `startRound` 之前 —— 第 1 个幸存者大回合就可能要选计划。
+     */
+    setupPlanCards(state, content);
     /** 把镜像切回当前行动的那个杀手，紧接着 `startRound` 要用它的状态 */
     if (state.killerId && state.killers[state.killerId])
         loadKillerToMirror(state, state.killerId);
@@ -2462,14 +2611,441 @@ setTraitDraftDoneHandler((state: GameState) => {
     startRound(state);
 });
 setTraitSetupHandler((state: GameState) => applyVariant1Setup(state));
+/**
+ * 【变体3】把"某条计划能力现在生效吗"注入给 `effects.ts`
+ * （那边要判"修理不响 / 额外修理标记"，但不能反过来 import `plans.ts`）。
+ */
+setPlanImplChecker((state, impl) => planHasImpl(state, impl));
+/**
+ * 【变体3】**计划能力的具体效果**。
+ *
+ * `plans.ts` 只做"通用部分"（扣代价、记"用过了"、按 `mapMarker` 放标记、写一条战报），
+ * 具体做什么由这里按 `impl` 分派 —— 因为只有 engine 认识修理 / 搜索牌库 / 钥匙 / 中毒
+ * / 遭遇 / 胜负这一套。
+ *
+ * ⚠ 这里**尽量不抛错**：`applyPlanAbility` 已经先把代价扣掉了，抛错会让"付了钱没效果"。
+ * 条件不满足就写一条战报说明。
+ */
+setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
+    const ab = plan.abilities[index];
+    if (!ab)
+        return;
+    const actor = actorId ? state.players[actorId] : null;
+    const who = actor?.name ?? '幸存者';
+    switch (ab.impl) {
+        /**
+         * 蜂鳴器 ① / 爆炸陷阱 ①：在**你的地点**放置计划标记。
+         * 标记已经由 `plans.ts` 的通用部分按 `mapMarker` 放好了，这里不用重复做。
+         */
+        case 'placePlanMarker':
+            break;
+        /** 蜂鳴器 ②：**在带有计划标记的地点**发出响声（不限次数） */
+        case 'noiseOnPlanMarker': {
+            if (!actor?.roomId) {
+                log(state, '【变体3】蜂鳴器：你不在任何地点，发不出响声。', 'survivor');
+                break;
+            }
+            if (!planMarkersAt(state, actor.roomId)) {
+                log(state, `【变体3】蜂鳴器：你所在的「${roomName(state, actor.roomId)}」没有计划标记。`, 'survivor');
+                break;
+            }
+            pushNoise(state, actor.roomId, false, { byPlayerId: actor.id, source: 'item' });
+            /**
+             * ⚠ **计划的事永远不写进杀手战报**（用户口径：「计划能力之类永远不告诉杀手，
+             * 只有在游戏因此胜利时告诉杀手原因」）—— 响声本身杀手在响声阶段看得到，
+             * 但"这是计划能力弄出来的"只有幸存者知道。
+             */
+            log(state, `【变体3】${who} 在带计划标记的「${roomName(state, actor.roomId)}」发出响声（响声双方都听得到，但原因只说给幸存者）。`, 'survivor');
+            break;
+        }
+        /** 自製無線電：**立刻完成修理**，并在你的地点发出响声 */
+        case 'finishRepairNow': {
+            const before = state.repairProgress;
+            if (before >= state.rules.repairNeeded) {
+                log(state, '【变体3】自製無線電：无线电已经修好了。', 'survivor');
+                break;
+            }
+            addRepairProgress(state, state.rules.repairNeeded);
+            announceRepairIfJustFinished(state, before);
+            maybeArmRescue(state);
+            if (actor?.roomId)
+                pushNoise(state, actor.roomId, false, { byPlayerId: actor.id, source: 'item' });
+            /**
+             * ⚠ 计划战报只给幸存者（用户口径）。
+             * 「修理完成 / 警车倒数」那几条是**游戏状态变化**，照旧双方都发
+             * （`announceRepairIfJustFinished` / `maybeArmRescue` 自己会写）。
+             */
+            log(state, `【变体3】自製無線電：修理进度直接拉满（${state.repairProgress}/${state.rules.repairNeeded}），并在「${actor?.roomId ? roomName(state, actor.roomId) : '?'}」发出响声。`, 'survivor');
+            checkSurvivorWin(state);
+            break;
+        }
+        /** 萬能鑰匙：从**线索（搜索）牌库底部**取出钥匙 */
+        case 'spendToolboxForKey': {
+            const deck = state.searchDeck ?? [];
+            let idx = -1;
+            for (let i = deck.length - 1; i >= 0; i -= 1) {
+                const card = state.cardById[deck[i]!];
+                if (card && isKeyCard(card)) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx < 0) {
+                log(state, '【变体3】萬能鑰匙：线索牌库里已经没有钥匙了。', 'survivor');
+                break;
+            }
+            const [cardId] = state.searchDeck.splice(idx, 1);
+            const added = addKeys(state, 1, actor?.id);
+            log(
+                state,
+                `【变体3】萬能鑰匙：${who} 从线索牌库底部取出「${state.cardById[cardId!]?.name ?? cardId}」——` +
+                    (state.split
+                        ? `钥匙由他单独保管（共 ${actor?.keys ?? 0} 把）。`
+                        : `钥匙上架（${state.keysCollected}/${state.rules.keysNeeded}，本次 +${added}）。`),
+                'survivor',
+            );
+            checkSurvivorWin(state);
+            break;
+        }
+        /** 古代箱子：从搜索牌库抽 3 张（代价"弃一个古代护符"已由通用部分扣掉） */
+        case 'spendAmuletDraw3': {
+            if (!actor) {
+                log(state, '【变体3】古代箱子：找不到发动者。', 'survivor');
+                break;
+            }
+            for (let i = 0; i < 3; i += 1)
+                planDrawSearchCard(state, actor, '古代箱子');
+            checkSurvivorWin(state);
+            break;
+        }
+        /** 反擊！暗中伏擊：**完成计划时**立刻在幸存者地点放置计划标记 */
+        case 'placePlanMarkerAtSurvivors': {
+            const rooms = [...new Set(aliveSurvivorsOf(state).map((s) => s.roomId!).filter(Boolean))];
+            if (!rooms.length) {
+                log(state, '【变体3】暗中伏擊：场上没有幸存者，放不了计划标记。', 'survivor');
+                break;
+            }
+            for (const roomId of rooms) addPlanMarker(state, roomId);
+            log(
+                state,
+                `【变体3】暗中伏擊：在 ${rooms.map((r) => `「${roomName(state, r)}」`).join('、')} 放置了计划标记。`,
+                'survivor',
+            );
+            break;
+        }
+        /**
+         * 現場研究：**額外行動：【移動】×2**。
+         *
+         * 「額外行動」= 不占这个幸存者的一般行动名额 —— 我们这边的一般行动名额
+         * 是靠 `mainActionUsed` / 行动类型按钮控制的，所以直接给**本小回合
+         * 移动力 +2**（客户端可达范围 `legalMoves` 是按 `moveLeft` 算的，会自动跟上）。
+         */
+        case 'extraMove12': {
+            if (!actor) {
+                log(state, '【变体3】現場研究：找不到发动者。', 'survivor');
+                break;
+            }
+            actor.moveLeft = (actor.moveLeft ?? 0) + 2;
+            log(state, `【变体3】現場研究：${who} 本小回合额外获得 2 格移动力（现在还能走 ${actor.moveLeft} 格）。`, 'survivor');
+            break;
+        }
+        /**
+         * 秘術草藥：**（在螺旋地点）額外行動：【治療】並移除目標身上所有「恐懼」**。
+         *
+         * ⚠ 用户口径（2024 澄清）：卡面写的是**移除「恐懼」**（不是中毒）——
+         * "移除中毒"只是**治疗自带的**（本作规则：受到治疗就移除中毒标记，
+         * 见 `clearPoisonOnHeal`），不是这条能力单独的条款。
+         *
+         * 目标 = **发动者自己**（卡面没写"选目标"，对比情報分享的 `pickTarget`）。
+         */
+        case 'healClearFear': {
+            if (!actor) {
+                log(state, '【变体3】秘術草藥：找不到发动者。', 'survivor');
+                break;
+            }
+            const poisoned = (state.poisoned ?? []).includes(actor.id);
+            const hurt = actor.hp < actor.maxHp;
+            const feared = (actor.fear ?? 0) > 0 || actor.overFear === true;
+            if (!hurt && !poisoned && !feared) {
+                log(state, `【变体3】秘術草藥：${who} 既没受伤、没有中毒，也没有恐惧，没有可治的。`, 'survivor');
+                break;
+            }
+            /** `clearsFear = true`：允许"满血但有恐惧"的人成为合法治疗目标 */
+            applyHeal(state, actor.id, 1, true);
+            /** 治疗自带的：移除中毒标记 */
+            clearPoisonOnHeal(state, actor.id);
+            if (feared) {
+                actor.fear = 0;
+                actor.overFear = false;
+            }
+            log(
+                state,
+                `【变体3】秘術草藥：${who} 在螺旋地点服用草药（${hurt ? `生命恢复到 ${actor.hp}/${actor.maxHp}` : '本来就满血'}）` +
+                    `${feared ? '，并移除了身上所有恐惧' : ''}` +
+                    `${poisoned ? '，治疗同时移除了中毒标记' : ''}。`,
+                'survivor',
+            );
+            break;
+        }
+        /**
+         * 通道調查 ②：**特殊行動：移動通過一條秘密通道**。
+         *
+         * 和「手電筒 / 煤油燈」走的是同一条路（`trySecretPassage`）——
+         * 差别只在：不用道具、不限次数，但**占这个幸存者的一般行动**（卡面写的是"特殊行動"）。
+         *
+         * 目的地由界面点（`usePlanAbility` 带 `toRoomId` 进来）；没带就是
+         * 界面还没选，`usePlanAbility` 那边会先把候选挂到 `pendingPlanPassage` 上。
+         */
+        case 'moveThroughPassage': {
+            if (!actor) {
+                log(state, '【变体3】通道調查：找不到发动者。', 'survivor');
+                break;
+            }
+            const toRoomId = target?.toRoomId ?? null;
+            if (!toRoomId) {
+                log(state, '【变体3】通道調查：请先选择要穿过的秘密通道出口。', 'survivor');
+                break;
+            }
+            const ends = passageNeighborsFor(state, actor.roomId);
+            if (!ends.includes(toRoomId)) {
+                log(state, `【变体3】通道調查：从「${actor.roomId ? roomName(state, actor.roomId) : '?'}」走不到那个出口。`, 'survivor');
+                break;
+            }
+            const fromRoom = actor.roomId;
+            trySecretPassage(state, actor.id, toRoomId);
+            actor.mainActionUsed = true;
+            actor.moveLeft = 0;
+            log(
+                state,
+                `【变体3】通道調查：${who} 用计划找到的通道从「${fromRoom ? roomName(state, fromRoom) : '?'}」移动到「${roomName(state, toRoomId)}」（占一般行动）。`,
+                'survivor',
+            );
+            checkSurvivorWin(state);
+            advanceAfterSurvivor(state, actor.id);
+            break;
+        }
+        /**
+         * 情報分享：**完成计划时，选择一名幸存者从搜索牌库抽取一张牌**。
+         *
+         * 两步走：先由"完成计划时在场的那个幸存者"选人（`pendingPlanTarget`），
+         * 选完带着 `targetPlayerId` 再进来一次，那时才真的抽牌。
+         */
+        case 'onCompleteDrawOneForOne': {
+            const pickId = target?.targetPlayerId ?? null;
+            const pick = pickId ? state.players[pickId] : null;
+            if (pick && pick.alive && pick.faction === 'survivor') {
+                planDrawSearchCard(state, pick, '情報分享');
+                checkSurvivorWin(state);
+                break;
+            }
+            if (!actor) {
+                log(state, '【变体3】情報分享：找不到发动者，改为由第一名幸存者抽牌。', 'survivor');
+                const fallback = aliveSurvivorsOf(state)[0];
+                if (fallback)
+                    planDrawSearchCard(state, fallback, '情報分享');
+                break;
+            }
+            const cands = aliveSurvivorsOf(state).map((s) => s.id);
+            if (cands.length === 0) {
+                log(state, '【变体3】情報分享：场上没有幸存者，抽不了牌。', 'survivor');
+                break;
+            }
+            state.pendingPlanTarget = { planId: plan.id, index, chooserId: actor.id, candidates: cands };
+            log(
+                state,
+                `【变体3】情報分享：由 ${who} 选择一名幸存者，从搜索牌库抽取一张牌` +
+                    `（${aliveSurvivorsOf(state).map((s) => s.name).join('、')}）。`,
+                'survivor',
+            );
+            break;
+        }
+        /** 反擊！奧術封印：**完成计划时**在螺旋地点发出响声 */
+        case 'noiseAtSpiral': {
+            const rooms = (state.map.rooms ?? [])
+                .filter((r) => (r.tags ?? []).includes('special-spiral'))
+                .map((r) => r.id);
+            if (!rooms.length) {
+                log(state, '【变体3】奧術封印：这张地图没有螺旋地点。', 'survivor');
+                break;
+            }
+            for (const roomId of rooms)
+                pushNoise(state, roomId, false, { byPlayerId: actor?.id, source: 'item' });
+            log(state, `【变体3】奧術封印：在螺旋地点「${rooms.map((r) => roomName(state, r)).join('、')}」发出响声（原因只说给幸存者）。`, 'survivor');
+            break;
+        }
+        default:
+            /** 还没落地的能力：明说，别静默吃掉（免得玩家以为发动成功却没效果） */
+            log(state, `【变体3】计划能力「${ab.text}」的效果还在实现中（${ab.impl}）。`, 'survivor');
+            break;
+    }
+});
+/**
+ * 【变体3】**计划自带的"立刻获胜"条件** —— 达成时直接结束对局。
+ *
+ * 卡面文字都是「…倖存者立刻獲勝！」，所以这里只判"这条 `impl` 的计划是否已完成"
+ * （`planImplActive` 只认**已完成的那张计划**），不判是谁触发的。
+ */
+function planWinSurvivors(state: GameState, planLabel: string, reason: string): void {
+    if (state.phase === 'gameOver')
+        return;
+    state.winner = 'survivors';
+    state.winReason = reason;
+    state.phase = 'gameOver';
+    log(state, `【变体3】幸存者胜利：计划「${planLabel}」—— ${reason}`, 'all', true);
+}
+/** 某条地点的 tags 里有没有这个标记 */
+function roomHasTag(state: GameState, roomId: string | null | undefined, tag: string): boolean {
+    if (!roomId)
+        return false;
+    const room = (state.map.rooms ?? []).find((r) => r.id === roomId);
+    return Boolean(room && (room.tags ?? []).includes(tag));
+}
+/**
+ * 【变体3】**爆炸陷阱**：杀手【搜索】带计划标记、且该地点没有幸存者 → 幸存者立刻获胜。
+ *
+ * 必须由"搜索"这条路调用（主流程的搜索、快进里的搜索都要调），
+ * 别的移动经过不算。
+ */
+function checkPlanBombTrapOnKillerSearch(state: GameState, roomId: string | null | undefined): boolean {
+    if (!roomId || state.phase === 'gameOver')
+        return false;
+    if (!planImplActive(state, 'winOnKillerSearchMarkedRoom'))
+        return false;
+    if (!planMarkersAt(state, roomId))
+        return false;
+    if (survivorsInRoom(state, roomId).length > 0)
+        return false;
+    planWinSurvivors(
+        state,
+        '爆炸陷阱',
+        `杀手搜索了带计划标记、且没有幸存者的「${roomName(state, roomId)}」。`,
+    );
+    return true;
+}
+/**
+ * 【变体3】**幸存者回合开始时**的两条获胜条件：
+ *  - 火箭發射器：所有幸存者都在**同一个**与杀手相邻的地点，且**上一回合没有发生遭遇**
+ *  - 被封印的傳送門：所有幸存者都在**螺旋地点**，且队伍物品栏里有秘密地图＋手电筒＋古代护符
+ *
+ * 返回 true = 已经结束对局（调用方要停手）。
+ */
+function checkPlanRoundStartWins(state: GameState): boolean {
+    /** 「上一個回合中沒有發生遭遇」：本计数器在每个大回合开头读一次、然后归零 */
+    const hadEncounterLastRound = (state.encountersThisRound ?? 0) > 0;
+    state.encountersThisRound = 0;
+    if (state.phase === 'gameOver')
+        return true;
+    const alive = aliveSurvivorsOf(state);
+    if (alive.length === 0)
+        return false;
+    /** ① 火箭發射器 */
+    if (planImplActive(state, 'winOnAllAdjacentNoEncounter') && !hadEncounterLastRound) {
+        const rooms = [...new Set(alive.map((s) => s.roomId).filter(Boolean))] as string[];
+        const killer = state.killerId ? state.players[state.killerId] : null;
+        if (rooms.length === 1 && killer?.roomId) {
+            const here = rooms[0]!;
+            /** 「與殺手相鄰」= 地图上的相邻地点（不管封堵/潜行那一套） */
+            const adjacent = mapAdjacentRooms(state.map, killer.roomId).includes(here);
+            if (adjacent) {
+                planWinSurvivors(
+                    state,
+                    '火箭發射器',
+                    `所有幸存者都在与杀手相邻的「${roomName(state, here)}」，且上一回合没有发生遭遇。`,
+                );
+                return true;
+            }
+        }
+    }
+    /** ② 被封印的傳送門：全员都在螺旋地点，队伍里齐了秘密地图/手电筒/古代护符 */
+    if (planImplActive(state, 'winOnSpiralWithItems')) {
+        const allAtSpiral = alive.every((s) => roomHasTag(state, s.roomId, 'special-spiral'));
+        if (allAtSpiral) {
+            const owners: Record<string, string[]> = { map: [], flashlight: [], amulet: [] };
+            for (const s of alive) {
+                for (const itemId of Object.keys(owners)) {
+                    if ((s.items?.[itemId] ?? 0) > 0)
+                        owners[itemId]!.push(s.name);
+                }
+            }
+            const missing = Object.keys(owners).filter((itemId) => owners[itemId]!.length === 0);
+            if (missing.length === 0) {
+                const label: Record<string, string> = { map: '秘密地图', flashlight: '手电筒', amulet: '古代护符' };
+                planWinSurvivors(
+                    state,
+                    '被封印的傳送門',
+                    `所有幸存者都在螺旋地点，且队伍物品栏里有` +
+                        `${Object.keys(owners).map((id) => `${label[id]}（${owners[id]!.join('、')}）`).join('、')}。`,
+                );
+                return true;
+            }
+        }
+    }
+    return false;
+}
+/**
+ * 【变体3】从搜索牌库抽 1 张并按"搜索抽牌"的规矩结算
+ * （钥匙上架 / 物品进背包 / 其它牌跑效果后进弃牌堆），带响声的那张照响。
+ *
+ * 和乔治「聪明绝顶 B」同一套口径，抽出来给计划能力复用。
+ */
+function planDrawSearchCard(state: GameState, p: PlayerState, reason: string): void {
+    const cardId = drawSearchCard(state);
+    if (!cardId) {
+        log(state, `【变体3】${reason}：搜索牌库已空，没有抽到牌。`, 'survivor');
+        return;
+    }
+    const card = state.cardById[cardId];
+    log(state, `【变体3】${reason}：${p.name} 抽取「${card?.name ?? cardId}」。`, 'survivor');
+    if (card && isKeyCard(card)) {
+        const added = addKeys(state, 1, p.id);
+        log(
+            state,
+            state.split
+                ? `${p.name} 获得 ${added} 把钥匙（单独保管，共 ${p.keys ?? 0} 把）。`
+                : added > 0
+                    ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
+                    : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
+            'survivor',
+        );
+    }
+    else if (card) {
+        const gains = card.effects.filter((e) => e.op === 'gainItem');
+        if (gains.length) {
+            runEffects({ state, actorId: p.id, effects: gains });
+        }
+        else {
+            runEffects({ state, actorId: p.id, effects: card.effects.filter((e) => e.op !== 'noise') });
+            discardUniqueCard(state, cardId, 'search');
+        }
+    }
+    if (card?.makesNoise && p.roomId)
+        pushNoise(state, p.roomId, false, { byPlayerId: p.id, source: 'item' });
+}
+/** 场上还活着的幸存者（计划能力里常要按位置判定） */
+function aliveSurvivorsOf(state: GameState): PlayerState[] {
+    return Object.values(state.players).filter(
+        (x) => x.faction === 'survivor' && x.alive && Boolean(x.roomId),
+    );
+}
+/**
+ * 让 `traits.ts` 能问"**当前这名杀手**手上有哪些棋子"。
+ *
+ * 雕像局的特性卡挂在主雕像那一份上（一局只发一份，常驻效果只结算一次），
+ * 所以"某尊雕像有没有某特性"要落到这一份卡上；但**只在本杀手名下找** ——
+ * 2对3 里不能把另一名杀手的特性算进来（用户明确要求）。
+ */
+setKillerScopeHandler((state: GameState) => currentKillerPieceIds(state));
 
 /**
- * 【变体1】**升级到某一级之后的特性追加效果**（09 慢热杀手 / 08 压抑怒火）。
+ * 【变体1】**升级到某一级之后的特性追加效果**（09 慢热杀手 / 08 压抑怒火 /
+ * 17 压迫威慑 / 18 狡诈猎手）。
  *
- * 调用时机：`settleEvolutionForCurrentKiller` 把这一级结算完之后
- * （力量、锁定牌、超限弃牌都处理过了）。返回一个更大的等级 = 继续跳级结算。
+ * ⚠ **时机（用户口径）**：这是"进化相关的特性卡效果"，
+ * 排在 **确认 → 坍塌 →（这里）→ 执行进化效果** 的第三步，
+ * 所以在 `evolutionTraitStage` 里调用，而不是在结算阶段。
+ * 返回一个更大的等级 = 继续跳级结算。
  */
-setAfterLevelSettledHandler((state: GameState, level: number) => {
+export function revealEvolutionTraits(state: GameState, level: number): number | undefined {
     if (!state.variant1)
         return;
     const kid = state.killerId;
@@ -2528,7 +3104,39 @@ setAfterLevelSettledHandler((state: GameState, level: number) => {
         );
     }
     return undefined;
-});
+}
+
+/**
+ * **③ 进化相关的特性卡效果**（用户口径的完整顺序）：
+ *   ① 确认进化效果
+ *   ② **双方坍塌结算**（只有**墓穴**地图才有 —— 由 `interceptEvolutionForCollapse`
+ *      的 `isCrypt` 判定保证；非墓穴地图这一步自然跳过）
+ *   ③ **进化相关的特性卡效果**（只有开了**变体1**才有 —— `revealEvolutionTraits`
+ *      里第一句就是 `if (!state.variant1) return;`）
+ *   ④ 执行进化效果（力量 / 选卡 / 选牌 / 选主雕像 / 选地点 / 入手 / 弃牌）
+ *
+ * ⚠ **特性 08「压抑怒火」不在这里跳级**（用户口径）：
+ * 它要的是"**先执行 3 级进化效果**，然后由于 08 再走一轮 4 级"——
+ * 也就是连 4 级那轮的坍塌 / 特性 / 效果都要完整走一遍。
+ * 所以跳级在 `settleConfirmedEvolution` 的**末尾**才发起。
+ *
+ * @returns 是否挂出了"要玩家先选"的特性作业（如 18 的封堵选门、17 的选惊吓目标）
+ */
+function evolutionTraitStage(state: GameState, level: number): boolean {
+    /**
+     * ⚠ **同一级只跑一次**（幂等守卫）。
+     *
+     * 两处都会调它：`ackEvolution`（正常路径）和 `advanceEvolutionAfterChoice`
+     * （坍塌打断后的补跑）。没有这道守卫的话，坍塌走完补跑时会**再结算一遍**
+     * 特性（09 慢热杀手会重复 +1 力量）。
+     */
+    if (state.evolutionTraitStageAtLevel === level)
+        return Boolean(state.pendingTraitVictim) || Boolean(state.pendingBlockadeJob);
+    state.evolutionTraitStageAtLevel = level;
+    revealEvolutionTraits(state, level);
+    /** 17 要杀手自己选惊吓目标；18 要杀手点地图选门 */
+    return Boolean(state.pendingTraitVictim) || Boolean(state.pendingBlockadeJob);
+}
 
 /**
  * 【变体1】杀手特性 11「恐惧迸发」：**当你伤害任何幸存者时，【惊吓】所有幸存者**。
@@ -2542,7 +3150,16 @@ setOnSurvivorDamagedHandler((state: GameState, targetId: string, sourceId?: stri
     const src = sourceId ? state.players[sourceId] : undefined;
     if (src?.faction !== 'killer')
         return;
-    if (!hasTrait(state, src.id, 'trait_k11'))
+    /**
+     * ⚠ **按"造成伤害的那名杀手"查特性**（含他的全部雕像），不要按某一尊棋子查。
+     *
+     * 用户口径：02/11 认"**当前遭遇中的那尊雕像**"，而特性卡一局只发一份、
+     * 挂在主雕像上（这样 12 那种常驻"力量 +1"只结算一次）。
+     * 所以非主雕像打出的伤害也必须能触发它 —— 但又**不能跨到另一名杀手**
+     * （2对3 里两名杀手的特性不能弄混）。
+     */
+    const ownerKillerId = src.statueIndex != null ? (state.killerId ?? src.id) : src.id;
+    if (!killerPieceIdsFor(state, ownerKillerId).some((id) => hasTrait(state, id, 'trait_k11')))
         return;
     const victims = Object.values(state.players).filter((p) => p.faction === 'survivor' && p.alive);
     if (!victims.length)
@@ -2564,6 +3181,16 @@ setOnSurvivorDamagedHandler((state: GameState, targetId: string, sourceId?: stri
 export function applyVariant1Setup(state: GameState): void {
     if (!state.variant1)
         return;
+    /**
+     * ⚠ **先记下"谁该行动"**：下面 ② 会逐个 `switchActiveKiller` 切镜像，
+     * 循环结束时 `state.killerId` 已经变成"最后一个有开局特性的杀手"了。
+     *
+     * 以前收尾写的是 `switchActiveKiller(state, state.killerId)` —— 那时候
+     * `state.killerId` 早被改掉了，"切回原样"其实是切到了别人：
+     * 2对3 里只有**后手**持 14「埋伏等待」时，开局升级就从他开始确认
+     * （用户口径：每轮都该从**先手**开始；`evolution-trait14-2v3.mjs` 抓到的）。
+     */
+    const backKillerId = state.killerId ?? null;
 
     /** ① 幸存者侧：04 持枪证明 */
     for (const p of Object.values(state.players)) {
@@ -2576,6 +3203,16 @@ export function applyVariant1Setup(state: GameState): void {
     }
 
     /** ② 杀手侧：逐个切镜像 */
+    /**
+     * ⚠ **这里是"逐个杀手切镜像"结算的，所以 08 / 09 这类开局效果
+     * 只影响持有者**（用户口径：「只有进化是共同的（2v3 两名杀手一同进化），
+     * 08、14 的其他效果只对持有者有效」）——
+     * 只有 `setupTraitsOf(state, kid)` 非空的那名杀手才会被切进来、
+     * 才会动到他的切片（手牌 / 力量）。队友完全不受影响。
+     *
+     * 对照：**等级**是队伍共享的，所以"一起升级 / 08 的跳级 / 14 的开局等级 2"
+     * 属于进化本身，两人一起生效（见 `runUpgrade`）。
+     */
     const killerIds = (state.killerIds ?? []).filter((kid) => state.killers[kid]);
     for (const kid of killerIds) {
         const list = setupTraitsOf(state, kid);
@@ -2675,9 +3312,9 @@ export function applyVariant1Setup(state: GameState): void {
             }
         }
     }
-    /** 收尾：切回当前行动的那个杀手（`switchActiveKiller` 会存旧读新） */
-    if (state.killerId && state.killers[state.killerId])
-        switchActiveKiller(state, state.killerId);
+    /** 收尾：切回**进来时该行动的那名杀手**（`switchActiveKiller` 会存旧读新） */
+    if (backKillerId && state.killers[backKillerId])
+        switchActiveKiller(state, backKillerId);
 }
 
 /**
@@ -3133,6 +3770,23 @@ export function enterNoiseReport(state: GameState) {
     if (state.phase === 'gameOver')
         return;
     /**
+     * 【变体3】计划卡：**发现阶段结束后、大回合结束前**插一次位置检查
+     * （用户口径）——这里正是发现阶段收尾的公共出口，而且此时 `phase`
+     * 还停在幸存者回合里，符合"仍在幸存者大回合之内"。
+     * 返回 true = 这一步直接分出了胜负（"立刻获胜"类能力）。
+     */
+    if (checkPlanProgress(state))
+        return;
+    /**
+     * 【变体3】「情報分享」完成时要**选一名幸存者抽 1 张**：
+     * 选择期间停在这里（`phase` 还留在幸存者回合，界面才看得到幸存者视角），
+     * 选完由 `pickPlanTarget` 再回到本函数。
+     */
+    if (state.pendingPlanTarget) {
+        state.pendingPlanResume = true;
+        return;
+    }
+    /**
      * 乔治「思维敏捷」：**幸存者大回合结束时**判定一次
      * （用户明确："乔治二技能要在幸存者大回合结束时判定是否达成条件"）。
      *
@@ -3191,6 +3845,7 @@ export function enterDiscovery(state: GameState) {
     state.phase = 'discovery';
     state.lastDiscoveryCardId = null;
     state.discoveryOptions = [];
+    state.discoveryKeepQueue = null;
     state.discoveryActorId = null;
     const alive = state.turnOrder.filter((id) => {
         const pl = state.players[id];
@@ -3268,6 +3923,25 @@ export function fastForwardSurvivors(state: GameState) {
     /** 还剩 2 张时才需要选：直接留第一张 */
     if (state.discoveryOptions.length > 1)
         resolveDiscoveryChoice(state, state.discoveryOptions[0]!);
+    /**
+     * ⚠ **装备溢出还没弃完，就别把阶段推进到响声。**
+     *
+     * 用户报的「单人模式我快进，马尔科物品溢出弃牌时变成了杀手界面」就是这个：
+     * 发现阶段拿到物品 → `enforceInventory` 挂起 `pendingItemDiscard` →
+     * `resolveDiscoveryChoice` 自己 `return` 了（见它内部同一道闸），
+     * 但**快进函数紧接着又自己推进了一次**：这时
+     * `phase === 'discovery' && discoveryOptions.length === 0 && !pendingDiscoveryPick`
+     * 三个条件都为真 → 直接 `enterNoiseReport`。
+     * 于是 `phase = noiseReport`（杀手阶段）+ 马尔科的弃牌还挂着：
+     * 快照把 `you` 换成杀手（`buildSnapshot` 的 viewPiece 那一段），
+     * 客户端 solo 分支命中「响声报告 → 杀手界面」→ 出现
+     * **杀手界面 + 马尔科的弃牌按钮**的错位。
+     *
+     * 闸住之后 phase 留在 `discovery`（幸存者界面），
+     * 弃牌由 `discardItem` 自己收尾调 `enterNoiseReport`（见那一支）。
+     */
+    if (state.pendingItemDiscard)
+        return;
     if (state.phase === 'discovery' && state.discoveryOptions.length === 0 && !state.pendingDiscoveryPick)
         enterNoiseReport(state);
 }
@@ -3285,6 +3959,21 @@ export function fastForwardKiller(state: GameState) {
         throw new Error('杀手不在地图上');
     if (state.encounter)
         throw new Error('遭遇中不能快进');
+    /**
+     * ⚠ **慢速阶段快进 ≠ 搜索**（用户口径：「我在慢速阶段快进怎么会搜索？」）。
+     *
+     * 慢速阶段本来只是"打不打沙漏牌"的可选阶段 —— 快进在这里只该
+     * **跳过出牌、直接结束回合**。以前不管在哪个阶段，快进都把回合**拽回**
+     * "2 次普通行动（原地搜索）"，于是慢速阶段点一下快进就凭空多出两次搜索，
+     * 屋里有人就**直接爆发遭遇**（用户遇到的就是这个）。
+     */
+    if (state.killerTurnStep === 'slow') {
+        if (hasPendingKillerChoice(state))
+            throw new Error('请先完成当前的选择');
+        log(state, '快进：跳过慢速阶段的出牌，直接结束回合。', 'killer');
+        endKillerTurn(state);
+        return;
+    }
     /** 跳过快速 / 特殊阶段，直接给 2 个普通行动 */
     state.killerTurnStep = 'main';
     state.killerMainChoice = 'actions';
@@ -3307,6 +3996,9 @@ export function fastForwardKiller(state: GameState) {
                 ? `${k.name} 发现了 ${victims.length} 名幸存者！`
                 : `${k.name} 搜索房间，没有发现人。`,
         );
+        /** 【变体3】爆炸陷阱在快进里也照样判（和主流程同一条规则） */
+        if (checkPlanBombTrapOnKillerSearch(state, k.roomId))
+            return;
         maybeStartEncounter(state);
         if (state.encounter)
             return;
@@ -3364,17 +4056,59 @@ export function beginDiscoveryDraw(state: GameState, actorId: string) {
         markTraitUsed(state, 'trait_s18');
         log(state, `【变体1】${actor.name}「拾物妙手」：这次发现的**两张都留下**。`, 'survivor');
         const keepIds = [...opts];
-        for (let i = 0; i < keepIds.length; i += 1) {
-            /** 每轮都把候选恢复，绕过 `includes` 校验；只有最后一次才推进流程 */
-            state.discoveryOptions = [...keepIds];
-            state.discoveryKeepBoth = i < keepIds.length - 1;
-            resolveDiscoveryChoice(state, keepIds[i]!);
-            /** 第一张结算时若挂起了安静搜查/背包弃装，就不再继续第二张 */
-            if (state.pendingQuietSearch || state.pendingItemDiscard)
-                break;
-        }
+        /**
+         * ⚠ 记下"还没结算完的那几张"：第一张结算时若挂起了背包弃装 / 安静搜查，
+         * 就先停下来等玩家处理 —— 处理完由 `continueKeepBothDiscovery` 接着结算第二张
+         * （不记队列的话那两张候选会一直挂着、流程卡死）。
+         */
+        state.discoveryKeepQueue = [...keepIds];
+        continueKeepBothDiscovery(state);
         return;
     }
+}
+
+/**
+ * 【变体1】特性 18「拾物妙手」：把"两张都留"里**还没结算的那张**继续结算。
+ *
+ * 被打断的两种情况（都由本函数负责续跑）：
+ *  - 背包满 → `pendingItemDiscard`（`discardItem` 弃完会回来）
+ *  - 发现牌带响声且持有人有「安静搜查」→ `pendingQuietSearch`（答完会回来）
+ *
+ * @returns 是否处理过（false = 当前没有待续的）
+ */
+function continueKeepBothDiscovery(state: GameState): boolean {
+    const queue = state.discoveryKeepQueue;
+    if (!queue?.length)
+        return false;
+    const all = [...queue];
+    while (state.discoveryKeepQueue?.length) {
+        const id = state.discoveryKeepQueue.shift()!;
+        /** 每轮把候选恢复（`resolveDiscoveryChoice` 要按它校验"这张是本次摸到的"） */
+        state.discoveryOptions = [...all];
+        /** 只有最后一次才推进流程 */
+        state.discoveryKeepBoth = state.discoveryKeepQueue.length > 0;
+        resolveDiscoveryChoice(state, id);
+        if (state.pendingItemDiscard || state.pendingQuietSearch)
+            return true;
+    }
+    state.discoveryKeepBoth = false;
+    return true;
+}
+
+/**
+ * 【变体1】特性 18「拾物妙手」的收尾：两张都结算完了（最后一张可能只是被弃装打断）。
+ *
+ * @returns 是否确实是"两张都留"的收尾（false = 当前不是那个场景，调用方按普通流程走）
+ */
+function finishKeepBothDiscovery(state: GameState): boolean {
+    if (state.discoveryKeepQueue == null)
+        return false;
+    state.discoveryKeepQueue = null;
+    state.discoveryKeepBoth = false;
+    state.discoveryOptions = [];
+    if (!state.pendingItemDiscard && !state.pendingQuietSearch)
+        enterNoiseReport(state);
+    return true;
 }
 
 /** 这张发现牌左上角带不带响声（钥匙也吵） */
@@ -3452,9 +4186,16 @@ export function resolveDiscoveryChoice(state: GameState, cardId: string) {
     const options = [...state.discoveryOptions];
     const noisy = options.some((id) => discoveryCardNoisy(state, id));
     const kept = state.cardById[cardId];
-    state.discoveryOptions = [];
+    /**
+     * ⚠ 【变体1】特性 18「拾物妙手」正在"两张都留"（`discoveryKeepQueue != null`）时：
+     *  - **另一张不进弃牌堆**（两张都留下，不能先丢一张再留下）
+     *  - 候选**先不清空**：这一批还没结算完（最后收尾时统一清）
+     */
+    const keepAll = state.discoveryKeepQueue != null;
+    if (!keepAll)
+        state.discoveryOptions = [];
     for (const id of options) {
-        if (id === cardId)
+        if (id === cardId || keepAll)
             continue;
         const rejected = state.cardById[id];
         discardUniqueCard(state, id, 'discovery');
@@ -3964,6 +4705,8 @@ export function finishEncounter(state: GameState) {
      * 未命名【伏擊】只在**那一次**遭遇里能用。
      */
     state.encounterFromRevealSearch = false;
+    /** 这场遭遇是哪尊雕像打的（特性 02/11 要认它）—— 遭遇结束就作废 */
+    state.encounterTriggerPieceId = null;
     const enc = state.encounter;
     clearTrapAfterEncounter(state, enc?.roomId);
     if (state.phase === 'gameOver') {
@@ -3975,10 +4718,9 @@ export function finishEncounter(state: GameState) {
         return;
     }
     /**
-     * 撤离队列：遭遇结束时**还活着、还在这场遭遇所在地点**的幸存者，
-     * 每人在轮到自己的那一步可以走 1 格或留在原地 —— 一人只走一次。
+     * **撤离名单**：遭遇结束时**还活着、还在这场遭遇所在地点**的幸存者。
      * 不直接用 discoveredIds：它是开战那一刻的快照，
-     * 有人在开战效果里倒下、或中途被打倒后，会让队列缺人或顺序不对。
+     * 有人在开战效果里倒下、或中途被打倒后，会让名单缺人或不对。
      */
     const queue = survivorsInRoom(state, enc.roomId).map((s) => s.id);
     if (queue.length === 0) {
@@ -3989,8 +4731,107 @@ export function finishEncounter(state: GameState) {
     }
     enc.fleeQueue = queue;
     enc.step = 'flee';
-    enc.targetId = queue[0] ?? null;
-    log(state, `遭遇结束。${queue.length} 名幸存者依次选择移动 1 格或留在原地。`, 'survivor');
+    /**
+     * ⚠ **（甲）撤离是独立的一套：先选人，再选撤离。**
+     *
+     * 用户口径：「遭遇结束时先弹一个『谁来撤离』的名单让你点，
+     * 选中谁谁才走」——和遭遇里"选下一名遭遇对象"同一种做法。
+     *
+     * 以前这里是"按队列自动来"（`targetId = queue[0]`），于是界面上
+     * 没有"被选中"这一步，玩家点地图时很容易掉进普通移动那一套
+     * （服务端就回「请使用逃离操作」）。
+     *
+     * `targetId = null` 就表示**正在等人点名单**；点了谁，谁才成为 target。
+     */
+    enc.targetId = null;
+    log(
+        state,
+        `遭遇结束。${queue.length} 名幸存者需要依次撤离 —— 请点名单选择先让谁撤离（每人可移动 1 格或留在原地）。`,
+        'survivor',
+    );
+}
+
+/** 这场遭遇里还没撤离、还能被选中的幸存者 */
+export function pendingFleeIds(state: GameState): string[] {
+    const enc = state.encounter;
+    if (!enc || enc.step !== 'flee')
+        return [];
+    return enc.fleeQueue.filter((id) => {
+        const p = state.players[id];
+        return Boolean(p?.alive);
+    });
+}
+
+/** 谁有资格点这份"谁来撤离"的名单（共享操控模式下每个操控者都能点自己的人） */
+export function canPickFleeSurvivor(state: GameState, socketId: string): boolean {
+    const enc = state.encounter;
+    if (!enc || enc.step !== 'flee' || enc.targetId)
+        return false;
+    return pendingFleeIds(state).some((id) => {
+        const p = state.players[id];
+        return p ? controlsPiece(state, socketId, p) : false;
+    });
+}
+
+/**
+ * 名单上点了某个人 → 轮到他撤离。
+ *
+ * 只有**名单里的活人**才能被选；选完由 `encounterFlee` 收尾。
+ */
+export function pickFleeSurvivor(state: GameState, targetId: string): void {
+    const enc = state.encounter;
+    if (!enc || enc.step !== 'flee')
+        throw new Error('当前不是撤离步骤');
+    const target = state.players[targetId];
+    if (!target || target.faction !== 'survivor' || !target.alive)
+        throw new Error('无法选择该幸存者');
+    if (!enc.fleeQueue.includes(targetId))
+        throw new Error('这名幸存者不需要撤离');
+    enc.targetId = targetId;
+    log(state, `轮到 ${target.name} 撤离：点地图选相邻 1 格后确认，或选择留在原地。`, 'survivor');
+}
+
+/**
+ * 一场遭遇的撤离全部走完 → 收拾干净、交回杀手回合。
+ * （撤离期间的收尾只有这一处，`encounterFlee` 和新流程都走它）
+ */
+export function endEncounterAndResumeKiller(state: GameState): void {
+    const enc = state.encounter;
+    if (enc)
+        clearTrapAfterEncounter(state, enc.roomId);
+    state.encounter = null;
+    log(state, '遭遇结束，杀手摸牌后结束回合。');
+    endKillerTurn(state);
+}
+
+/**
+ * 一个人撤离完了 → 名单里去掉他。
+ *
+ *  - 名单空了 → 遭遇结束，杀手摸牌收尾；
+ *  - 还有活人 → **回到"选人"这一步**（`targetId = null`），
+ *    等玩家再点名单上的下一个（用户口径：选中谁谁才走，不按顺序自动来）。
+ */
+export function advanceFleeSelection(state: GameState, doneId?: string | null): void {
+    const enc = state.encounter;
+    if (!enc)
+        return;
+    /**
+     * ⚠ **刚撤离完的那个人必须从名单里去掉** —— 否则名单永远不空，
+     * 遭遇结束不了（这是（甲）改版的第一个 bug，由 `flee-pick-flow.mjs` 抓出来的）。
+     */
+    enc.fleeQueue = enc.fleeQueue.filter((id) => {
+        if (doneId && id === doneId)
+            return false;
+        const p = state.players[id];
+        return Boolean(p?.alive);
+    });
+    enc.targetId = null;
+    const left = pendingFleeIds(state);
+    if (left.length === 0) {
+        endEncounterAndResumeKiller(state);
+        return;
+    }
+    log(state, `还有 ${left.length} 名幸存者要撤离（${left.map((id) => state.players[id]?.name ?? id).join('、')}），请继续选人。`, 'survivor');
 }
 
 /** 打中一个人之后：同地还有人就再选，没有人了就结束遭遇 */
@@ -4303,6 +5144,11 @@ export function startEncounter(state: GameState, roomId: string) {
     if (alive.length === 0)
         return;
     /**
+     * 【变体3】计数：本大回合发生了遭遇（「火箭發射器」要判"上一个回合没有遭遇"）。
+     * 在**大回合开头**读一次就归零，见 `checkPlanRoundStartWins`。
+     */
+    state.encountersThisRound = (state.encountersThisRound ?? 0) + 1;
+    /**
      * **这次遭遇是不是"重现时那一次强制搜索"引发的？**
      * 未命名【伏擊】和谋杀者 2 级的"重现时"都特指**这一次**。
      * 标记在遭遇结束 / 新回合开始时清掉。
@@ -4387,9 +5233,13 @@ export function startEncounter(state: GameState, roomId: string) {
          * ⚠ **顺序（用户明确）：先看杀手取不取消，再看幸存者用不用 12**。
          * 杀手有「玩弄猎物」且还没用掉时，先停下来等他决定；
          * 他**不取消**（或没有这张卡）才轮到幸存者的「英勇阻截」。
+         *
+         * ⚠ **特性归属（用户口径）**：特性卡一局只发一份、挂在**主雕像**上
+         * （这样 12 这种常驻"力量 +1"只结算一次，不会 4 尊各加一次）。
+         * 所以这里按"**当前这名杀手**（含他的全部雕像）"查，而不是按某尊棋子查 ——
+         * 但也不能跨到另一名杀手身上（2对3 里两个杀手的特性不能弄混）。
          */
-        const kid = state.killerId;
-        if (kid && traitAvailable(state, kid, 'trait_k02')) {
+        if (state.killerId && traitAvailableForKiller(state, 'trait_k02')) {
             state.pendingPreyOffer = true;
             log(
                 state,
@@ -4560,6 +5410,20 @@ export function resolveEncounterCombat(state: GameState, diceValues: number[] | 
         otherDefenseBoost += relicShield;
         log(state, `${surv.name} 的遗物「剛毅之盾」生效：本次遭遇防御 +${relicShield}。`, 'all', true);
     }
+    /**
+     * 【变体3】**燃燒瓶**：「每次攻擊僅限一次，你可以**棄掉**一個威士忌酒瓶來 +2 防禦值。
+     * （如果可以，你還能如常使用其他物品來繼續增強自己的防禦）」。
+     *
+     * 用户口径：
+     *  - 酒瓶是**弃置**（在 `confirmWhiskeyDefense` 里已经进弃牌堆了）；
+     *  - **不算使用物品**、**不占防御物品名额** → 所以这里
+     *    **不写进 `otherDefenseBoost`**（不影响威廉「坚韧不拔」/ 特性 05 的 +1），
+     *    也和剛毅之盾、乔治笔记各走各的。
+     */
+    if (enc.whiskeyUsed?.[survId]) {
+        defenseValue += 2;
+        log(state, `【变体3】${surv.name} 弃置的威士忌酒瓶（燃燒瓶）：本次遭遇防御 +2（不算使用物品、不占名额，也不影响坚韧不拔 / 武艺超群）。`, 'survivor');
+    }
     const itemId = enc.defenseItems?.[survId] ?? null;
     if (itemId) {
         /**
@@ -4700,6 +5564,31 @@ export function resolveEncounterCombat(state: GameState, diceValues: number[] | 
     const blocked = defenseValue >= totalAtk;
     if (blocked) {
         log(state, `${surv.name} 完全挡住了攻击（防御 ${defenseValue} ≥ 攻击 ${totalAtk}）。`, 'all', true);
+        /**
+         * 【变体3】反擊三张卡的**防御成立 → 立刻获胜**条件（都在"完全挡住"这一刻判）：
+         *  - 暗中伏擊：防御值**高出杀手力量至少 3 点**
+         *  - 奧術封印：**在螺旋地点**用**長劍**成功防御
+         *
+         * 判完照常走收尾（`finishEncounter` 遇到 `gameOver` 会直接把遭遇收掉）。
+         */
+        if (planImplActive(state, 'winOnDefenseOverPower3') && defenseValue >= totalAtk + 3) {
+            planWinSurvivors(
+                state,
+                '暗中伏擊',
+                `${surv.name} 的防御 ${defenseValue} 高出杀手的力量 ${totalAtk} 达 3 点以上。`,
+            );
+        }
+        else if (
+            planImplActive(state, 'winOnSwordDefenseAtSpiral') &&
+            itemId === 'longsword' &&
+            roomHasTag(state, enc.roomId, 'special-spiral')
+        ) {
+            planWinSurvivors(
+                state,
+                '奧術封印',
+                `${surv.name} 在螺旋地点「${roomName(state, enc.roomId)}」用長劍成功防御（防御 ${defenseValue} ≥ 攻击 ${totalAtk}）。`,
+            );
+        }
         discardFromKillerDeck(state, 2);
         finishEncounter(state);
         return;
@@ -5098,6 +5987,207 @@ function maybeFinishRestart(state: GameState, content: GameContent): boolean {
     return true;
 }
 
+/**
+ * **坍塌的逐人走位还没走完** → 进化流程先别往下走（用户口径：
+ * 「坍塌结算后才执行进化效果」）。
+ */
+function collapseStillResolving(state: GameState): boolean {
+    return Boolean(state.pendingCollapseMoves?.currentId);
+}
+
+/**
+ * 坍塌走完之后的接回点：如果这次进化的坍塌还在等 / 刚走完，
+ * 就把进化流程接着推下去（选卡 / 结算）。
+ */
+setCollapseDoneHandler((state: GameState) => {
+    if (state.pendingEvolutionAck)
+        advanceEvolutionAfterChoice(state);
+});
+
+/**
+ * **进化「要你选的东西」选完一项之后**接着走。
+ *
+ * 顺序（用户口径）：确认 → 坍塌 → 特性 → **执行进化效果**。
+ * 这里负责"执行进化效果"里那些需要玩家选的项：选完一项再问下一项，
+ * 全都问完才做实际结算（力量 / 入手 / 弃牌 / 换主雕像）。
+ */
+function advanceEvolutionAfterChoice(state: GameState): void {
+    if (!state.pendingEvolutionAck)
+        return;
+    /**
+     * ⚠ **坍塌还没走完就先等着**（用户口径：坍塌结算后才执行进化效果）。
+     * 走完那一刻会由 `setCollapseDoneHandler` 再调回这里。
+     */
+    if (collapseStillResolving(state))
+        return;
+    /** 特性作业（17 选惊吓目标 / 18 选门）还没做完 → 继续等它 */
+    if (state.pendingTraitVictim || state.pendingBlockadeJob)
+        return;
+    /**
+     * ③ **进化相关的特性卡**（变体1）。
+     *
+     * ⚠ **这里必须补跑一次**：确认时如果坍塌挂出了"轮流走一步"的队列，
+     * `ackEvolution` 会在 ② 之后 `break` 掉，**③④ 都还没跑**；
+     * 坍塌走完由本函数接手。以前这里直接跳到 ④，
+     * 于是"墓穴 + 坍塌有人被压"时**进化类特性整段丢失**
+     * （09 慢热杀手少 +1 力量 —— `evolution-order-2v3-crypt.mjs` 抓到的）。
+     *
+     * 幂等由 `evolutionTraitStage` 自己的等级守卫保证（确认时跑过就不重复）。
+     */
+    if (evolutionTraitStage(state, state.killerLevel))
+        return;
+    if (advanceEvolutionChoices(state))
+        return;
+    settleConfirmedEvolution(state);
+}
+
+/**
+ * **确认之后的实际结算**（进化流程的最后一步）。
+ *
+ * 到这里"要你选的东西"都已经选完，可以安全地做：
+ * 力量 +N、锁定牌入手、手牌超限弃牌、以及雕像换主雕像。
+ */
+function settleConfirmedEvolution(state: GameState): void {
+    const ack = state.pendingEvolutionAck;
+    if (!ack)
+        return;
+    /** 这一轮进化的等级（跳级判定要拿它比） */
+    const baseLevel = ack.toLevel;
+    /**
+     * 力量 / 解锁入手 / 手牌超限 → 挂 `pendingKillerDiscards`。
+     * ⚠ **只结算当前这名杀手**：2对3 里两人各自确认、各自结算。
+     */
+    resolveDeferredEvolution(state, state.killerId);
+    /**
+     * **已选好的"转换主雕像"到这里才真正生效**（用户要求"选择要确认"）。
+     * 点那一尊的时候只记在 `pendingStatueEvoTarget` 里。
+     *
+     * ⚠ 不给幸存者写战报 —— 用户要求「是否切换主雕像不能写在幸存者战报里」。
+     */
+    if (state.pendingStatueEvoTarget) {
+        const from = state.players[state.killerId ?? '']?.statueIndex ?? 0;
+        const targetId = state.pendingStatueEvoTarget;
+        const to = state.players[targetId];
+        state.pendingStatueEvoTarget = null;
+        if (switchMainStatue(state, targetId)) {
+            log(state, `雕像 1 级：主雕像从 ${from} 号转换为 ${to?.statueIndex ?? '?'} 号。`, 'killer');
+        }
+    }
+    state.pendingStatueEvoSwitch = false;
+    /**
+     * ⚠ **2对3：还有人没结算就"先不结束本次升级"**（用户口径：
+     * 两人做完各自的升级效果、等对方完成本次升级再继续）。
+     *
+     * 这里**保留 `pendingEvolutionAck`**（那两人共用的确认面板）并把回合
+     * 切给还没做的那名杀手 —— 他确认自己的那一份之后才会走到"放行"。
+     */
+    if ((ack.killerIds?.length ?? 0) > 1 && state.killerId) {
+        const done = [...new Set([...(ack.doneKillerIds ?? []), state.killerId])];
+        ack.doneKillerIds = done;
+        const next = (ack.killerIds ?? []).find((id) => !done.includes(id));
+        if (next) {
+            state.pendingEvolutionAck = ack;
+            switchActiveKiller(state, next);
+            /** 换人了：下一名杀手的 ③④ 要各自重新走一遍 */
+            state.evolutionChoiceIssuedAtLevel = 0;
+            state.evolutionTraitStageAtLevel = 0;
+            log(
+                state,
+                `【2对3】「${state.players[state.killerId]?.name ?? next}」的进化效果已结算；` +
+                `还等另一名杀手确认完，本次升级才继续。`,
+                'all',
+                true,
+            );
+            return;
+        }
+    }
+    state.pendingEvolutionAck = null;
+    /**
+     * ⚠ **特性 08「压抑怒火」的跳级在这里发起**（用户口径）：
+     * 「杀手在 3 级时，就执行 3 级进化效果，然后由于 08，**再确认 4 级进化效果**，
+     *   再坍塌，再特性牌（此时等级 4 级，不触发 08），再执行进化效果」。
+     *
+     * 也就是**连 4 级那一轮也要完整走一遍**（坍塌 → 特性 → 效果），
+     * 所以这里把等级提到 4 并重新挂出确认面板；那一轮的坍塌由
+     * `interceptEvolutionForCollapse` 照常拦截、由 `ackEvolution` 结算。
+     */
+    /**
+     * ⚠ 传 `ack.killerIds`：2对3 里**任一人**持 08 都要跳级，不能只看最后确认的那个人
+     * （详见 `evolutionLevelJump` 的注释）。
+     */
+    const jump = evolutionLevelJump(state, baseLevel, ack.killerIds);
+    if (typeof jump === 'number' && jump > baseLevel) {
+        state.killerLevel = jump;
+        /**
+         * ⚠ **4 级这一轮同样要"确认后再坍塌"**（用户口径：再确认 4 级进化效果 →
+         * 再坍塌 → 再特性牌 → 再执行进化效果）。
+         * 这里重新问一次 gate：墓穴且还有可塌地点才会置起标志。
+         */
+        state.pendingCollapseAfterEvolution = false;
+        state.collapseConsumedForLevel = 0;
+        interceptEvolutionForCollapse(state, baseLevel, jump);
+        log(state, `杀手进化到 **${jump} 级**：请确认新效果。`, 'all', true);
+        /**
+         * ⚠ **这一轮的"先确认者"要跟上一轮同一人**（用户口径：
+         * 「先手持 08，则是 k1，k2，k1，k2」）。
+         *
+         * 跳级是由"3 级最后结算的那名杀手"触发的，所以不切回来的话
+         * 4 级那轮就会从**后手**开始（k2，k1）。
+         */
+        const jumpStart = ack.startKillerId ?? ack.killerIds?.[0] ?? state.killerId;
+        state.pendingEvolutionAck = {
+            fromLevel: baseLevel,
+            toLevel: jump,
+            deferred: true,
+            killerIds: killerIdsForAck(state),
+            startKillerId: jumpStart ?? null,
+        };
+        /** 08 跳级：新的一级要重新走 ③④ */
+        state.evolutionChoiceIssuedAtLevel = 0;
+        state.evolutionTraitStageAtLevel = 0;
+        if (jumpStart && jumpStart !== state.killerId && state.killers[jumpStart])
+            switchActiveKiller(state, jumpStart);
+        return;
+    }
+    /**
+     * 【变体1】特性 14「埋伏等待」的开局升级：**确认完直接回到开局流程**。
+     *
+     * ⚠ 不能落到 `maybeCloseKillerUpkeep` —— 那会把这一次当成
+     * 正常杀手回合收尾（多抽 3 张牌、还会推进到下一个杀手）。
+     */
+    if (state.pendingTraitSetupResume) {
+        state.pendingTraitSetupResume = false;
+        startRound(state);
+        return;
+    }
+    /**
+     * 结算时才可能入手新牌 → 可能超上限要弃牌。
+     * 这时**不能**继续往下走（`maybeCloseKillerUpkeep` 会推进阶段），
+     * 得等玩家把牌弃完（`discardKillerCard` 那边弃完会回来收尾）。
+     */
+    if (state.pendingKillerDiscards > 0)
+        return;
+    maybeCloseKillerUpkeep(state);
+}
+
+/** 这次进化涉及哪些杀手（2对3 是两个）—— 给跳级时重挂确认面板用 */
+function killerIdsForAck(state: GameState): string[] {
+    return state.mode === '2v3' && state.killerIds.length
+        ? [...state.killerIds]
+        : (state.killerId ? [state.killerId] : []);
+}
+/**
+ * 进化带来的弃牌弃完了 → 把杀手回合收尾。
+ * （`discardKillerCard` 在弃完之后调用）
+ */
+function maybeFinishAfterEvolutionDiscard(state: GameState): void {
+    if (state.pendingEvolutionAck || state.pendingUnlockDiscard)
+        return;
+    if (state.pendingKillerDiscards > 0)
+        return;
+    maybeCloseKillerUpkeep(state);
+}
+
 export function handleAction(state: GameState, socketId: string, action: ClientAction, content: GameContent): void
 {
     /**
@@ -5203,6 +6293,30 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
     if (state.pendingSixthSense && action.type !== 'resolveSixthSense') {
         throw new Error('请先选 1 张留下（第六感）');
     }
+    /**
+     * **【墓穴】坍塌收尾期间冻住一切别的操作**。
+     *
+     * 光靠 `isControllerActive` 不够 —— 那只管按钮亮不亮，
+     * 网页可以直接发动作。这一步是"屋里的人还没走完，谁都不许动"的硬约束。
+     *
+     * ⚠ **顺序**：这一条必须排在下面「请先确认进化效果」**前面**。
+     * 坍塌是"确认进化之后"才发生的，所以这两个待办会同时挂着；若先命中进化那条，
+     * 玩家刚点完「确认新效果」却收到"请先确认进化效果"，根本看不懂该做什么
+     * （`crypt.mjs` 的收尾用例就是按"这时候该说坍塌"来断言的）。
+     *
+     * 例外（必须放行，否则会卡死）：
+     *  - `collapseMove` 本人：就是这一步
+     *  - `confirmAmulet` / `confirmResilience`：坍塌那 1 点伤害正常走护符/坚毅，
+     *    它们会停下来问一句，得让人答得出来
+     *  - `discardKillerCard`：进坍塌前如果正欠着弃牌，先把账结清
+     */
+    const collapseFloorAction = action.type === 'collapseMove'
+        || action.type === 'confirmAmulet'
+        || action.type === 'confirmResilience'
+        || action.type === 'discardKillerCard';
+    if (state.pendingCollapseMoves && !collapseFloorAction) {
+        throw new Error('坍塌还没收尾：先让屋里的人轮流走一步离开');
+    }
     if (state.pendingEvolutionAck &&
         action.type !== 'ackEvolution' &&
         // 雕像 1 级「每次升级首先执行」：先决定要不要转换主雕像
@@ -5215,7 +6329,46 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         // 女王等级 4：先点 2 个地点生成僵尸
         action.type !== 'pickQueenSpawnRoom' &&
         // 可选效果（「可以」）：先决定执行或跳过
-        action.type !== 'resolveOptionalEffect') {
+        action.type !== 'resolveOptionalEffect' &&
+        /**
+         * ⚠ **放行"超限弃牌"** —— 否则死锁：
+         *   上面那条 `pendingKillerDiscards > 0` 只放行 `discardKillerCard`，
+         *   而这里又把它拦下 → 「确认新效果」说"请先弃置多余手牌"、
+         *   「弃牌」说"请先确认进化效果"，**两个操作互相拒绝、谁也走不了**。
+         *
+         * 触发条件就是未命名的正常流程：解锁二选一选完（如【刺耳噪声】）→
+         * 手牌 5 → 6 超上限 → 必须先弃 1 张，但那时进化还没确认。
+         * 顺序应该是"弃完再确认"，所以这里必须放行弃牌。
+         */
+        action.type !== 'discardKillerCard' &&
+        /**
+         * ⚠ **特性作业也是进化流程里的一步**（用户口径：
+         * 确认 → 坍塌 → 特性卡 → 执行进化效果）：
+         *  - 17「压迫威慑」= `useTrait` 选惊吓目标
+         *  - 18「狡诈猎手」= `confirmEvoBlockade` 确认封堵
+         * 不放行它们就会"特性挂出来了却点不动"（本文件外那套测试抓到的）。
+         */
+        !(action.type === 'useTrait' && Boolean(state.pendingTraitVictim)) &&
+        !(action.type === 'confirmEvoBlockade' && Boolean(state.pendingBlockadeJob)) &&
+        /**
+         * ⚠ **坍塌的"轮流走一步"也必须放行** —— 否则又一个死锁（刚抓到的）：
+         *   进化的坍塌结算会挂出"谁先走"的队列，而进化流程**必须等它走完**
+         *   才继续（用户口径：坍塌结算后才执行进化效果）；
+         *   这时 `pendingEvolutionAck` 还挂着，若把 `collapseMove` 拦下来，
+         *   玩家就会看到「请先确认进化效果」，可坍塌又走不完 → 整局卡死。
+         *
+         * 顺序：坍塌走完 → `setCollapseDoneHandler` → 继续进化流程。
+         */
+        action.type !== 'collapseMove' &&
+        /**
+         * ⚠ **坍塌那 1 点伤害引出的护符 / 坚毅询问也必须放行**（否则真死锁）：
+         *   坍塌伤害会挂起「是否出示古代护符」/「是否使用坚毅标记」，
+         *   而这时 `pendingEvolutionAck` 还挂着 —— 拦住它们玩家就答不了，
+         *   坍塌走不完、进化也继续不了，整局卡死。
+         *   （墓穴测试里"护符要能问得出来、答得下去"那一段抓到的。）
+         */
+        action.type !== 'confirmAmulet' &&
+        action.type !== 'confirmResilience') {
         throw new Error('请先确认进化效果');
     }
     /**
@@ -5250,7 +6403,24 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         action.type !== 'relocateBlockade') {
         throw new Error('请先移除场上封堵，腾出可放置数量');
     }
-    if (state.pendingItemDiscard && action.type !== 'discardItem' && action.type !== 'confirmAmulet') {
+    /**
+     * ⚠ **发现阶段的两步必须放行**（用户口径：「翻发现牌，如果幸存者背包满了，
+     * 应该**先选择要拿的发现牌，再选择弃置哪张牌**」）：
+     *  - `pickSurvivorTurn`：发现阶段里它是"选谁翻牌"
+     *  - `chooseDiscovery`：选**留哪一张**（这一步之后才会因为入手而超格）
+     *
+     * 背包满的旧账常常是**上一个动作**留下的（搜索拿到物品时挂的），
+     * 而"所有幸存者都行动完 → 自动进发现阶段"是**服务端自动**走的、不经过动作闸门 ——
+     * 于是玩家一进发现阶段就被"请先弃置一件装备"挡住，那两张候选根本点不了，
+     * 「先选后弃」变成了「先弃后选」（用户报的就是这个）。
+     *
+     * 放行的只是这两步：`acknowledgeDiscovery`（确认发现）**不放行** ——
+     * 该弃的没弃完，不许跳过。
+     */
+    const discoveryFloorAction = action.type === 'chooseDiscovery'
+        || (action.type === 'pickSurvivorTurn' && state.phase === 'discovery' && state.pendingDiscoveryPick);
+    if (state.pendingItemDiscard && !discoveryFloorAction &&
+        action.type !== 'discardItem' && action.type !== 'confirmAmulet') {
         if (state.mode !== 'multi' || playerId === state.pendingItemDiscard.playerId) {
             throw new Error('装备栏已满，请先弃置一件装备');
         }
@@ -5316,13 +6486,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
      *    它们会停下来问一句，得让人答得出来
      *  - `discardKillerCard`：进坍塌前如果正欠着弃牌，先把账结清
      */
-    const collapseFloorAction = action.type === 'collapseMove'
-        || action.type === 'confirmAmulet'
-        || action.type === 'confirmResilience'
-        || action.type === 'discardKillerCard';
-    if (state.pendingCollapseMoves && !collapseFloorAction) {
-        throw new Error('坍塌还没收尾：先让屋里的人轮流走一步离开');
-    }
     switch (action.type) {
         // —— 大厅：改名字、选模式、选角色、准备、开打 ——
         case 'setName': {
@@ -5380,6 +6543,119 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 ? `房主开启了【变体1】特性卡（当前生存难度【${TRAIT_DIFFICULTY_LABEL[state.traitDifficulty]}】）——` +
                     '开局前每人抽特性卡：幸存者每人抽 2 选 1，杀手按难度抽选。'
                 : '房主关闭了【变体1】特性卡。', 'all', true);
+            break;
+        }
+        /**
+         * 【变体3】**计划卡开关**（房主在大厅 / 选人阶段切换）。
+         *
+         * 和变体1 / 变体2 都能同开；开启后开局给幸存者方随机发 2 张计划卡，
+         * **杀手看不到**（快照只发幸存者视角）。
+         */
+        case 'setVariant3': {
+            if (socketId !== state.hostId)
+                throw new Error('只有房主可以切换规则');
+            if (state.phase !== 'lobby' && state.phase !== 'characterSelect') {
+                throw new Error('对局开始后无法切换规则');
+            }
+            state.variant3 = Boolean(action.on);
+            log(state, state.variant3
+                ? '房主开启了【变体3】计划卡——开局给幸存者方随机发 2 张，' +
+                    '他们在发现阶段之前可以确认 / 改变计划（要所有幸存者玩家同意）。**杀手看不到这些卡**。'
+                : '房主关闭了【变体3】计划卡。', 'all', true);
+            break;
+        }
+        /**
+         * 【变体3】**确认 / 改变计划**（幸存者方）。
+         *
+         * 第一次选 = 确认计划；之后再选 = 改变计划。**每一次都要所有幸存者玩家各自同意**。
+         */
+        case 'pickPlan': {
+            if (p.faction !== 'survivor' && !(isSharedSurvivorMode(state) && state.killerId))
+                throw new Error('只有幸存者方可以选计划');
+            if (!controlsPiece(state, socketId, p))
+                throw new Error('无权操作');
+            beginPlanSwitch(state, p.controllerId, action.planId);
+            break;
+        }
+        /** 【变体3】计划确认的投票（每个幸存者玩家各点一次） */
+        case 'votePlan': {
+            const pend = state.pendingPlanSwitch;
+            if (!pend)
+                throw new Error('现在没有待确认的计划');
+            if (!planVoters(state).some((v) => v.id === socketId))
+                throw new Error('只有幸存者玩家可以确认计划');
+            votePlanSwitch(state, socketId, action.accept !== false);
+            break;
+        }
+        /**
+         * 【变体3】发动计划能力（完成后才有；特殊行动 / 额外行动）。
+         */
+        case 'usePlanAbility': {
+            if (p.faction !== 'survivor')
+                throw new Error('只有幸存者可以发动计划能力');
+            if (!controlsPiece(state, socketId, p))
+                throw new Error('无权操作');
+            const plan = state.planById?.[action.planId];
+            if (!plan)
+                throw new Error('未知的计划卡');
+            const ab = plan.abilities[action.index];
+            const reason = planAbilityBlockReason(state, action.planId, action.index, p);
+            if (reason)
+                throw new Error(reason);
+            /**
+             * 【变体3】**要选目的地的能力**（通道調查 ②）：
+             * 界面还没点出口时先把候选挂起来，等它点。
+             *
+             * ⚠ 这一步**不能**消耗"每场一次"或代价 —— 只是"进入选择"，
+             * 真结算走下面带 `toRoomId` 的那一次。
+             */
+            if (ab?.impl === 'moveThroughPassage') {
+                const ends = passageNeighborsFor(state, p.roomId);
+                if (action.toRoomId) {
+                    assertSurvivorMainAction(p);
+                    if (!ends.includes(action.toRoomId))
+                        throw new Error('那个出口不在这条秘密通道上');
+                    applyPlanAbility(state, plan, action.index, p.id, { toRoomId: action.toRoomId });
+                    state.pendingPlanPassage = null;
+                }
+                else if (ends.length === 0) {
+                    throw new Error('你现在不在秘密通道地点（或该地点没有别的通道出口）');
+                }
+                else {
+                    state.pendingPlanPassage = [...ends];
+                    log(state, `【变体3】通道調查：请选择要穿过的秘密通道出口（${ends.map((r) => roomName(state, r)).join('、')}）。`, 'survivor');
+                }
+                break;
+            }
+            applyPlanAbility(state, plan, action.index, p.id, {
+                toRoomId: action.toRoomId ?? null,
+                targetPlayerId: action.targetPlayerId ?? null,
+            });
+            break;
+        }
+        /**
+         * 【变体3】「情報分享」：完成计划后**选一名幸存者**从搜索牌库抽 1 张。
+         *
+         * 谁选由 `pendingPlanTarget.chooserId` 定（完成计划时在场的那个幸存者）。
+         */
+        case 'pickPlanTarget': {
+            const pt = state.pendingPlanTarget;
+            if (!pt)
+                throw new Error('当前没有待选的目标');
+            if (pt.chooserId !== p.id && !controlsPiece(state, socketId, p))
+                throw new Error('现在不是你选目标');
+            if (!pt.candidates.includes(action.playerId))
+                throw new Error('只能选场上活着的幸存者');
+            const plan = state.planById?.[pt.planId];
+            if (!plan)
+                throw new Error('未知的计划卡');
+            state.pendingPlanTarget = null;
+            applyPlanAbility(state, plan, pt.index, pt.chooserId, { targetPlayerId: action.playerId });
+            /** 选完继续走"发现阶段收尾"那一套 */
+            if (state.pendingPlanResume) {
+                state.pendingPlanResume = false;
+                enterNoiseReport(state);
+            }
             break;
         }
         /**
@@ -5456,7 +6732,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (tdef.faction === 'killer') {
                 if (state.killerId !== who.id)
                     throw new Error('现在不是这名杀手的回合');
-                if (state.phase !== 'killerMain' && state.phase !== 'upkeep')
+                /**
+                 * ⚠ **02「玩弄猎物」是"遭遇爆发那一刻"的反应**——
+                 * 那时候 `phase === 'encounter'`，所以必须在"要在自己回合发动"这道闸上
+                 * 给它开个口子；否则点下去只会报「杀手特性要在自己的回合发动」，
+                 * 这张卡等于废的（**僵尸搜索触发的遭遇也一样**，
+                 * 用户检查「女王 + 僵尸搜索」时顺带发现的）。
+                 */
+                const preyReaction =
+                    traitId === 'trait_k02' && state.pendingPreyOffer === true && state.encounter != null;
+                if (!preyReaction && state.phase !== 'killerMain' && state.phase !== 'upkeep')
                     throw new Error('杀手特性要在自己的回合发动');
                 const payIds = [...new Set(action.payCardIds ?? [])];
                 const need = KILLER_TRAIT_PAY[traitId] ?? 0;
@@ -5496,11 +6781,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     /** 06 敏锐听觉：弃 1 张 → 感知一个带响声的地点（点地图选） */
                     case 'trait_k06': {
                         state.killerSenseRoomActive = true;
-                        const rooms = state.noises.map((id) => roomName(state, id));
+                        /**
+                         * ⚠ **爆竹回合 = 全场都在响**，而那时 `state.noises` 是空的
+                         * （见 `pushNoise` / 响声阶段：“全场都有响声（爆竹）”）——
+                         * 照直列 `state.noises` 会写成"没有响声"，和实际不符。
+                         */
+                        const noiseHint = state.firecrackerThisRound
+                            ? '（本回合有爆竹：**全场都在响**）'
+                            : state.noises.length
+                                ? `（本回合响声：${state.noises.map((id) => roomName(state, id)).join('、')}）`
+                                : '';
                         log(
                             state,
                             `【变体1】${who.name}「敏锐听觉」：弃掉 ${need} 张卡牌，` +
-                                `请点一个带响声的地点感知${rooms.length ? `（本回合响声：${rooms.join('、')}）` : ''}。`,
+                                `请点一个带响声的地点感知${noiseHint}。`,
                             'killer',
                         );
                         break;
@@ -5687,6 +6981,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                             true,
                         );
                         addFear(state, victim.id, 1);
+                        /** 特性作业做完了 → 回去继续进化流程（选卡/结算） */
+                        advanceEvolutionAfterChoice(state);
                         break;
                     }
                     default:
@@ -6005,7 +7301,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (pend.from === 'discovery') {
                 if (state.pendingItemDiscard)
                     break;
-                enterNoiseReport(state);
+                /** 特性 18「拾物妙手」被打断的：先接着结算还没留的那张；都结算完了就收尾 */
+                if (continueKeepBothDiscovery(state))
+                    break;
+                if (!finishKeepBothDiscovery(state))
+                    enterNoiseReport(state);
             }
             break;
         }
@@ -6411,7 +7711,33 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         }
         case 'move': {
             if (state.phase === 'encounter' && state.encounter?.step === 'flee') {
-                throw new Error('请使用逃离操作');
+                /**
+                 * **撤离只认 `encounterFlee`**（撤离是独立的一套，见（甲）流程）。
+                 *
+                 * 走到这里说明客户端把撤离点击当成了普通移动。正常路径下不会发生；
+                 * 万一发生，客户端会在请求里附 `__diag`（见 `useGameSocket`），
+                 * 那时才往服务器窗口打一份现场，方便定位。
+                 */
+                const enc = state.encounter;
+                const targetId = enc.targetId;
+                const target = targetId ? state.players[targetId] : null;
+                const clientDiag = (action as unknown as { __diag?: unknown }).__diag;
+                if (clientDiag) {
+                    console.warn(
+                        '[撤离诊断] 收到 move（不是 encounterFlee）\n' +
+                        `  房间=${state.roomCode} 模式=${state.mode}\n` +
+                        `  发送者 socket=${socketId} → 解析出的棋子=${playerId}（${p?.name ?? '?'}）\n` +
+                        `  正在撤离的是 ${targetId ?? '（还没选人）'}（${target?.name ?? '?'}）\n` +
+                        `  待撤离名单=[${pendingFleeIds(state).map((i) => `${state.players[i]?.name ?? i}(${i})`).join(' → ')}]\n` +
+                        `  请求内容=${JSON.stringify(action)}\n` +
+                        `  客户端自报现场=${JSON.stringify(clientDiag)}`,
+                    );
+                }
+                throw new Error(
+                    target
+                        ? `请使用逃离操作（现在轮到「${target.name}」撤离：点地图选相邻 1 格后按「确认移动」，或按「留在原地」）`
+                        : '请先在"谁来撤离"名单里点一个人，再让他撤离',
+                );
             }
             /**
              * **幸存者自己的路径草稿**（凯莱布「幸运币」的〔移動〕×0-2）：
@@ -6794,6 +8120,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 else {
                     log(state, `${p.name} 发现了 ${victims.length} 名幸存者！`);
                 }
+                /** 【变体3】爆炸陷阱：搜到带计划标记、且没人的地点 → 幸存者立刻获胜 */
+                if (checkPlanBombTrapOnKillerSearch(state, here))
+                    break;
                 maybeStartEncounter(state);
                 maybeFinishKillerMain(state);
             }
@@ -7173,8 +8502,25 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             log(state, `${p.name} 弃置了 ${itemName(action.itemId)}。`);
             if (pending.count <= 0 || itemCount(p.items) <= inventorySlotsFor(state, p.id)) {
                 state.pendingItemDiscard = null;
-                if (state.phase === 'discovery' && state.discoveryOptions.length === 0) {
-                    enterNoiseReport(state);
+                if (state.phase === 'discovery') {
+                    /**
+                     * ⚠ 弃完之后的收尾分两种：
+                     *  - 普通发现：候选已经清空 → 进响声报告
+                     *  - 特性 18「拾物妙手」两张都留：第一张结算时被弃装打断，
+                     *    候选还挂着 → **接着结算第二张**（不是进响声报告）
+                     */
+                    if (state.discoveryOptions.length === 0)
+                        enterNoiseReport(state);
+                    else if (!continueKeepBothDiscovery(state) && !finishKeepBothDiscovery(state)) {
+                        /**
+                         * 兜底：候选还挂着、但已经没有"待续结算"的了（理论上不该出现）。
+                         * 与其把两张候选一直挂在那儿让玩家无从下手，不如清掉候选、把流程推下去。
+                         */
+                        state.discoveryOptions = [];
+                        state.discoveryKeepQueue = null;
+                        state.discoveryKeepBoth = false;
+                        enterNoiseReport(state);
+                    }
                 }
             }
             break;
@@ -7890,8 +9236,28 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!controlsPiece(state, socketId, p))
                 throw new Error('无权操作');
             resolveStealthToPassage(state, action.roomId);
-            /** 落点选完，效果队列继续（恐詭管道是 slow 阶段的一张牌） */
-            continueKillerQueue(state);
+            /**
+             * ⚠ **点地图只是"选中"，不继续队列**（用户口径：选了地点要确认）。
+             * 效果队列由 `confirmPassagePick`（点「确认潜入」）继续。
+             */
+            break;
+        }
+        case 'confirmPassagePick': {
+            if (!(state.pendingPassagePick ?? []).length)
+                throw new Error('当前不是选择秘密通道地点');
+            if (p.faction !== 'killer')
+                throw new Error('只有杀手可以确认');
+            if (!controlsPiece(state, socketId, p))
+                throw new Error('无权操作');
+            confirmStealthToPassage(state);
+            /**
+             * 确认落点之后，效果队列继续（恐詭管道是 slow 阶段的一张牌）。
+             *
+             * ⚠ 走 `resumeAfterKillerChoice` 而不是裸的 `continueKillerQueue`：
+             * 前者才会把打出的牌落定、把 `pendingCardSpeed` 清掉 ——
+             * 否则这张牌一直卡在"正在结算"上（和【變形】那个漏法是同一个）。
+             */
+            resumeAfterKillerChoice(state);
             break;
         }
         /**
@@ -7922,19 +9288,36 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 'killer',
             );
             job.remaining -= 1;
-            job.options = job.options.filter((id) => id !== action.cardId);
-            job.optionsNamed = job.optionsNamed.filter((c) => c.id !== action.cardId);
+            /**
+             * ⚠ **只去掉一份**：牌组里同一张卡有多份（爬行×3），
+             * 以前是按 id `filter` 掉**所有同名份数** —— 于是「變形」要选 2 张、
+             * 弃牌堆里正好有两张「爬行」时，选掉一张后另一张就从候选里消失了
+             * （玩家会看到"明明还有牌却不让我选"）。
+             */
+            const oi = job.options.indexOf(action.cardId);
+            if (oi >= 0)
+                job.options.splice(oi, 1);
+            const ni = job.optionsNamed.findIndex((c) => c.id === action.cardId);
+            if (ni >= 0)
+                job.optionsNamed.splice(ni, 1);
             if (job.remaining > 0) {
                 if (!job.options.length) {
                     log(state, `${job.cardName}：弃牌堆里没有别的牌可移除了。`, 'killer');
                     state.pendingDiscardRemove = null;
-                    continueKillerQueue(state);
+                    /**
+                     * ⚠ **必须走 `resumeAfterKillerChoice`（打牌流程的真正出口）**，
+                     * 不能只 `continueKillerQueue` —— 那样"打出的这张牌"不会落定、
+                     * 速度标记不会清掉，**回合也永远停在 main、进不了慢速阶段**
+                     * （用户报的"【變形】做完后没有自动转到慢速阶段"）。
+                     */
+                    resumeAfterKillerChoice(state);
                 } else {
                     log(state, `${job.cardName}：还要再选 ${job.remaining} 张。`, 'killer');
                 }
             } else {
                 state.pendingDiscardRemove = null;
-                continueKillerQueue(state);
+                /** 同上：选完了要接回打牌流程的出口 */
+                resumeAfterKillerChoice(state);
             }
             break;
         }
@@ -8055,8 +9438,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             log(
                 state,
                 `${p.name} 使用遗物「洞察之球」（特殊行动）：在「${roomName(state, p.roomId)}」依次摸两张牌。`,
-                'all',
-                true,
+                survivorActionVis(state),
             );
             consumeInsight(state, p);
             searchDrawMultiple(state, p.id, 2);
@@ -8397,6 +9779,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'pickStatueStep': {
             if (p.faction !== 'killer')
                 throw new Error('仅杀手可执行');
+            /**
+             * ⚠ **记下"这一尊雕像"** —— 用户口径：
+             * 变体1 的特性 02「玩弄猎物」/ 11「恐惧迸发」认**当前遭遇中的那尊雕像**，
+             * 其他特性（如 12 加力量）认**主雕像**。
+             * 这里在开战前把它记下来，遭遇结束时清掉。
+             */
+            state.encounterTriggerPieceId = action.statueId;
             const encounterRoom = pickStatueStepAction(state, action.statueId);
             if (encounterRoom) state.statueEncounterRoom = encounterRoom;
             /** 还在等下一次选择 / 正在走路径 → 就停在这儿 */
@@ -8435,6 +9824,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             state.pendingQueenSpawnRooms = null;
             for (const rid of picked)
                 spawnZombieAt(state, rid);
+            /** 这一项选完了 → 问下一项，或做实际结算 */
+            advanceEvolutionAfterChoice(state);
             break;
         }
         /**
@@ -8529,8 +9920,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 log(
                     state,
                     `幸运币：弃掉「${card?.name ?? topId}」（不是钥匙），改为〔移動〕×0-2。`,
-                    'all',
-                    true,
+                    survivorActionVis(state),
                 );
                 state.pendingMoveRange = 2;
                 state.pendingMoveMin = 0;
@@ -8810,10 +10200,22 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              * 所以另外记一份，**不在结算完时清掉**，一直留到本回合结束。
              */
             state.currentKillerCardId = action.cardId;
-            /** 费用牌已就位，现在执行「永久从弃牌堆移除」（排除本牌） */
+            /**
+             * 费用牌已就位，现在执行「永久从弃牌堆移除」（排除本牌）。
+             *
+             * ⚠ **必须走"让玩家自己挑"的 `beginRemoveFromDiscardPermanent`** ——
+             * 这里以前调的是旧的自动版 `removeFromDiscardPermanent`（从堆顶直接拿），
+             * 于是【變形】【戰鬥適應】依旧**系统代选**，用户报的
+             * 「应该是自选弃牌，怎么没改过来」就是这一处（另一处入口在效果队列里）。
+             */
             const earlyRemovals = effectsToRun.filter((fx) => fx.op === 'removeFromDiscardPermanent');
             for (const fx of earlyRemovals) {
-                removeFromDiscardPermanent(state, typeof fx.value === 'number' ? fx.value : 1, action.cardId);
+                beginRemoveFromDiscardPermanent(
+                    state,
+                    typeof fx.value === 'number' ? fx.value : 1,
+                    card.name,
+                    [action.cardId],
+                );
             }
             /**
              * 「使用这张牌时启用」的力量（屏息）：必须**立刻**生效，
@@ -9004,6 +10406,12 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 state.justUnlockedCards = [];
                 if (state.phase === 'upkeep')
                     maybeCloseKillerUpkeep(state);
+                /**
+                 * ⚠ 也可能是**进化带来的弃牌**：那时 `pendingEvolutionAck` 还在
+                 * （进化效果"弃牌"这一步），弃完要把杀手回合收尾。
+                 */
+                else
+                    maybeFinishAfterEvolutionDiscard(state);
             }
             break;
         }
@@ -9191,6 +10599,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 itemId = null;
             }
             /**
+             * 【变体3】**燃燒瓶**（`whiskeyDefenseBonus`）：
+             * 「每次攻擊僅限一次，你可以**棄掉**一個威士忌酒瓶來 +2 防禦值」。
+             *
+             * 用户口径（2024 澄清）：
+             *  - 酒瓶是**弃置**、不是"使用物品" → **不占防御物品名额**，
+             *    也**不算使用物品**（不影响威廉「坚韧不拔」/ 特性 05 / 乔治笔记 / 剛毅之盾）；
+             *  - 这一问要**排在"防御物品确认之后"**单独进行 ——
+             *    所以这里只挂 `whiskeyOffer`，等 `confirmWhiskeyDefense` 再掷骰。
+             */
+            const canWhiskey =
+                planImplActive(state, 'whiskeyDefenseBonus') &&
+                (p.items.whiskey ?? 0) > 0 &&
+                !state.encounterBlockItems;
+            /**
              * 荊棘纏繞（攻击时机）：本次攻击中目标**不能使用任何物品**。
              *
              * ⚠ 用户明确：**剛毅之盾（遗物）也一并禁掉** ——
@@ -9220,11 +10642,65 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             log(
                 state,
                 itemId
-                    ? `${p.name} 使用「${itemName(itemId)}」加防${useShield ? '，并用「剛毅之盾」+1（不占名额）' : ''}。`
+                    ? `${p.name} 使用「${itemName(itemId)}」加防${useShield ? '，并用「剛毅之盾」+1' : ''}。`
                     : useShield
-                        ? `${p.name} 用遗物「剛毅之盾」加防 +1（不占防御物品名额）。`
+                        ? `${p.name} 加防：遗物「剛毅之盾」+1（不占防御物品名额）。`
                         : `${p.name} 不使用防御物品。`,
             );
+            /**
+             * 燃燒瓶的第二段：先让幸存者回答"要不要弃掉一个威士忌酒瓶 +2"，
+             * 回答完（`confirmWhiskeyDefense`）才掷骰。
+             */
+            if (canWhiskey) {
+                enc.whiskeyOffer = { playerId };
+                log(
+                    state,
+                    `【变体3】燃燒瓶：${p.name} 还可以**弃掉一个威士忌酒瓶**来 +2 防御值（不算使用物品、不占名额）—— 请先确认。`,
+                    'survivor',
+                );
+                break;
+            }
+            rollEncounterDefense(state);
+            break;
+        }
+        /**
+         * 【变体3】**燃燒瓶的第二段**：确认要不要弃威士忌酒瓶。
+         *
+         * 用户口径：这一步排在**防御物品确认之后**；酒瓶是**弃置**（进弃牌堆），
+         * 不算"使用物品" —— 所以只加到防御值上，不进 `otherDefenseBoost`。
+         */
+        case 'confirmWhiskeyDefense': {
+            if (state.phase !== 'encounter' || !state.encounter)
+                throw new Error('当前不在遭遇中');
+            const enc = state.encounter;
+            const offer = enc.whiskeyOffer;
+            if (!offer)
+                throw new Error('现在不需要确认威士忌酒瓶');
+            const who = state.players[offer.playerId];
+            if (!who || who.faction !== 'survivor')
+                throw new Error('找不到该幸存者');
+            if (!controlsPiece(state, socketId, who))
+                throw new Error('无权操作该幸存者');
+            const use = Boolean(action.use);
+            if (use && (who.items.whiskey ?? 0) <= 0)
+                throw new Error('你没有威士忌酒瓶');
+            enc.whiskeyOffer = null;
+            if (!enc.whiskeyUsed)
+                enc.whiskeyUsed = {};
+            enc.whiskeyUsed[who.id] = use;
+            if (use) {
+                /** **弃置**：从背包拿走、进物品弃牌堆（不是"使用"） */
+                takeItem(who, 'whiskey', 1);
+                discardConsumedItem(state, 'whiskey', 1);
+                log(
+                    state,
+                    `【变体3】燃燒瓶：${who.name} 弃置一个威士忌酒瓶（进弃牌堆），本次遭遇防御 +2 —— 不算使用物品、不占防御物品名额。`,
+                    'survivor',
+                );
+            }
+            else {
+                log(state, `【变体3】燃燒瓶：${who.name} 不弃威士忌酒瓶。`, 'survivor');
+            }
             rollEncounterDefense(state);
             break;
         }
@@ -9250,14 +10726,37 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             resolvePendingEncounterDice(state);
             break;
         }
+        case 'pickFleeSurvivor': {
+            if (state.phase !== 'encounter' || !state.encounter)
+                throw new Error('当前不在遭遇中');
+            if (state.encounter.step !== 'flee')
+                throw new Error('当前不是撤离步骤');
+            /**
+             * ⚠ **（甲）撤离要先选人**：名单上点谁，谁才成为本次撤离的人。
+             *
+             * 权限按**被点的那个人归谁管**判定（1对3 里各点各的；
+             * 单人热座 / 共享操控下谁都能点自己这边的人）。
+             */
+            const wanted = state.players[action.targetPlayerId];
+            if (!wanted || wanted.faction !== 'survivor' || !wanted.alive)
+                throw new Error('无法选择该幸存者');
+            if (!controlsPiece(state, socketId, wanted))
+                throw new Error('不能替这名幸存者选撤离');
+            pickFleeSurvivor(state, action.targetPlayerId);
+            break;
+        }
         case 'encounterFlee': {
             if (state.phase !== 'encounter' || !state.encounter)
                 throw new Error('当前不在遭遇中');
             if (state.encounter.step !== 'flee')
                 throw new Error('当前不是逃离步骤');
             const enc = state.encounter;
-            if (enc.fleeQueue[0] !== playerId)
-                throw new Error('还没轮到你逃离');
+            /**
+             * 现在"轮到谁"看的是 `targetId`（由名单点出来），
+             * 不再看 `fleeQueue[0]` —— 队列只表示"还有谁没撤离"。
+             */
+            if (enc.targetId !== playerId)
+                throw new Error('还没轮到你逃离（请先在名单里选中自己）');
             if (action.moveToRoomId) {
                 /**
                  * 【变体1】幸存者特性 09「生存本能」：
@@ -9301,13 +10800,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             else {
                 log(state, `${p.name} 选择不移动。`, 'survivor');
             }
-            enc.fleeQueue.shift();
-            if (enc.fleeQueue.length === 0) {
-                clearTrapAfterEncounter(state, enc.roomId);
-                state.encounter = null;
-                log(state, '遭遇结束，杀手摸牌后结束回合。');
-                endKillerTurn(state);
-            }
+            /**
+             * 这个人撤离完了 → 回"选人"这一步（名单里还有谁就继续选谁）。
+             * 名单空了由 `advanceFleeSelection` 自己收尾遭遇。
+             */
+            advanceFleeSelection(state, playerId);
             break;
         }
         case 'chooseSenseColor': {
@@ -9774,6 +11271,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             chooseAutoMovePath(state, action.pathIndex);
             continueKillerQueue(state);
             flushDeferredPlayedCard(state);
+            /** 和其它收尾保持一致：把这一张的速度标记清掉 */
+            state.pendingCardSpeed = null;
             maybeStartEncounter(state);
             maybeFinishKillerMain(state);
             break;
@@ -9849,6 +11348,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'pickTrackerTarget': {
             if (p.faction !== 'killer')
                 throw new Error('仅杀手可选择');
+            /**
+             * ⚠ **必须还在"等选距离目标"**：遭遇一爆发（`interruptCurrentCardEffects`）
+             * 或 02「玩弄猎物」取消遭遇时，`pendingTrackerPick` 就被清掉了 ——
+             * 那时【追蹤】的后半段（展示距离）**作废**，不能靠一条迟到的动作又把它结算出来。
+             */
+            if (!state.pendingTrackerPick)
+                throw new Error('追蹤：现在没有要展示的距离');
             resolveTrackerDistance(state, action.targetPlayerId);
             continueKillerQueue(state);
             if (!hasPendingKillerChoice(state)) {
@@ -9934,9 +11440,38 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!pool.includes(action.cardId))
                 throw new Error('这张牌不在候选里');
             const card = state.cardById[action.cardId];
-            /** 二选一：选中的进手牌，没选中的留在锁定区（以后不再解锁） */
-            state.killerLocked = state.killerLocked.filter((x) => x !== action.cardId);
+            /**
+             * ⚠ **二选一：选中的进手牌，另一张（同组其它张）永久作废。**
+             *
+             * 用户口径：「未命名 3 级**只有解锁的锁定牌加入手牌，另一张不加入**」。
+             *
+             * 以前这里只把选中的那张拿走、另一张**留在锁定区**，而
+             * `settleEvolutionForCurrentKiller` 里有一句"二选一里只剩一张的组 →
+             * 直接入手"（本意是给"候选本来就只有一张"的组兜底）——
+             * 于是另一张在结算时**又被塞进手牌**（两张全到手）。
+             * 现在把同组其它张直接从锁定区移除，那句兜底就再也看不到它们了。
+             */
+            const group = card?.unlockChoice;
+            const sameGroup = group
+                ? state.killerLocked.filter((x) => x !== action.cardId && state.cardById[x]?.unlockChoice === group)
+                : [];
+            state.killerLocked = state.killerLocked.filter(
+                (x) => x !== action.cardId && !sameGroup.includes(x),
+            );
             state.killerHand.push(action.cardId);
+            if (sameGroup.length) {
+                state.abandonedLockedCards = [
+                    ...(state.abandonedLockedCards ?? []),
+                    ...sameGroup,
+                ];
+                log(
+                    state,
+                    `二选一：${sameGroup.map((id) => `「${state.cardById[id]?.name ?? id}」`).join('、')}` +
+                        ` 不再解锁，本局作废（不会加入手牌）。`,
+                    'all',
+                    true,
+                );
+            }
             state.pendingUnlockChoice = null;
             log(state, `解锁「${card?.name ?? action.cardId}」加入手牌。`, 'all', true);
             const max2 = state.rules.killerHandMax ?? 5;
@@ -9946,6 +11481,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 state.justUnlockedCards = [action.cardId];
                 log(state, `进化入手牌后手牌超过 ${max2}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
             }
+            /** 这一项选完了 → 问下一项，或做实际结算 */
+            advanceEvolutionAfterChoice(state);
             break;
         }
         case 'pickEvolutionCard': {
@@ -9964,6 +11501,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             log(state, `未命名获得进化卡牌「${card.name}」：${card.text}`, 'all', true);
             /** 立刻结算这张进化卡牌的被动 / 效果 */
             applyEvolutionCard(state, action.cardId);
+            /** 这一项选完了 → 问下一项，或做实际结算 */
+            advanceEvolutionAfterChoice(state);
             break;
         }
         case 'pickStatueEvoSwitch': {
@@ -9983,16 +11522,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 log(state, '雕像 1 级：这一尊就是当前主雕像，视为不切换。', 'killer');
                 state.pendingStatueEvoTarget = null;
                 state.pendingStatueEvoSwitch = false;
+                advanceEvolutionAfterChoice(state);
                 break;
             }
             state.pendingStatueEvoTarget = target.id;
-            /** 选择已经做出了 → 关掉"还没决定"的闸门（真正的切换等确认） */
+            /** 选择已经做出了 → 关掉"还没决定"的闸门（真正的切换等结算） */
             state.pendingStatueEvoSwitch = false;
             log(
                 state,
-                `雕像 1 级：已选 ${target.statueIndex} 号（${roomName(state, target.roomId)}），点「确认新效果」后生效。`,
+                `雕像 1 级：已选 ${target.statueIndex} 号（${roomName(state, target.roomId)}）。`,
                 'killer',
             );
+            advanceEvolutionAfterChoice(state);
             break;
         }
         case 'skipStatueEvoSwitch': {
@@ -10003,6 +11544,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             state.pendingStatueEvoSwitch = false;
             state.pendingStatueEvoTarget = null;
             log(state, '雕像 1 级：选择不转换主雕像。', 'killer');
+            advanceEvolutionAfterChoice(state);
             break;
         }
         case 'openChest': {
@@ -10036,22 +11578,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'ackEvolution': {
             if (!state.pendingEvolutionAck)
                 throw new Error('当前没有待确认的进化');
-            /** 雕像 1 级「每次升级首先执行」：主雕像切换要先处理完 */
-            if (state.pendingStatueEvoSwitch) {
-                throw new Error('请先决定是否转换主雕像');
-            }
-            /** 未命名升级：要先选一张进化卡牌 */
-            if (state.pendingEvolutionCardPick) {
-                throw new Error('请先选择一张进化卡牌');
-            }
-            /** 解锁二选一：要先挑一张 */
-            if (state.pendingUnlockChoice) {
-                throw new Error('请先选择要解锁哪张牌');
-            }
-            /** 女王等级 4：先点 2 个地点生成僵尸 */
-            if (state.pendingQueenSpawnRooms) {
-                throw new Error('请先选择 2 个生成僵尸的地点');
-            }
+            /**
+             * ⚠ **这里不再要求"先选好卡牌 / 先决定主雕像"** —— 那些选择
+             * 现在排在**确认之后**（用户口径：它们本身就是执行进化效果）。
+             * 见下面的 ②③④ 顺序注释。
+             */
             const ack = state.pendingEvolutionAck;
             const kind = killerKindOf(state);
             const texts = kind
@@ -10059,50 +11590,76 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 : [];
             log(state, `已确认进化效果：${texts.join('；') || `等级 ${ack.toLevel}`}。`);
             /**
-             * **现在才真正结算这一级**（用户要求：
-             * 「杀手在确认进化效果后才执行进化效果」）。
+             * ⚠ **2对3：确认之后由 `settleConfirmedEvolution` 统一收尾**
+             * （先结算完**自己**这一份，再切给另一名杀手确认）。
              *
-             * 顺序很重要：先把"确认前的选择"都验完（上面的几个 if），
-             * 再来执行力量 +N、锁定牌入手、手牌超限弃牌 ——
-             * 这样"要弃牌"和"还没选要不要转主雕像"就不会互相卡死。
+             * 这里**绝不能提前 `break` 去切人** —— 那样当前这名杀手的
+             * 力量 / 入场 / 弃牌都还没结算就换人了（丢效果）。
              */
-            resolveDeferredEvolution(state);
             /**
-             * **已选好的"转换主雕像"到这里才真正生效**（用户要求"选择要确认"）。
-             * 点那一尊的时候只记在 `pendingStatueEvoTarget` 里。
+             * ⚠ **顺序（用户口径）**：
+             *   ① 确认进化效果（就是这一步）
+             *   ② **双方坍塌结算**（墓穴地图）
+             *   ③ 变体1 里与进化有关的特性
+             *   ④ **执行进化效果**：力量 / 选卡 / 选牌 / 选主雕像 / 选地点 / 入场 / 弃牌
              *
-             * ⚠ 不给幸存者写战报 —— 用户要求「是否切换主雕像不能写在幸存者战报里」。
+             * 以前是反的：`runUpgrade` 在确认**之前**就把"选进化卡""二选一解锁"
+             * 挂了出来，而坍塌又插在确认之前 —— 于是"选卡（=执行进化效果）"
+             * 跑到"确认"前面去了。
+             *
+             * ② 的坍塌：`interceptEvolutionForCollapse` 只记下了
+             * `pendingCollapseAfterEvolution`，到这里才真正开塌。
+             * 本 handler 已经跑完（升级挂好了确认面板），所以可以安全地再推一次升级。
              */
-            if (state.pendingStatueEvoTarget) {
-                const from = state.players[state.killerId ?? '']?.statueIndex ?? 0;
-                const targetId = state.pendingStatueEvoTarget;
-                const to = state.players[targetId];
-                state.pendingStatueEvoTarget = null;
-                if (switchMainStatue(state, targetId)) {
-                    log(state, `雕像 1 级：主雕像从 ${from} 号转换为 ${to?.statueIndex ?? '?'} 号。`, 'killer');
+            if (state.pendingCollapseAfterEvolution) {
+                /**
+                 * ⚠ **这里不要再调 `runUpgrade`**：确认面板早就挂好了
+                 * （`setUpgradeHandler` 在被拦下后自己补跑过一次），
+                 * 再调一次就会**连升两级**。
+                 * 只做"把这次坍塌结掉"这一件事。
+                 */
+                const levelForCollapse = state.pendingCollapseLevel;
+                state.pendingCollapseAfterEvolution = false;
+                const savedConsumed = state.collapseConsumedForLevel ?? 0;
+                state.collapseConsumedForLevel = levelForCollapse;
+                /**
+                 * ⚠ `beginCollapse` 只认 `pendingCollapse`（它是"正要塌"的闸门）。
+                 * 我们把拦截推迟到了确认之后，所以这里要**自己把它立起来**，
+                 * 否则 `beginCollapse` 会直接返回 null、什么都不塌
+                 * （这个坑就是 `_probe-collapse` 抓出来的）。
+                 */
+                state.pendingCollapse = true;
+                const collapsedTo = beginCollapse(state);
+                if (collapsedTo)
+                    log(state, `墓穴坍塌：「${roomName(state, collapsedTo)}」塌了。`, 'all', true);
+                state.collapseConsumedForLevel = savedConsumed;
+                /**
+                 * ⚠ **坍塌有人要"轮流走一步"时就此打住**（用户口径：
+                 * 「坍塌结算后才执行进化效果」）—— 等他们全走完，
+                 * 由 `setCollapseDoneHandler` 接着推进化流程。
+                 *
+                 * 以前不管这个就直接往下挂"选进化卡"，于是**两个待办同时挂着**：
+                 * 一边在问幸存者移动、一边弹出进化选卡（用户报的截图就是这个）。
+                 */
+                if (collapseStillResolving(state)) {
+                    log(state, '坍塌还没处理完，进化效果等大家走完再继续。', 'killer');
+                    break;
                 }
             }
-            state.pendingStatueEvoSwitch = false;
-            state.pendingEvolutionAck = null;
             /**
-             * 【变体1】特性 14「埋伏等待」的开局升级：**确认完直接回到开局流程**。
-             *
-             * ⚠ 不能落到下面的 `maybeCloseKillerUpkeep` —— 那会把这一次当成
-             * 正常杀手回合收尾（多抽 3 张牌、还会推进到下一个杀手）。
+             * ③ **进化相关的特性卡**（只有开了变体1才有；函数自己会判）。
+             * 17 要选惊吓目标、18 要点地图选门 —— 有这类选择就先停下，
+             * 选完由 `advanceEvolutionAfterChoice` 接着走。
              */
-            if (state.pendingTraitSetupResume) {
-                state.pendingTraitSetupResume = false;
-                startRound(state);
+            if (evolutionTraitStage(state, state.killerLevel))
                 break;
-            }
             /**
-             * 结算时才可能入手新牌 → 可能超上限要弃牌。
-             * 这时**不能**继续往下走（`maybeCloseKillerUpkeep` 会推进阶段），
-             * 得等玩家把牌弃完。
+             * ④ 挂出这一级"要你选的东西"；有东西要选就先停下，
+             * 选完由 `advanceEvolutionAfterChoice` 接着走。
              */
-            if (state.pendingKillerDiscards > 0)
+            if (advanceEvolutionChoices(state))
                 break;
-            maybeCloseKillerUpkeep(state);
+            settleConfirmedEvolution(state);
             break;
         }
         case 'confirmWhizSearch': {
@@ -10147,6 +11704,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 break;
             }
             resumeAfterKillerChoice(state);
+            /**
+             * 特性 18「狡诈猎手」的封堵是**进化流程里的一步**：
+             * 封完（18 只封 1 扇，`pendingBlockadeJob` 已清）就回去继续进化
+             * （选锁定牌 / 选进化卡 / 结算）。
+             */
+            if (!state.pendingBlockadeJob)
+                advanceEvolutionAfterChoice(state);
             if (state.phase === 'upkeep')
                 maybeCloseKillerUpkeep(state);
             break;
@@ -10437,7 +12001,27 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
     const activeId = activePlayerId(state);
     const controllingActive = isControllerActive(state, controllerId);
     let legalMoves: string[] = [];
-    if (controllingActive && activeId) {
+    /**
+     * 【墓穴】坍塌收尾：这时候地图上**唯一能点**的就是"离开废墟"的相邻格。
+     *
+     * ⚠ 必须排在**最前面**，而且**不能再要求 `controllingActive && activeId`**：
+     * 坍塌是"升级时"发生的，`activePlayerId` 那时还指着**杀手**
+     * （`killerMain` / `upkeep` 都返回杀手），可轮到走的是**幸存者** ——
+     * 于是地图高亮的是杀手的移动候选、幸存者该点的格子反而没有圈
+     * （用户报的"点选地图要高亮，有些没做到"）。
+     *
+     * 只给"操控着当前这个人"的观众下发；别人（1对3 的杀手、2对3 的另一名杀手）
+     * 拿到空数组 —— 坍塌的移动不该显示在别人界面上。
+     */
+    const collapseMoverNow = state.pendingCollapseMoves?.currentId
+        ? state.players[state.pendingCollapseMoves.currentId]
+        : null;
+    if (collapseMoverNow) {
+        legalMoves = controlsPiece(state, controllerId, collapseMoverNow)
+            ? collapseMoveOptions(state, collapseMoverNow)
+            : [];
+    }
+    else if (controllingActive && activeId) {
         if (state.pendingPathDraft && state.phase === 'killerMain') {
             const last = state.pendingPathDraft.rooms[state.pendingPathDraft.rooms.length - 1];
             /**
@@ -10581,7 +12165,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         }
         else if (state.phase === 'encounter' &&
             state.encounter?.step === 'flee' &&
-            activeId === state.encounter.fleeQueue[0]) {
+            activeId === state.encounter.targetId) {
             /**
              * minRange=1：原地要靠「留在原地」按钮单独表达，不把当前格算成可点的落点。
              *
@@ -10602,14 +12186,41 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
      * 所以 2对3 必须像 1对3 一样以**自己操控的棋子**为准，
      * 否则另一名杀手的视角会被当成当前行动者、看到别人的手牌。
      */
-    const viewPieceRaw = state.mode === 'multi' || state.mode === '2v3'
-        ? you
-        : controllingActive && activeId
-            ? state.players[activeId]
-            : you;
+    /**
+     * ⚠ **【墓穴】坍塌收尾优先**：这一步不属于"谁的回合"，而 `activePlayerId`
+     * 那时还指着**杀手**（`killerMain` / `upkeep` 都返回杀手）—— 于是快照的 `you`
+     * 会被算成杀手，客户端就**不会切到幸存者界面**：被压到的幸存者只能看着
+     * 杀手侧的"确认新效果"面板，自己那步"离开废墟"根本点不了
+     * （用户报的"单人模式坍塌砸到幸存者，没有切到幸存者界面"）。
+     *
+     * `resolveYouForController` 本来就以 collapseMover 优先，这里必须跟它一致。
+     *
+     * ⚠⚠ **但"该走的人"必须和这个观众对得上** —— 用户报的
+     * 「坍塌时若杀手需移动，幸存者方加载出了杀手的界面」就是这里出的：
+     * 以前直接 `collapseMoverNow`，轮到**杀手**走时，**所有人**（包括幸存者玩家）
+     * 的快照 `you` 都被改成杀手 —— 幸存者那边就渲染成杀手界面了
+     * （手牌区、行动区全变）。所以先按 `controlsPiece` 判一句，
+     * 不是自己的人就继续往下走原来的判定，绝不跨阵营。
+     */
+    const collapseMoverMine =
+        collapseMoverNow && controlsPiece(state, controllerId, collapseMoverNow)
+            ? collapseMoverNow
+            : null;
+    const viewPieceRaw = collapseMoverMine
+        ? collapseMoverMine
+        : state.mode === 'multi' || state.mode === '2v3'
+            ? you
+            : controllingActive && activeId
+                ? state.players[activeId]
+                : you;
     /** 杀手回合里幸存者装备溢出：仍以杀手座位看雾与手牌，弃装数据走 pendingItemDiscard */
     let viewPiece = viewPieceRaw;
-    if (state.pendingItemDiscard) {
+    /**
+     * ⚠ **坍塌收尾期间不要套用"装备溢出仍看杀手座位"那条** ——
+     * 那会把上面刚定好的"该走的那个人"又盖回杀手。
+     * 弃装面板等坍塌走完再处理（顺序：先离开废墟，再弃装备）。
+     */
+    if (state.pendingItemDiscard && !collapseMoverMine) {
         const keepKiller = (state.phase === 'killerMain' ||
             state.phase === 'upkeep' ||
             state.phase === 'noiseReport' ||
@@ -10686,6 +12297,26 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         ];
     }
     /**
+     * 【杀手界面・地图旁边的信息栏】**本大回合的全部战报**（用户要求）。
+     *
+     * 口径：
+     *  - 范围 = **当前这个大回合**（`l.round === state.round`，即幸存者大回合 + 本轮的杀手回合）；
+     *  - 内容 = **杀手本来就能看到的那部分**（用和 `visibleLogs` 完全同一套可见性判定，
+     *    所以幸存者私密日志、以及雾阶段不该给他的「共通信息」都不会漏进去）；
+     *  - 只给**杀手视角**（幸存者那边本来就有完整战报栏）。
+     *
+     * ⚠ 不直接复用 `visibleLogs`：它被截到最近 80 条，一个热闹的大回合会丢开头几条。
+     */
+    const killerCanSee = (l: LogEntry) =>
+        l.vis !== 'survivorSecret' && (l.vis !== 'survivor' || Boolean(l.needsCommon && killerFogPhase));
+    const roundLogs =
+        viewerFaction === 'killer'
+            ? state.logs
+                .filter((l) => (l.round ?? 0) === state.round && killerCanSee(l))
+                .slice(-200)
+                .map((l) => l.text)
+            : [];
+    /**
      * 幸存者大回合（含发现）期间，杀手不许知道内部进度：
      * 现在轮到谁、谁要翻发现牌、三个人是不是都行动完了 —— 一律抹掉。
      * 幸存者自己看到的 activePlayerId 不受影响（这条只作用于杀手视角）。
@@ -10710,6 +12341,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         .map((c) => ({ id: c.id, name: c.name, locked: Boolean(c.locked) }));
     return {
         roomCode: state.roomCode,
+        /** 这一局的标识（客户端用它区分"重新开始后的新一局"） */
+        matchId: state.matchId,
         hostId: state.hostId,
         mode: state.mode,
         /** 「分头行动」：客户端据此把顶栏钥匙区换成模式标识、并显示各自钥匙数 */
@@ -10836,6 +12469,14 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
          * - `traitPickerIds`：还等着选的人（显示"等待 XX 选特性"）。
          */
         variant1: state.variant1,
+        /**
+         * 【变体3】计划卡开关 —— 大厅 / 选人界面那颗按钮靠它回显"开 / 关"。
+         *
+         * ⚠ 以前**没下发这个字段**，客户端拿到的永远是 `undefined`：
+         * 点一下服务端其实开了，但按钮一直显示"关" → 看起来像"点了没反应"。
+         * 这是**模式设置**，双方都该知道（`plans` 那块才只发幸存者）。
+         */
+        variant3: state.variant3,
         traitDifficulty: state.variant1 ? state.traitDifficulty : undefined,
         traitDefs: (() => {
             if (!state.variant1) return [];
@@ -11073,9 +12714,72 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             ) &&
             !killerInRoom(state, viewPiece.roomId),
         ) && !viewPiece.searchedThisTurn,
+        /**
+         * **"有杀手在你这个地点吗"**（服务端唯一口径，客户端别再自己算一遍）。
+         *
+         * 客户端以前自己遍历棋子判"同地"，结果漏了雕像豁免 ——
+         * 雕像局里那个**残留的主体棋子**还停在杀手起始房间（墓穴 = 隐藏出口 G1），
+         * 谁站那儿就搜不了、修不了（用户报的「1对1、墓穴、杀手是雕像、
+         * 乔治在 G1 没有搜索」）。现在直接下发 `killerInRoom` 的结果。
+         */
+        killerInYourRoom: Boolean(viewPiece.roomId && killerInRoom(state, viewPiece.roomId)),
         repairedThisPhase: state.repairedThisPhase,
         firecrackerThisRound: state.firecrackerThisRound,
         firecrackerRoomId: visibleFirecrackerRoom,
+        /**
+         * 【变体3】**计划卡**（只有幸存者视角有；杀手完全看不到）。
+         *
+         * 里面把两张卡"要画什么"都算好了（进度完成情况、能力是否已用、
+         * 是不是当前进行中的计划），客户端只管画。
+         */
+        plans: viewerFaction === 'survivor' && state.variant3
+            ? {
+                cards: (state.planHand ?? [])
+                    /**
+                     * ⚠ **完成某一计划后，另一张计划卡隐藏**（用户口径）——
+                     * 所以只保留已完成的那张，另一张不再下发。
+                     */
+                    .filter((id) => !state.planCompletedId || id === state.planCompletedId)
+                    .map((id) => planViewFor(state, id, viewPiece))
+                    .filter((x): x is NonNullable<typeof x> => Boolean(x)),
+                currentId: state.planCurrentId,
+                step: state.planStep,
+                completedId: state.planCompletedId,
+                /** 地图上的计划标记（只画在幸存者地图上） */
+                markers: [...(state.planMarkers ?? [])],
+                canPick: canPickPlan(state, controllerId),
+                voterIds: planVoters(state).map((v) => v.id),
+                /** 这名观众自己是不是投票人（客户端据此决定要不要弹"同意/不同意"） */
+                myVoterId: planVoters(state).some((v) => v.id === controllerId)
+                    ? controllerId
+                    : null,
+                pendingSwitch: state.pendingPlanSwitch
+                    ? {
+                        toId: state.pendingPlanSwitch.toId,
+                        fromId: state.pendingPlanSwitch.fromId,
+                        requestedBy: state.pendingPlanSwitch.requestedBy,
+                        ...planSwitchProgress(state),
+                    }
+                    : null,
+                /** 【通道調查】当前这名观众能走的秘密通道出口（①互连之后就是整个通道网络） */
+                passageEnds: viewPiece?.faction === 'survivor'
+                    ? passageNeighborsFor(state, viewPiece.roomId)
+                    : [],
+                /** 【通道調查 ②】正在等选通道出口 */
+                pendingPassage: viewerFaction === 'survivor' ? [...(state.pendingPlanPassage ?? [])] : [],
+                /** 【情報分享】完成计划后等选一名幸存者抽牌 */
+                pendingTarget: viewerFaction === 'survivor' && state.pendingPlanTarget
+                    ? {
+                        chooserId: state.pendingPlanTarget.chooserId,
+                        chooserName: state.players[state.pendingPlanTarget.chooserId]?.name ?? null,
+                        candidates: state.pendingPlanTarget.candidates.map((id) => ({
+                            id,
+                            name: state.players[id]?.name ?? id,
+                        })),
+                    }
+                    : null,
+            }
+            : null,
         suitcaseAvailable: state.suitcaseAvailable,
         /**
          * **地图特殊规则**的状态（实验室 / 城堡）。
@@ -11161,6 +12865,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
                     roomId: pend.roomId,
                     currentId: null,
                     name: mover.name,
+                    /** 阵营也告诉客户端：面板只画在"该走的那一方"的界面上 */
+                    faction: mover.faction ?? undefined,
                     options: [] as string[],
                     mustMove: false,
                     waiting: true,
@@ -11175,6 +12881,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
                 roomId: pend.roomId,
                 currentId: mover.id,
                 name: mover.name,
+                faction: mover.faction ?? undefined,
                 options,
                 mustMove: options.length > 0,
                 waiting: false,
@@ -11319,6 +13026,29 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
                 defenseOptions: Object.fromEntries(Object.entries(state.encounter.defenseOptions).map(([k, v]) => [k, [...v]])),
                 attackOptions: [...state.encounter.attackOptions],
                 fleeQueue: [...state.encounter.fleeQueue],
+                /**
+                 * 【（甲）撤离先选人】交给客户端的名单：
+                 *  - `fleeReadyIds`：**还没撤离、还能被点**的幸存者
+                 *  - `fleeTargetId`：已经被选中、正在撤离的那一个（null = 正在等选人）
+                 * 客户端据此画"谁来撤离"的名单，并在选中后显示撤离操作。
+                 */
+                fleeReadyIds: pendingFleeIds(state),
+                fleeTargetId: state.encounter.targetId,
+                /**
+                 * 【变体3】燃燒瓶的第二段：防御物品确认完之后，单独问
+                 * "要不要弃掉一个威士忌酒瓶 +2"。
+                 *
+                 * ⚠ **只发给幸存者视角**（用户口径：计划的事永远不告诉杀手）——
+                 * 否则杀手从快照里看到"有人被问要不要弃威士忌"，就知道幸存者手里
+                 * 有【燃燒瓶】这张计划卡了。
+                 */
+                whiskeyOffer: viewerFaction === 'survivor' && state.encounter.whiskeyOffer
+                    ? { playerId: state.encounter.whiskeyOffer.playerId }
+                    : null,
+                /** 同理：谁弃了威士忌也**不下发给杀手**（那是【燃燒瓶】的痕迹） */
+                whiskeyUsed: viewerFaction === 'survivor'
+                    ? { ...(state.encounter.whiskeyUsed ?? {}) }
+                    : {},
             }
             : null,
         killerHandCount: state.killerHand.length,
@@ -11357,6 +13087,11 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             viewerFaction === 'killer'
                 ? (state.killerIntel ?? []).map((e) => ({ title: e.title, lines: [...e.lines] }))
                 : [],
+        /**
+         * 【杀手界面】**本大回合的全部战报**（用户要求：放在地图旁边那块信息栏里）。
+         * 只给杀手视角；内容按"他本来就看得见"过滤（见上面 `roundLogs` 的注释）。
+         */
+        roundLogs,
         /**
          * **杀手当前打出的牌**（卡牌 id）——**双方都下发**：
          * 幸存者在地图右边看到这张牌的卡面，知道杀手这回合打了什么。
@@ -11526,6 +13261,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingCoreNeighbors: viewerFaction === 'killer' ? [...(state.pendingCoreNeighbors ?? [])] : [],
         pendingTeleportPick: viewerFaction === 'killer' ? [...(state.pendingTeleportPick ?? [])] : [],
         pendingPassagePick: viewerFaction === 'killer' ? [...(state.pendingPassagePick ?? [])] : [],
+        /** 恐詭管道：已选中、等确认的落点（客户端画「确认潜入」按钮用） */
+        pendingPassageRoom: viewerFaction === 'killer' ? state.pendingPassageRoom : null,
         /** 【變形 / 戰鬥適應】等杀手从弃牌堆挑要永久移除的牌 */
         pendingDiscardRemove: viewerFaction === 'killer' && state.pendingDiscardRemove
             ? {
@@ -11558,6 +13295,16 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingEffectChoice: viewerFaction === 'killer' && state.pendingEffectChoice
             ? { options: state.pendingEffectChoice.options }
             : null,
+        /**
+         * **还有没有"打到一半、等杀手做选择"的牌。**
+         *
+         * 客户端以前自己抄了一份判定（`killerPlayable` 里逐个查 `pendingXxx`），
+         * 于是每次闸门加字段两边都会漏 —— 用户报的
+         * 「选择效果期间还能选择其他快速卡牌打」就是两边都漏了
+         * `pendingEffectChoice` / `pendingMoveChoices`。
+         * 现在直接下发服务端那一份答案，客户端照着置灰，不再各写一份。
+         */
+        pendingKillerChoice: hasPendingKillerChoice(state),
         /**
          * 潜行起点（幸存者用来判断「杀手是不是可能在我这格」）。
          * 这是幸存者侧情报：杀手自己拿到没用，旁观/观战也不该顺着它找杀手。
