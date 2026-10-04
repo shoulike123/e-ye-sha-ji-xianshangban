@@ -8403,6 +8403,51 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   }
                 }
                 /**
+                 * 【替换牌】煤油灯 —— 卡面：「+1 防御值；**或额外行动：移动通过一条
+                 * 秘密通道**。可反复使用。」
+                 *
+                 * 两半各走各的：
+                 *  - 「+1 防御值」在**遭遇防御**里选（服务端 `DEFENSE_ITEMS.lamp`，
+                 *    `consume: false` → 可反复），不在这里；
+                 *  - 「通过秘密通道」是**额外行动**，就是这一组按钮
+                 *    （每个出口一个，和上面「观察入微」同一套写法）。
+                 *
+                 * ⚠ 以前只实现了服务端、**这里没有入口** —— 拿到煤油灯也只能当防御物品用，
+                 * 「穿过秘密通道」那一半等于没有（用户问的"煤油灯和神秘包裹有没有
+                 * 放进额外行动窗口里"）。
+                 */
+                if ((p.items.lamp ?? 0) > 0) {
+                  for (const rid of ends) {
+                    add(
+                      `lamp-${rid}`,
+                      `煤油灯穿过秘密通道→${roomDisplayName(state.map, rid, viewerFaction)}`,
+                      () =>
+                        void runSurvivor(`${p.name}用煤油灯穿过秘密通道`, {
+                          type: 'useItem',
+                          itemId: 'lamp',
+                          toRoomId: rid,
+                          actorPlayerId: p.id,
+                        }),
+                    );
+                  }
+                }
+                /**
+                 * 【替换牌】神秘包裹 —— 卡面：「额外行动：从发现牌堆抽取一张卡牌，
+                 * 并在你的地点发出响声。」
+                 *
+                 * 同样是**额外行动**（服务端 `useItem` 的 `extraItems` 里有 `parcel`）：
+                 * 不占一般行动、做完小回合也能做，但**必然发出响声**。
+                 */
+                if ((p.items.parcel ?? 0) > 0) {
+                  add('parcel', '神秘包裹（抽一张发现牌，会发出响声）', () =>
+                    void runSurvivor(`${p.name}打开神秘包裹`, {
+                      type: 'useItem',
+                      itemId: 'parcel',
+                      actorPlayerId: p.id,
+                    }),
+                  );
+                }
+                /**
                  * 狼人宝藏：这名幸存者**自己所在地点**有没开过的宝箱时，可以开一个。
                  * （和主行动区那个按钮同一套判定，只是这里按**被检查的角色**算，
                  *   不能再用 `state.you` —— 否则多人热座下只有第一个幸存者能开箱。）
