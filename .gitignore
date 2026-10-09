@@ -9,3 +9,4 @@ server/dist/
 .env.*
 # 右键菜单测试用的 Board.tsx 编译产物（由 scripts/tests/build-menu.mjs 生成）
 client/_ssrbuild/
+Terrorscape2_RuleBook_机翻对照版.pdf
