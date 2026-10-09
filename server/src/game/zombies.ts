@@ -54,6 +54,7 @@ function queen(state: GameState): PlayerState | null {
  * 但僵尸仍各按女王力量计。
  */
 export function zombiePower(state: GameState): number {
+  /** 每个僵尸各自一份，和女王力量相同，同样不能超过上限 */
   return effectiveKillerPower(state);
 }
 
@@ -92,12 +93,17 @@ export function spawnZombieAt(state: GameState, roomId: string): string | null {
   return id;
 }
 
-/** 移除一个僵尸（献祭 / 被十字弩消灭） */
-export function removeZombie(state: GameState, zombieId: string): boolean {
+/**
+ * 移除一个僵尸（献祭 / 被十字弩消灭）。
+ * `quiet`：调用方自己写战报（十字弩只报「哪里的僵尸被消灭」，不另写一条「移除了」）。
+ */
+export function removeZombie(state: GameState, zombieId: string, quiet = false): boolean {
   const i = (state.zombies ?? []).findIndex((z) => z.id === zombieId);
   if (i < 0) return false;
   const [z] = state.zombies.splice(i, 1);
-  log(state, `移除了「${roomName(state, z!.roomId)}」的一个僵尸（剩余 ${state.zombies.length} 个）。`, 'all', true);
+  if (!quiet) {
+    log(state, `移除了「${roomName(state, z!.roomId)}」的一个僵尸（剩余 ${state.zombies.length} 个）。`, 'all', true);
+  }
   return true;
 }
 
@@ -108,13 +114,14 @@ export function removeZombie(state: GameState, zombieId: string): boolean {
  * 这里按**最短路径**算出经过哪些门，把其中被封堵的去掉。
  * 找不到路径（或本来就同格）就什么都不做。
  */
-export function clearBlockadesAlongPath(state: GameState, fromRoomId: string, toRoomId: string): string[] {
-  if (!fromRoomId || !toRoomId || fromRoomId === toRoomId) return [];
-  const path = shortestZombiePath(state, fromRoomId, toRoomId);
-  if (!path || path.length < 2) return [];
+/** 沿给定路线拆掉走过的封堵（僵尸实际走的那几格，不另算一条最短路）。 */
+export function clearBlockadesOnRoute(state: GameState, rooms: string[]): string[] {
   const cleared: string[] = [];
-  for (let i = 0; i < path.length - 1; i++) {
-    const door = doorId(path[i]!, path[i + 1]!);
+  for (let i = 0; i < rooms.length - 1; i++) {
+    const a = rooms[i];
+    const b = rooms[i + 1];
+    if (!a || !b || a === b) continue;
+    const door = doorId(a, b);
     if (!isDoorBlocked(state, door)) continue;
     removeBlockade(state, door);
     cleared.push(door);
@@ -128,6 +135,13 @@ export function clearBlockadesAlongPath(state: GameState, fromRoomId: string, to
     );
   }
   return cleared;
+}
+
+export function clearBlockadesAlongPath(state: GameState, fromRoomId: string, toRoomId: string): string[] {
+  if (!fromRoomId || !toRoomId || fromRoomId === toRoomId) return [];
+  const path = shortestZombiePath(state, fromRoomId, toRoomId);
+  if (!path || path.length < 2) return [];
+  return clearBlockadesOnRoute(state, path);
 }
 
 /** 僵尸走路用的最短路径（可用杀手密道，封堵不挡路） */
@@ -154,6 +168,15 @@ function shortestZombiePath(state: GameState, from: string, to: string): string[
   return out;
 }
 
+/**
+ * 〔屍群來了〕能落到的格子：从出发地走 **1** 格。
+ * 和僵尸走路同一套相邻（杀手密道算 1 格，封堵不挡路）。
+ */
+export function hordeStepRooms(state: GameState, fromRoomId: string): string[] {
+  if (!fromRoomId) return [];
+  return roomsAdjacentKiller(state, fromRoomId);
+}
+
 /** 把一个僵尸移到相邻/任意地点（**经过封堵会移去封堵**） */
 export function moveZombie(state: GameState, zombieId: string, toRoomId: string): boolean {
   const z = (state.zombies ?? []).find((x) => x.id === zombieId);
@@ -177,7 +200,11 @@ export function spawnZombieAtQueen(state: GameState): string | null {
  *
  * - 只能选**有僵尸的地点**作为出发地（由调用方校验）。
  * - 僵尸按路径一步步走，**经过封堵会移去封堵**。
- * - 目的地不需要与出发地相邻（牌面允许移动 ×N），但路径必须存在。
+ * - 目的地**不需要与出发地相邻**（牌面写的是"朝同一个目的地"），
+ *   但**这一群只走 N 格**（用户口径：「女王的尸群来了只能移动一格」）——
+ *   目的地很远时是"朝那个方向走 1 格"，不是直接飞过去。
+ * - 路线用 `shortestZombiePath`：**杀手密道（`pathType:'killer'` 的边）算 1 格**
+ *   （用户口径：「小屋的杀手密道应该是算在内」）。
  */
 export function hordeMove(state: GameState, fromRoomId: string, toRoomId: string, steps: number): number {
   const list = zombiesIn(state, fromRoomId);
@@ -191,14 +218,23 @@ export function hordeMove(state: GameState, fromRoomId: string, toRoomId: string
     log(state, `屍群來了：从「${roomName(state, fromRoomId)}」到不了「${roomName(state, toRoomId)}」。`, 'killer');
     return 0;
   }
-  /** 经过的封堵先移去（一群僵尸一起走，只需要结算一次） */
-  clearBlockadesAlongPath(state, fromRoomId, toRoomId);
-  for (const z of list) z.roomId = toRoomId;
+  /**
+   * ⚠ **只走 `steps` 格**（以前是直接 `roomId = toRoomId`，一步跨好几个房间 ——
+   * 战报却写着「移動×1」，自相矛盾）。
+   */
+  const walk = Math.max(0, Math.min(Math.trunc(steps), path.length - 1));
+  const dest = path[walk] ?? fromRoomId;
+  /** 经过的封堵先移去（一群僵尸一起走，只需要结算一次）—— 只算**这 N 格**走过的 */
+  if (walk > 0 && dest !== fromRoomId)
+    clearBlockadesAlongPath(state, fromRoomId, dest);
+  for (const z of list) z.roomId = dest;
   const n = list.length;
   const route = path.map((id) => roomName(state, id)).join(' → ');
+  const left = path.length - 1 - walk;
   log(
     state,
-    `屍群來了：「${roomName(state, fromRoomId)}」的 ${n} 个僵尸朝「${roomName(state, toRoomId)}」移動×${steps}（路线：${route}）。`,
+    `屍群來了：「${roomName(state, fromRoomId)}」的 ${n} 个僵尸朝「${roomName(state, toRoomId)}」移動×${walk}` +
+      `（走到「${roomName(state, dest)}」${left > 0 ? `，还差 ${left} 格` : '，已到目的地'}；路线：${route}）。`,
     'all',
     true,
   );

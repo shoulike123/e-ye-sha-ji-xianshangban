@@ -694,7 +694,7 @@ console.log('=== ⑩ 遗物牌堆与 5 张遗物牌 ===');
       '非遭遇时问的还是古代护符', String(g4.pendingAmulet?.relic));
   }
 
-  /** ⑥ 洞察之球：特殊行动，用了**依次摸两张牌** */
+  /** ⑥ 洞察之球：特殊行动 = **搜索两次**（用户口径：能触发欧菲莉亚的第六感） */
   {
     const g = mkCrypt();
     reset(g);
@@ -712,18 +712,77 @@ console.log('=== ⑩ 遗物牌堆与 5 张遗物牌 ===');
     const deckBefore = g.searchDeck.length;
     const handBefore = JSON.stringify(s.items);
     handleAction(g, s.id, { type: 'useInsightOrb' }, content);
-    /** 一次行动摸走 2 张牌 */
+    /** 搜两次 → 一共 2 张（非欧菲莉亚时每次摸 1 张） */
     ok(
       g.searchDeck.length === deckBefore - 2,
-      '洞察之球一次摸走 2 张牌',
+      '**搜索两次 → 一共摸走 2 张**',
       `${deckBefore} → ${g.searchDeck.length}`,
+    );
+    ok(
+      g.logs.filter((l) => l.text.includes('搜索物资')).length >= 2 ||
+        g.logs.some((l) => l.text.includes('搜索两次')),
+      '**战报写的是"搜索两次"**',
+      g.logs.map((l) => l.text).find((t) => t.includes('洞察之球')) ?? '',
     );
     ok(!relic.hasRelic(s, 'insight'), '洞察之球用掉（一次性）');
     ok(!(s.items.relic_insight > 0), '从背包移除', handBefore);
     ok(g.survivorDiscard.includes('relic_insight'), '用掉进普通弃牌堆');
     ok(s.mainActionUsed === true, '占一次一般行动（特殊行动属于第 4 项）');
-    /** 它**不是**"搜索物资"，所以不占用本回合的搜索次数 */
-    ok(s.searchedThisTurn === false, '不占「本回合搜索过」——它本身不是搜索那个按钮');
+    /**
+     * ⚠ **口径（用户明确）**：「洞察之球是作为**特殊行动**，效果是**搜索两次**，
+     * 但**它不算常规的搜索**」—— 所以"本回合搜索过物资"这个账**不动**。
+     */
+    ok(s.searchedThisTurn === false, '**不算常规的搜索**（不占"本回合搜索过物资"）');
+  }
+
+  /** ⑥-b 洞察之球 + 欧菲莉亚「第六感」：每次搜索都摸 2 选 1 */
+  {
+    const g = mkCrypt();
+    reset(g);
+    /** 换成欧菲莉亚（survivor7，「第六感」：搜索时摸 2 选 1） */
+    const s = g.players[survivorIds(g)[0]];
+    s.characterId = 'survivor7';
+    relic.giveRelic(g, s, 'relic_insight');
+    s.roomId = 'G1';
+    killerPiece(g).roomId = 'B1';
+    giveTurn(g, s.id);
+    const deckBefore = g.searchDeck.length;
+
+    handleAction(g, s.id, { type: 'useInsightOrb' }, content);
+    console.log(
+      `  第一次搜索：摸牌堆 ${deckBefore} → ${g.searchDeck.length}；` +
+      `待选第六感=${Boolean(g.pendingSixthSense)}；还剩搜索=${g.pendingInsightSearches}`,
+    );
+    ok(Boolean(g.pendingSixthSense), '**第一次搜索就触发了第六感**（摸 2 选 1）');
+    ok(g.searchDeck.length === deckBefore - 2, '第六感摸的是 2 张', `${deckBefore} → ${g.searchDeck.length}`);
+    ok(g.pendingInsightSearches === 1, '**还剩第二次搜索没跑**', String(g.pendingInsightSearches));
+
+    /** 选 1 张留下 → 剩下的搜索接着跑，又会摸 2 张、再问一次第六感 */
+    const firstPick = g.pendingSixthSense.cardIds[0];
+    handleAction(g, s.id, { type: 'resolveSixthSense', cardId: firstPick }, content);
+    const afterSecond = g.searchDeck.length;
+    console.log(
+      `  选完之后：摸牌堆 ${afterSecond}；第二次第六感=${Boolean(g.pendingSixthSense)}；` +
+      `还剩搜索=${g.pendingInsightSearches}`,
+    );
+    /**
+     * 第二次搜索照跑：摸牌堆的账 = 11 −2（第一次摸 2）+1（返回 1 张到牌库顶）
+     * −2（第二次摸 2）= 8。
+     */
+    ok(afterSecond === deckBefore - 3, '**第二次搜索照跑**（欧菲莉亚每次摸 2）',
+      `${deckBefore} → ${afterSecond}`);
+    ok(Boolean(g.pendingSixthSense), '第二次搜索也触发第六感');
+    ok(g.pendingInsightSearches === 0, '两次都跑完了', String(g.pendingInsightSearches));
+
+    /** 第二次也选完 → 这次特殊行动才算收尾 */
+    const secondPick = g.pendingSixthSense.cardIds[0];
+    handleAction(g, s.id, { type: 'resolveSixthSense', cardId: secondPick }, content);
+    ok(!g.pendingSixthSense, '第六感收掉了');
+    ok(g.pendingInsightSearches === 0, '搜索次数清零');
+    ok(s.mainActionUsed === true, '这次特殊行动占掉一般行动');
+    /** 返回的那两张要回到搜索牌库顶（第六感的规则） */
+    ok(g.searchDeck.length === deckBefore - 2, '两次各留 1 张、各返回 1 张',
+      `${deckBefore} → ${g.searchDeck.length}`);
   }
 
   /** ⑦ 遗物进背包：和普通物品一模一样的格子规则（上限 3，超了本人自选弃） */

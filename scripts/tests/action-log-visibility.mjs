@@ -6,8 +6,11 @@
  *     哪里的封堵被移除 / 哪里的哪个雕像被停滞 / 哪里的几个僵尸被消灭 /
  *     哪里的核心标记被移除 / 哪里的猎手陷阱被踩。
  *     → 实现手段是 `effects.logSplit(幸存者版, 杀手版)`。
- *  2. ⚠⚠ **例外：拆封堵必须点名**（用户明确：「分头行动要分清谁清除了封堵」）——
- *     这条**不能**并进上面那套里。本文件专门守它。
+ *  2. ⚠ **拆封堵：幸存者那边永远点名；杀手那边分模式**（用户 2026-02 口径，
+ *     取代更早的"一律点名"）：
+ *       · **一般模式** → 只告诉杀手现象（哪扇门的封堵没了），**不说是谁**；
+ *       · **分头行动** → 仍然点名（「分头行动要分清谁清除了封堵」）。
+ *     本文件专门守这两条。
  *  3. 遗物牌堆的「鑰匙」在**杀手方视角**要和普通钥匙（搜索/发现）**走一样的战报**
  *     —— 普通钥匙上架是 `'survivor'`（杀手看不到），所以遗物钥匙也不给杀手看。
  *  4. 城堡的机关大门：幸存者那边写"谁操作的控制杆"，**杀手只知道门在哪**。
@@ -73,7 +76,7 @@ function after(st, run) {
 }
 const anyHas = (arr, kw) => arr.some((t) => t.includes(kw));
 
-console.log('=== ① 拆封堵：**双方都要看到是谁拆的**（例外，不能并进"只报现象"） ===');
+console.log('=== ① 拆封堵：幸存者那边点名；杀手那边**一般模式不点名**、分头行动点名 ===');
 {
   const { st, p } = mkDuo();
   const door = st.map.edges.find((e) => !e.pathType || e.pathType === 'door');
@@ -81,10 +84,22 @@ console.log('=== ① 拆封堵：**双方都要看到是谁拆的**（例外，�
   st.blockades = [key];
   const name = p.name;
   const { killer, survivor } = after(st, () => removeBlockade(st, key, p.id));
-  console.log(`  杀手看到：${JSON.stringify(killer)}`);
-  ok(anyHas(killer, name), '**杀手战报里必须有人名**', killer.join(' | '));
-  ok(anyHas(killer, '封堵'), '也写明"哪扇门的封堵被移除"');
-  ok(anyHas(survivor, name), '幸存者那边也有人名');
+  console.log(`  一般模式 杀手看到：${JSON.stringify(killer)}`);
+  console.log(`  一般模式 幸存者看到：${JSON.stringify(survivor)}`);
+  ok(anyHas(survivor, name), '**幸存者那边必须有人名**', survivor.join(' | '));
+  ok(!anyHas(killer, name), '**一般模式：杀手战报里没有人名**（只说现象）', killer.join(' | '));
+  ok(anyHas(killer, '封堵'), '但写明"哪扇门的封堵被移除"');
+}
+{
+  /** 分头行动：同一件事要**点名**（那条口径没变） */
+  const { st, p } = mkDuo();
+  st.split = true;
+  const door = st.map.edges.find((e) => !e.pathType || e.pathType === 'door');
+  const key = [door.from, door.to].sort().join('|');
+  st.blockades = [key];
+  const { killer } = after(st, () => removeBlockade(st, key, p.id));
+  console.log(`  分头行动 杀手看到：${JSON.stringify(killer)}`);
+  ok(anyHas(killer, p.name), '**分头行动：杀手战报里仍然有人名**', killer.join(' | '));
 }
 
 console.log('=== ② 雕像被停滞：杀手只知道"哪尊、在哪"，不知道是谁 ===');
@@ -159,9 +174,18 @@ console.log('=== ⑥ 猎手陷阱被踩：杀手只知道哪里、哪种陷阱 =
   st.hunterTraps = { t1: { kind: 'bear', roomId: edge.to } };
   const { err, killer } = after(st, () => tryIt(st, 's', { type: 'move', toRoomId: edge.to }));
   console.log(`  从 ${edge.from} 走到 ${edge.to}（${err ?? 'OK'}）\n    杀手：${JSON.stringify(killer)}`);
-  ok(!anyHas(killer, p.name), '**杀手看不到是谁踩的**', killer.join(' | '));
+  /**
+   * ⚠ 口径改了（作者原话）：
+   *  - 「**受到伤害就明确说如何受到伤害，这个杀手要明确知道**」
+   *  - 「**捕熊陷阱没错，这个不用改**」
+   *
+   * 所以杀手现在**看得到是谁踩的** —— 旧断言（要求杀手看不到人名）已经过时，
+   * 换成"陷阱现象 + 谁受了伤"两条都在。
+   */
   ok(anyHas(killer, '捕熊陷阱') && anyHas(killer, '被触发'),
     '杀手看到"哪里的哪种陷阱被触发"', killer.join(' | '));
+  ok(anyHas(killer, p.name) && anyHas(killer, '受到'),
+    '**杀手看得到是谁受了伤、以及受伤这件事**', killer.join(' | '));
 }
 
 console.log('=== ⑦ 剛毅之盾 = 普通防御物品（能吃到乔治的防御笔记） ===');

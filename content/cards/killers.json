@@ -1090,9 +1090,7 @@
             "value": true
           },
           {
-            "op": "move",
-            "value": 99,
-            "min": 0
+            "op": "stealthToAnywhere"
           },
           {
             "op": "stealthResetTraps"

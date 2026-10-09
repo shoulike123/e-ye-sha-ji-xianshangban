@@ -36,6 +36,8 @@ interface StatusProps extends SharedProps {
   rescueCountdown?: number | null;
   /** 【分头行动】：顶栏钥匙区换成模式标识（钥匙各自保管，不上架） */
   split?: boolean;
+  /** 已〔中毒〕的幸存者 id。标记画在对应状态卡上。 */
+  poisoned?: string[];
 }
 
 interface SkillProps extends SharedProps {
@@ -231,6 +233,7 @@ export function SurvivorStatusBar({
   rescueCountdown = null,
   /** 【分头行动】：顶栏钥匙区换成模式标识 */
   split = false,
+  poisoned = [],
 }: StatusProps) {
   /**
    * 状态栏卡位**由布局数据决定**（`layout.statusBar.cards` 有多少项就画多少），
@@ -302,6 +305,20 @@ export function SurvivorStatusBar({
                   key={`fear-${i}`}
                   className={`surv-token fear${on ? ' on' : ''}`}
                   src={encodeURI(UI.fear)}
+                  alt=""
+                  draggable={false}
+                  style={boxStyle(tok)}
+                />
+              );
+            })}
+            {(layout.statusBar.poison ?? []).map((tok, i) => {
+              const p = slots[tok.card];
+              const on = Boolean(p && poisoned.includes(p.id));
+              return (
+                <img
+                  key={`poison-${i}`}
+                  className={`surv-token poison${on ? ' on' : ''}`}
+                  src={encodeURI('/Image/Killers/杀手九_女王/中毒标记.png')}
                   alt=""
                   draggable={false}
                   style={boxStyle(tok)}

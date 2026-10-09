@@ -12,6 +12,7 @@ import {
   drawKillerCards,
   discardConsumedItem,
   injuredSurvivorIds,
+  isLowProfile,
   log,
   mapDist,
   placeBlockade,
@@ -21,6 +22,8 @@ import {
   survivorActionVis,
   tryMove,
   killerAdjacentRooms,
+  noteSingleRoomSense,
+  noteSurvivorSeenAt,
 } from './effects.js';
 /** 守護之石出示后要**从背包移除并进普通弃牌堆**（它不是 ∞） */
 import { discardRelic, removeRelic } from './relic.js';
@@ -33,7 +36,7 @@ import {
   startSealAllBlockade,
   killerKindOf,
   /** 女猎手进化 4 级：追逐之后的〔移動〕×0-1 */
-  huntressChaseFollowupMove,
+  huntressTrackerFollowupMove,
 } from './evolution.js';
 import {
   resolveExecute,
@@ -188,13 +191,6 @@ export function effectiveCardSpeed(state: GameState, card: CardDef): string | un
     return 'fast';
   }
   return card.speed;
-}
-
-/** 安娜的低调：感知看不见她 */
-export function isLowProfile(state: GameState, p: PlayerState): boolean {
-  const ch = state.characters.find((c) => c.id === p.characterId);
-  if (ch?.skills.some((s) => s.id === 'low_profile' || s.name.includes('低调'))) return true;
-  return /安娜|anna|survivor1/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
 }
 
 /** 房间号以 R/B/G 开头的，分别是红蓝绿区 */
@@ -573,6 +569,15 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
       return false;
     case 'stealthToPassage':
       return stealthToPassage(state);
+    /**
+     * **〔潛行〕到任意地点** —— 女猎手「陷阱重置」用（卡面：「〔潜行〕到任意地点」）。
+     *
+     * ⚠ 用户口径：它和**保護色版的「恐詭管道」完全一致** ——
+     * **没有路径**，只有「点一个地点 → 按确认潜入」。
+     * 以前这张牌写的是 `move ×0-99`（逐格规划路径），手感完全不同。
+     */
+    case 'stealthToAnywhere':
+      return stealthToPassage(state, { anywhere: true, label: '陷阱重置' });
     case 'stealthAndMove': {
       const max = typeof fx.value === 'number' ? fx.value : 1;
       const min = typeof fx.min === 'number' ? fx.min : 0;
@@ -704,27 +709,20 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
       return beginSenseRoom(state);
     case 'senseColor':
       state.pendingSenseColor = true;
-      log(state, '请选择要感知的颜色区域：红 / 蓝 / 绿。');
+      log(state, '请选择要感知的颜色区域：红 / 蓝 / 绿。', 'killer');
       return true;
     case 'senseAdjacentPair':
       state.pendingSensePair = { firstRoomId: null };
-      log(state, '逻辑推理：请先点任意一个地点，再点一个与它相连的地点（门或一般通道，不含特殊通道；这两处不必与你相邻）。');
+      log(state, '逻辑推理：请先点任意一个地点，再点一个与它相连的地点（门或一般通道，不含特殊通道；这两处不必与你相邻）。', 'killer');
       return true;
     case 'move': {
       const max = typeof fx.value === 'number' ? fx.value : 1;
       const min = typeof fx.min === 'number' ? fx.min : 0;
       state.pendingPathDraft = { min, max, rooms: k.roomId ? [k.roomId] : [] };
-      /**
-       * **女猎手进化 4 级**：「使用『追逐』后〔移動〕×0-1」——
-       * 记下"这次草稿是追逐造成的"，等玩家确认走完那 1 步之后再追加一次 0-1 步。
-       * （草稿走完时 `confirmPathDraft` 会读这个标记。）
-       */
-      state.chaseFollowupPending = killerKindOf(state) === 'huntress'
-        && state.killerLevel >= 4
-        && /^huntress_chase_/.test(state.deferredPlayedCard ?? '');
       log(
         state,
         `请依次点相邻地点规划路径（${min}–${max} 步）。再点同一格可取消该步。步数合法后在行动区确认，才会移动。`,
+        'killer',
       );
       return true;
     }
@@ -846,7 +844,8 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
       // 杀手不会自己解除潜行，只在回合开始重现
       if (fx.value === false) return false;
       setStealth(k, true);
-      log(state, `${k.name} 在${roomName(state, k.roomId)}进入潜行。`);
+      log(state, `${k.name} 进入潜行。`, 'all', true);
+      log(state, `${k.name} 在「${roomName(state, k.roomId)}」进入潜行。`, 'killer');
       return false;
     case 'onReveal':
       state.stealthRevealKind = String(fx.value ?? '') as StealthRevealKind;
@@ -893,7 +892,9 @@ export function resolveSenseColor(state: GameState, color: 'R' | 'B' | 'G'): voi
   const whoLine = found.length
     ? `看到 ${found.length} 名幸存者：${found.map((s) => s.name).join('、')}`
     : '没有看到人。';
-  log(state, `感知${label}区域 —— ${placeLine}；${whoLine}`);
+  log(state, `感知${label}区域 —— ${placeLine}；${whoLine}`, 'killer');
+  /** 这个颜色区只有一个地点时，看到的人就在那里 */
+  noteSingleRoomSense(state, rooms, found);
   /**
    * **行动区把结果摆出来，等杀手确认**（用户要求："打牌之后如果需要获得信息，
    * 在行动区要给出信息然后杀手确认"）。
@@ -938,6 +939,7 @@ export function completeKillerCardMove(state: GameState, toRoomId: string): bool
     nowTaken >= min
       ? `已移动 ${nowTaken} 步，还可移动 ${max - nowTaken} 步。`
       : `已移动 ${nowTaken} 步，至少还要移动 ${min - nowTaken} 步。`,
+    'killer',
   );
   return false;
 }
@@ -997,7 +999,7 @@ export function confirmPathDraft(state: GameState): void {
      * 他**实际**走到了哪就更新目击记录：
      * 杀手地图上的立绘跟着他走到新位置，保持「眼见为实」的语义。
      */
-    if (finalRoom) state.witnessedAt[victim.id] = finalRoom;
+    if (finalRoom) noteSurvivorSeenAt(state, victim.id, finalRoom);
     log(
       state,
       `君臨天下：「${victim.name}」移动了 ${Math.max(0, draft.rooms.length - 1)} 步，现在在「${finalRoom ? roomName(state, finalRoom) : '?'}」。`,
@@ -1026,18 +1028,19 @@ export function confirmPathDraft(state: GameState): void {
   state.lastMoveCrossedBlockade = crossed;
   if (draft.rooms.length <= 1 && k.roomId) {
     state.lastMovePath = [k.roomId];
-    log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`);
+    if (k.stealth) {
+      log(state, `${k.name} 仍在潜行。`, 'all', true);
+      log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`, 'killer');
+    } else {
+      log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`);
+    }
   }
   state.pendingPathDraft = null;
   /**
-   * **女猎手进化 4 级**：「使用『追逐』后〔移動〕×0-1」。
-   * 追逐那 1 步走完之后，再给一次 0-1 步的移动机会（不想动就点确认）。
-   * 必须在 `continueKillerQueue` **之前**建新草稿，这样队列会等它。
+   * ⚠ 女猎手 4 级那次追加移动**不在这里** —— 它挂在「追蹤」结算完之后
+   * （`engine.ts` 的 `pickTrackerTarget` → `huntressTrackerFollowupMove`），
+   * 触发卡是**追蹤**、不是追逐（用户口径）。
    */
-  if (state.chaseFollowupPending) {
-    state.chaseFollowupPending = false;
-    huntressChaseFollowupMove(state);
-  }
   continueKillerQueue(state);
 }
 
@@ -1052,7 +1055,12 @@ export function finishKillerCardMove(state: GameState): void {
   if (taken === 0 && k?.roomId) {
     state.lastMovePath = [k.roomId];
     state.lastMoveCrossedBlockade = false;
-    log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`);
+    if (k.stealth) {
+      log(state, `${k.name} 仍在潜行。`, 'all', true);
+      log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`, 'killer');
+    } else {
+      log(state, `${k.name} 留在「${roomName(state, k.roomId)}」。`);
+    }
   }
   state.pendingMoveRange = null;
   state.pendingMoveMin = 0;
@@ -1100,7 +1108,7 @@ export function forcedRevealAndSearch(state: GameState): boolean {
     else log(state, '死亡盛放：没有人受到影响。');
   } else if (kind === 'lurkPick') {
     state.pendingLurkPick = true;
-    log(state, '潜藏威胁：请选择任意 1 名幸存者施加惊吓。');
+    log(state, '潜藏威胁：请选择任意 1 名幸存者施加惊吓。', 'killer');
     return true;
   }
   forcedSearchHere(state);
@@ -1343,10 +1351,8 @@ export function runAttackTimingExtras(state: GameState, card: CardDef | undefine
         if (typeof fx.value === 'number') addPermanentPower(state, fx.value);
         break;
       /**
-       * 戰鬥適應：永久从弃牌堆移除 1 张 —— **由玩家自己挑**。
-       * 遭遇紧接着要进防御步骤，所以这里不等他：先把选择挂上
-       * （`pendingDiscardRemove` 不参与 `hasPendingKillerChoice`，
-       *  因此不会把防御流程卡住），玩家在掷骰期间挑掉即可。
+       * 戰鬥適應：永久从弃牌堆移除 1 张 —— **打出后立刻由玩家自己挑**。
+       * 选完之前遭遇停在攻击步骤，不进入防御。
        */
       case 'removeFromDiscardPermanent': {
         const n = typeof fx.value === 'number' ? fx.value : 1;

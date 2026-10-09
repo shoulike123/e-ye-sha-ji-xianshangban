@@ -65,7 +65,13 @@ console.log('=== ① 机关大门选门：预选格要高亮、候选只给"门�
   ok(/out\.push\(gateDoorFrom\)|const out: string\[\] = \[gateDoorFrom\]/.test(block),
     '已经点的那一格也在列表里（再点一次 = 取消）');
 
-  ok(/pickedRoomIds=\{\[[\s\S]{0,200}gateUsable && gateDoorFrom \? \[gateDoorFrom\]/.test(views),
+  /**
+   * ⚠ 这里是源码断言（`gateDoorFrom` 是客户端 state，SSR 渲染时没法注入）。
+   * 原来匹配的是"内联字面量"的写法；后来所有预选场景统一收进了 `pickedMapRooms`，
+   * 机关大门也是其中一条 —— 断言跟着指向那条统一入口，语义不变、而且不再怕重构。
+   */
+  ok(/pickedRoomIds=\{pickedMapRooms\}/.test(views)
+    && /if \(gateUsable && gateDoorFrom\) out\.add\(gateDoorFrom\)/.test(views),
     '**预选格画成实心金圈**（`.picked`）');
   ok(/gateUsable \|\|/.test(views.slice(views.indexOf('const mapPickActive'), views.indexOf('const mapPickActive') + 900)),
     '`mapPickActive` 把机关大门选门算进去了');

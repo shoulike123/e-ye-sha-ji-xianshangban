@@ -295,6 +295,21 @@
           box: b,
         });
       });
+      if (!L.statusBar.poison?.length) {
+        L.statusBar.poison = [
+          { x: 26, y: 36, w: 7, h: 22, card: 0 },
+          { x: 58, y: 36, w: 7, h: 22, card: 1 },
+          { x: 90, y: 36, w: 7, h: 22, card: 2 },
+        ];
+      }
+      L.statusBar.poison.forEach((b) => {
+        out.push({
+          id: `poison-${b.card}`,
+          label: `中毒 卡${b.card + 1}`,
+          kind: 'poison',
+          box: b,
+        });
+      });
       return out;
     }
     if (state.panel === 'hud') {

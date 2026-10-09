@@ -36,6 +36,8 @@ export interface SurvivorLayout {
     cards: LayoutBox[];
     fear: Array<LayoutBox & { card: number; index: number }>;
     noise: Array<LayoutBox & { card: number }>;
+    /** 女王〔中毒〕标记，一格对应一张状态卡。游戏里只在中毒时亮起。 */
+    poison: Array<LayoutBox & { card: number }>;
   };
   /** 顶栏三块：钥匙架 / 角色状态 / 救援板块，百分比相对整行。 */
   hudRow: {
@@ -157,6 +159,11 @@ export const DEFAULT_SURVIVOR_LAYOUT: SurvivorLayout = {
       { card: 0, x: 16.2, y: 78, w: 4.2, h: 16 },
       { card: 1, x: 49, y: 78, w: 4.2, h: 16 },
       { card: 2, x: 81.8, y: 78, w: 4.2, h: 16 },
+    ],
+    poison: [
+      { card: 0, x: 26, y: 38, w: 7, h: 22 },
+      { card: 1, x: 58, y: 38, w: 7, h: 22 },
+      { card: 2, x: 90, y: 38, w: 7, h: 22 },
     ],
   },
   hudRow: {
@@ -445,6 +452,9 @@ export function mergeSurvivorLayout(raw: Partial<SurvivorLayout> | null | undefi
       noise: Array.isArray(raw?.statusBar?.noise) && raw.statusBar.noise.length
         ? raw.statusBar.noise
         : DEFAULT_SURVIVOR_LAYOUT.statusBar.noise,
+      poison: Array.isArray(raw?.statusBar?.poison) && raw.statusBar.poison.length
+        ? raw.statusBar.poison
+        : DEFAULT_SURVIVOR_LAYOUT.statusBar.poison,
     },
     hudRow: { ...DEFAULT_SURVIVOR_LAYOUT.hudRow, ...raw?.hudRow },
     keySlots: usableBoxes(raw?.keySlots, DEFAULT_SURVIVOR_LAYOUT.keySlots),

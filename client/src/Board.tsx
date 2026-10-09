@@ -55,6 +55,13 @@ interface BoardProps {
    * 「选择被停滞的雕像时那个雕像立绘要呈浮动状态」）。
    */
   statueHaltPickable?: boolean;
+  /**
+   * 只有**这个地点**上的雕像算"够得着"（停滞只能对同地点的雕像用）——
+   * 不传就是全场都浮动。
+   */
+  statueHaltRoomId?: string | null;
+  /** 已经选中、还没确认的那尊雕像 → 立绘金边高亮（等「确认停滞」） */
+  haltPickedStatueId?: string | null;
   rescueArmed?: boolean;
   rescueCountdown?: number | null;
   onRoomClick: (roomId: string) => void;
@@ -153,8 +160,6 @@ interface BoardProps {
     /** 【变体3】计划标记：圆心左侧 */
     planMarker: { dx: number; dy: number; size: number };
   };
-  /** 已〔中毒〕的幸存者 id（立绘右上角显示中毒标记） */
-  poisoned?: string[];
   /**
    * 当前遭遇的地点（没有遭遇就是 null）。
    * 杀手视角的右键菜单**只在遭遇期间列幸存者** —— 其他时候不该知道谁在哪。
@@ -587,6 +592,8 @@ export function Board({
   trapRoomIds = [],
   trapSpotRooms = [],
   statueHaltPickable = false,
+  statueHaltRoomId = null,
+  haltPickedStatueId = null,
   rescueArmed = false,
   rescueCountdown = null,
   onRoomClick,
@@ -615,7 +622,6 @@ export function Board({
   /** 【变体3】地图上的计划标记（幸存者视角才有；杀手拿到的是空数组） */
   planMarkers = [],
   zombies = [],
-  poisoned = [],
   encounterRoomId = null,
   leverGateDoorId = null,
   firstAidKit = false,
@@ -1164,7 +1170,7 @@ export function Board({
                        * 「雕像游戏中，幸存者界面不能有正确的主雕像的高亮显示」）。
                        * 「哪尊是主雕像」是杀手的秘密 —— 幸存者只能靠猜。
                        */
-                      className={`map-standee statue-standee${st.main && viewerFaction === 'killer' ? ' is-main' : ''}${st.halted ? ' halted' : ''}${statueHaltPickable && !st.halted ? ' halt-pickable' : ''}${mv ? ' just-moved' : ''}`}
+                      className={`map-standee statue-standee${st.main && viewerFaction === 'killer' ? ' is-main' : ''}${st.halted ? ' halted' : ''}${statueHaltPickable && !st.halted && (!statueHaltRoomId || st.roomId === statueHaltRoomId) ? ' halt-pickable' : ''}${haltPickedStatueId === st.id ? ' halt-picked' : ''}${mv ? ' just-moved' : ''}`}
                       pointerEvents="auto"
                       onClick={
                         onStatueClick
@@ -1279,19 +1285,6 @@ export function Board({
                         width={s.w + 2}
                         height={s.h + 2}
                         rx={2}
-                      />
-                    )}
-                    {/**
-                     * 〔中毒〕标记：女王的特殊能力 —— 中毒的幸存者立绘右上角加一个标记。
-                     */}
-                    {poisoned.includes(s.p.id) && (
-                      <image
-                        href={encodeURI('/Image/Killers/杀手九_女王/中毒标记.png')}
-                        x={x + s.w - 14}
-                        y={y - 6}
-                        width={18}
-                        height={18}
-                        pointerEvents="none"
                       />
                     )}
                   </g>

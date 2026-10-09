@@ -86,6 +86,59 @@ console.log('=== ① 雕像：进化确认 + 转主雕像 ===');
     /<button[^>]*disabled[^>]*>确认新效果<\/button>/.test(html),
     '**有待选项时「确认新效果」是禁用的**（不会点出一个死局）',
   );
+  /**
+   * ⚠ **切换主雕像也要二次确认**（用户口径）：点一尊只是"选中"（地图立绘高亮），
+   * 还要按「确认切换主雕像」才记下这次切换；真正生效仍在「确认新效果」。
+   */
+  ok(html.includes('确认切换主雕像'), '**有独立的「确认切换主雕像」按钮**（二次确认）');
+  {
+    const fs = await import('node:fs');
+    const views = fs.readFileSync(new URL('../../client/src/GameViews.tsx', import.meta.url), 'utf8');
+    const at = views.indexOf('雕像进化：你可以转换主雕像');
+    const panel = views.slice(at, at + 2600);
+    ok(at > 0, '（前提）找得到那段面板');
+    ok(/onClick=\{\(\) => setEvoStatuePick\(st\.id\)\}/.test(panel),
+      '**雕像按钮只"选中"**（不再点一下就发动作）');
+    ok(!/onClick=\{\(\) => void onAction\(\{ type: 'pickStatueEvoSwitch'/.test(panel),
+      '面板里的雕像按钮不再直接发 `pickStatueEvoSwitch`');
+    ok(/'确认切换主雕像'|确认切换主雕像/.test(panel), '确认按钮在那段面板里');
+    /**
+     * ⚠ **当前主雕像不能选**（用户口径：「雕像的进化切换主雕像不能选当前的主雕像转换」）——
+     * 和「重整旗鼓」那块同一口径（那边本来就 `disabled={st.main}`）。
+     */
+    ok(/disabled=\{st\.main\}/.test(panel), '**当前主雕像那颗按钮是禁用的**（不能选它"转换"）');
+    ok(/当前主雕像不能选/.test(panel), '面板文字里也写了"当前主雕像不能选"');
+    /**
+     * ⚠ **本地"选中"只在面板还开着时才算数**（用户截图里卡死的那一条）：
+     * 面板已经收起来（服务端两项都清了，例如点了「不转换」）但本地还留着选中 →
+     * 面板没了、确认按钮却一直灰着，只剩一句"请先按「确认切换主雕像」"。
+     */
+    ok(/\(state\.pendingStatueEvoSwitch && evoStatuePick\)/.test(views),
+      '**本地选中受"面板还开着"约束**（不会把确认按钮永久灰住）');
+    ok(/setEvoStatuePick\(null\)[\s\S]{0,80}skipStatueEvoSwitch/.test(views),
+      '按「不转换」时会清掉本地选中');
+    ok(/if \(!state\.pendingStatueEvoSwitch\) setEvoStatuePick\(null\)/.test(views),
+      '**服务端说"不用决定"时本地选中立刻作废**（下一级不会再被它灰住）');
+  }
+}
+
+/* ═══════════ ①-b 已确认过：不再画「确认新效果」（防重复结算） ═══════════ */
+console.log('=== ①-b 已确认之后还在做效果里的选择 ===');
+{
+  const st = mk('killer6');
+  armEvolution(st);
+  /** 模拟"已经点过确认新效果"：④ 步里的选择还挂着，ack 也还挂着 */
+  st.pendingEvolutionAck.acked = true;
+  st.pendingStatueEvoSwitch = true;
+  const snap = buildSnapshot(st, 'h');
+  ok(snap.pendingEvolutionAck?.acked === true, '快照里带着 `acked`');
+  const html = await draw(snap);
+  ok(html.includes('已确认新效果'), '**提示语换成"已确认新效果"**');
+  ok(!/确认新效果<\/button>/.test(html),
+    '**「确认新效果」那颗按钮收起来了**（再点一次会把这一级结算两遍）');
+  ok(html.includes('确认切换主雕像'), '「确认切换主雕像」照常在');
+  ok(!html.includes('进化才会继续结算') || html.includes('请先做完上面的选择'),
+    '不再说"请先按确认切换主雕像，进化才会继续结算"');
 }
 
 /* ═══════════ ② 未命名：确认新效果 + 选进化卡牌 同时出现 ═══════════ */
@@ -170,6 +223,57 @@ console.log('=== ⑤ 选完 → 确认按钮恢复可用 ===');
 
   /** 真实流程里「确认新效果」就是上面那一步，确认之后整条进化已经收尾 */
   ok(!st.pendingEvolutionAck, '**确认之后进化待办清空，对局继续**', JSON.stringify(st.pendingEvolutionAck));
+}
+
+/* ═══════════ ⑥ 进化 4 级「选 2 个地点 → 确认」（用户报的"行动区无法确认"） ═══════════ */
+console.log('=== ⑥ 女王 / 扼杀者 4 级：选满 2 个地点后的「确认」必须画得出来 ===');
+{
+  /**
+   * 用户原话：「扼杀者，女王4级进化效果行动区无法确认」。
+   *
+   * 根因：确认按钮原来画在**"杀手行动区"**里，而那一整块的条件是
+   * `state.phase === 'killerMain'` —— 可是进化 4 级的选择是**回合收尾**
+   * 时挂出来的（扼杀者那一路 `phase` 就是 `upkeep`），女王那一路
+   * `pendingEvolutionAck` 也还挂着。两条路都进不去那块 → 按钮根本不画。
+   *
+   * 现在它和「进化确认」面板同层（不看阶段）。
+   */
+  const st = mk('killer9');
+  armEvolution(st);
+  st.phase = 'upkeep';                 // ← 就是这一步：行动区被 `killerMain` 挡着
+  st.pendingQueenSpawnRooms = ['R1', 'R2'];
+  const snap = buildSnapshot(st, 'h');
+  ok((snap.pendingQueenSpawnRooms ?? []).length === 2, '快照里下发了已选地点',
+    JSON.stringify(snap.pendingQueenSpawnRooms));
+  const html = await draw(snap);
+  ok(html.includes('确认生成丧尸'), '**「确认生成丧尸」按钮渲染出来了**（收尾阶段也画得出）');
+  ok(html.includes('已选 2/2'), '写了"已选 2/2"');
+  ok(!/<button[^>]*disabled[^>]*>确认生成丧尸<\/button>/.test(html),
+    '**选满 2 个之后这颗按钮是「可用」的**');
+
+  /** 只选 1 个：面板还在（看得到"该点 2 个"的提示），但按钮禁用 */
+  st.pendingQueenSpawnRooms = ['R1'];
+  const html1 = await draw(buildSnapshot(st, 'h'));
+  ok(html1.includes('确认生成丧尸'), '只选 1 个时面板也在（提示不会消失）');
+  ok(/<button[^>]*disabled[^>]*>确认生成丧尸<\/button>/.test(html1), '没选满 2 个时按钮禁用');
+
+  /** 对照：幸存者视角既没有字段、也没有按钮 */
+  const sSnap = buildSnapshot(st, 's');
+  ok(sSnap.pendingQueenSpawnRooms == null, '幸存者快照里没有"待选地点"（保密）');
+  ok(!(await draw(sSnap)).includes('确认生成丧尸'), '幸存者界面上没有这颗按钮');
+}
+{
+  /** 扼杀者那一路：挂出来的时候进化确认已经收掉了（`pendingEvolutionAck` 为 null） */
+  const st = mk('killer8');
+  armEvolution(st);
+  st.phase = 'upkeep';
+  st.pendingEvolutionAck = null;
+  st.pendingStranglerCoreRooms = ['R1', 'R2'];
+  const html = await draw(buildSnapshot(st, 'h'));
+  ok(html.includes('确认放置核心标记'), '**「确认放置核心标记」按钮渲染出来了**');
+  ok(html.includes('已选 2/2'), '写了"已选 2/2"');
+  ok(!/<button[^>]*disabled[^>]*>确认放置核心标记<\/button>/.test(html),
+    '**选满 2 个之后这颗按钮是「可用」的**');
 }
 
 console.log(`\n进化面板：${pass} 通过 / ${fail} 失败`);

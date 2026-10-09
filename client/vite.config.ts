@@ -48,6 +48,23 @@ function serveFolder(urlPrefix: string, dir: string): Plugin {
           'Content-Type',
           MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream',
         );
+        /**
+         * ⚠ 这里原本**什么缓存头都不设** —— 浏览器没有 ETag 可问，
+         * 于是每刷新一次页面，那几张几十 MB 的地图底图就**整张重新下载**一遍，
+         * 同学那边自然卡。
+         *
+         * 现在给 ETag + 长缓存：正常情况下浏览器直接用本地副本，
+         * 图片真换了（`Ctrl+F5` 强制刷新）才会重新拿。
+         */
+        const st = fs.statSync(target);
+        const etag = `W/"${st.size}-${Math.round(st.mtimeMs)}"`;
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+        res.setHeader('ETag', etag);
+        if (req.headers['if-none-match'] === etag) {
+          res.statusCode = 304;
+          res.end();
+          return;
+        }
         fs.createReadStream(target).pipe(res);
       });
     },

@@ -14,8 +14,12 @@ import {
   isDoorBlocked,
   isDoorEdge,
   isRoomGone,
+  killerPowerHeadroom,
+  isLowProfile,
   log,
   mapDist,
+  noteSingleRoomSense,
+  noteSurvivorSeenAt,
   parseDoor,
   placeBlockade,
   roomName,
@@ -50,7 +54,7 @@ function killerActor(state: GameState): PlayerState | null {
 export function beginSenseRoom(state: GameState): boolean {
   state.pendingSenseRoom = null;
   state.killerSenseRoomActive = true;
-  log(state, '猎手本能：请点地图任选一个地点，然后在行动区确认。', 'all');
+  log(state, '猎手本能：请点地图任选一个地点，然后在行动区确认。', 'killer');
   return true;
 }
 
@@ -69,7 +73,7 @@ export function confirmSenseRoom(state: GameState): { roomId: string; witnessed:
   state.pendingSenseRoom = null;
   state.killerSenseRoomActive = false;
   const here = Object.values(state.players).filter(
-    (s) => s.faction === 'survivor' && s.alive && s.roomId === roomId,
+    (s) => s.faction === 'survivor' && s.alive && s.roomId === roomId && !isLowProfile(state, s),
   );
   /**
    * **战报和行动区同一套说法**（用户要求）：
@@ -80,9 +84,11 @@ export function confirmSenseRoom(state: GameState): { roomId: string; witnessed:
   const whoLine = here.length
     ? `看到 ${here.length} 名幸存者：${here.map((s) => s.name).join('、')}`
     : '没有看到人。';
-  log(state, `${placeLine}；${whoLine}`);
+  log(state, `${placeLine}；${whoLine}`, 'killer');
   /** **每一次〔感知〕都要有一次信息确认**（用户要求：「所有的感知都要信息确认」） */
   setKillerInfo(state, '感知（猎手本能 / 君臨天下）', [placeLine, whoLine]);
+  /** 只感知了一个地点：看到的人就在这里，杀手地图立绘挪过去 */
+  noteSingleRoomSense(state, [roomId], here);
   return { roomId, witnessed: here };
 }
 
@@ -97,7 +103,7 @@ export function beginTrackerDistance(state: GameState): boolean {
     return false;
   }
   state.pendingTrackerPick = true;
-  log(state, '追蹤：请选择一名幸存者来展示距离。', 'all');
+  log(state, '追蹤：请选择一名幸存者来展示距离。', 'killer');
   return true;
 }
 
@@ -183,7 +189,7 @@ export function senseAllNoise(state: GameState): void {
   const found: string[] = [];
   for (const id of searchRooms) {
     for (const s of Object.values(state.players)) {
-      if (s.faction !== 'survivor' || !s.alive || s.roomId !== id) continue;
+      if (s.faction !== 'survivor' || !s.alive || s.roomId !== id || isLowProfile(state, s)) continue;
       if (!found.includes(s.name)) found.push(s.name);
     }
   }
@@ -194,6 +200,14 @@ export function senseAllNoise(state: GameState): void {
   log(state, `领地意识 —— ${placeLine}；${whoLine}`, 'killer');
   /** 行动区把结果摆出来（**不把人对应到地点**，规则要求只说"一共有谁"） */
   setKillerInfo(state, '领地意识：可搜索的位置', [placeLine, whoLine]);
+  /** 可搜索位置只有一处时，看到的人就在那里 */
+  if (searchRooms.length === 1) {
+    const only = searchRooms[0]!;
+    const here = Object.values(state.players).filter(
+      (s) => s.faction === 'survivor' && s.alive && s.roomId === only && !isLowProfile(state, s),
+    );
+    noteSingleRoomSense(state, [only], here);
+  }
 }
 
 
@@ -258,8 +272,8 @@ export function moveNearestNoiseSearch(state: GameState): boolean {
       options.push({
         path,
         label: truncated
-          ? `走 6 步到「${roomName(state, endRoom)}」（朝「${roomName(state, dest)}」方向）`
-          : `前往「${roomName(state, dest)}」（${bestD} 步）`,
+          ? `走 6 步到「${roomName(state, endRoom)}」（朝「${roomName(state, dest)}」，经过 ${path.map((id) => roomName(state, id)).join(' → ')}）`
+          : `前往「${roomName(state, dest)}」（${bestD} 步）：${path.map((id) => roomName(state, id)).join(' → ')}`,
       });
     }
   }
@@ -281,6 +295,7 @@ export function moveNearestNoiseSearch(state: GameState): boolean {
   log(
     state,
     `超听觉：有 ${options.length} 条最快路径，请在行动区选择一条。`,
+    'killer',
   );
   return true;
 }
@@ -405,7 +420,7 @@ export function applySonarReveal(state: GameState): void {
     log(state, '音波感知：没有符合条件的幸存者。', 'killer');
     return;
   }
-  /** 揭示 = 双方战报写明谁在哪里 */
+  /** 揭示 = 双方战报写明谁在哪里，并把杀手地图上的立绘钉到该地点 */
   for (const t of targets) {
     log(
       state,
@@ -413,6 +428,7 @@ export function applySonarReveal(state: GameState): void {
       'all',
       true,
     );
+    noteSurvivorSeenAt(state, t.id, t.roomId);
   }
 }
 
@@ -454,7 +470,7 @@ export function chooseAutoMovePath(state: GameState, index: number): void {
   const picked = choices[index];
   if (!picked) throw new Error('没有这个选项');
   state.pendingMoveChoices = null;
-  log(state, `超听觉：已选择「${picked.label}」。`);
+  log(state, `超听觉：已选择「${picked.label}」。`, 'killer');
   applyAutoMove(state, k, picked.path);
 }
 
@@ -718,8 +734,22 @@ export function beginRemoveFromDiscardPermanent(
   cardName: string,
   excludeCardIds: string[] = [],
 ): boolean {
-  /** 弃牌堆里除了被排除的，还有没有牌可选 */
-  const options = state.killerDiscard.filter((id) => !excludeCardIds.includes(id));
+  /**
+   * 候选 = 弃牌堆里的**每一份**，其中**只吃掉"被排除的那一份"**。
+   *
+   * ⚠ 用户口径：「**只排除当前这张**」——
+   * 以前是 `filter(id => !exclude.includes(id))`，按 id 把**同名所有份数**一起抹掉：
+   * 牌组里同一张卡有多份时（「爬行」×3 之类），另一份明明躺在弃牌堆里
+   * 却选不了。现在按**份**扣：`indexOf` 找到一份就 `splice` 掉一份。
+   */
+  const pool = [...state.killerDiscard];
+  for (const ex of excludeCardIds) {
+    const i = pool.indexOf(ex);
+    if (i >= 0)
+      pool.splice(i, 1);
+  }
+  /** 弃牌堆里除了被排除的那一份，还有没有牌可选 */
+  const options = pool;
   if (!options.length) {
     log(state, `${cardName}：弃牌堆里没有可移除的卡牌。`, 'killer');
     return false;
@@ -789,9 +819,21 @@ export function removeFromDiscardPermanent(
 export function addPermanentPower(state: GameState, n: number): void {
   const cap = state.rules.killerPowerMax ?? 10;
   const before = state.killerPower;
-  state.killerPower = Math.min(cap, Math.max(0, state.killerPower + n));
-  state.killerLevelPowerGain = (state.killerLevelPowerGain ?? 0) + n;
-  log(state, `永久力量 +${n}（${before} → ${state.killerPower}）。`);
+  const gain = Math.max(0, Math.min(n, cap - before));
+  state.killerPower = before + gain;
+  state.killerLevelPowerGain = (state.killerLevelPowerGain ?? 0) + gain;
+  if (gain <= 0) {
+    log(state, `力量已达上限 ${cap}，这次永久 +${n} 没有生效。`, 'all', true);
+    return;
+  }
+  log(
+    state,
+    gain < n
+      ? `永久力量 +${gain}（原要 +${n}，上限 ${cap}；${before} → ${state.killerPower}）。`
+      : `永久力量 +${gain}（${before} → ${state.killerPower}，上限 ${cap}）。`,
+    'all',
+    true,
+  );
 }
 
 
@@ -813,8 +855,11 @@ export function senseRange(state: GameState, range: number): void {
    * 再列**感知到的所有人** —— 但不把人对应到地点上。
    */
   const names: string[] = [];
+  const seenHere: PlayerState[] = [];
   for (const id of rooms) {
     for (const s of survivorsHere(state, id)) {
+      if (isLowProfile(state, s)) continue;
+      seenHere.push(s);
       if (!names.includes(s.name)) names.push(s.name);
     }
   }
@@ -822,32 +867,53 @@ export function senseRange(state: GameState, range: number): void {
   const whoLine = names.length
     ? `看到 ${names.length} 名幸存者：${names.join('、')}`
     : `距离 ${range} 内没有看到人。`;
-  log(state, `红外探測 —— ${placeLine}；${whoLine}`);
+  log(state, `红外探測 —— ${placeLine}；${whoLine}`, 'killer');
   /** 行动区把结果摆出来，等杀手确认 */
   setKillerInfo(state, `红外探測（距离 ${range} 内）`, [placeLine, whoLine]);
+  /** 距离内只有一个地点时，看到的人就在那里 */
+  if (rooms.length === 1) {
+    noteSingleRoomSense(state, rooms, seenHere);
+  }
 }
 
-/** 潜行到任意一个带有秘密通道的地点（恐詭管道） */
-export function stealthToPassage(state: GameState): boolean {
+/**
+ * 潜行到某个地点（恐詭管道 / 陷阱重置）—— **点选 + 确认，不规划路径**。
+ *
+ * @param opts.anywhere `true` = 可以潜行到**任何地点**（保護色版的恐詭管道、
+ *   女猎手的「陷阱重置」）；不传就看 `passageStealthAnywhere`（保護色是常驻被动）。
+ * @param opts.label 战报/界面上的来源名（默认「恐詭管道」）。
+ */
+export function stealthToPassage(
+  state: GameState,
+  opts?: { anywhere?: boolean; label?: string },
+): boolean {
   const k = killerActor(state);
   if (!k?.roomId) return false;
+  const label = opts?.label ?? '恐詭管道';
+  const anywhere = opts?.anywhere === true || state.passageStealthAnywhere;
+  state.pendingPassageLabel = label;
   setStealth(k, true);
   /**
    * **保護色（进化卡牌）**：「恐詭管道」效果變為「〔潛行〕到**任何地點**」。
    *
    * ⚠ 这一段以前**没有**（`passageStealthAnywhere` 只被赋值、全项目没人读），
    * 所以拿了保護色也还是只能挑秘密通道口。现在落点列表直接换成整张地图。
+   *
+   * ⚠ **女猎手「陷阱重置」**（卡面：「〔潜行〕到任意地点」）走的是同一条路
+   *   （用户口径：和保護色版的恐詭管道**一致** —— 没有路径，只有点选地点确认）。
    */
-  if (state.passageStealthAnywhere) {
+  if (anywhere) {
     const all = state.map.rooms.filter((r) => !isRoomGone(state, r.id)).map((r) => r.id);
     if (!all.length) {
-      log(state, '保護色：这张地图没有可去的地点，改为〔潛行〕×0-1。');
+      log(state, `${label}：这张地图没有可去的地点，改为〔潛行〕×0-1。`);
       return beginStealthAnywhere(state, 1);
     }
     state.pendingPassagePick = all;
+    state.pendingPassageAnywhere = true;
+    log(state, `${k.name} 进入潜行。`, 'all', true);
     log(
       state,
-      `保護色：「恐詭管道」可以潛行到**任何地点**，请点一个地点：${all.map((id) => roomName(state, id)).join('、')}。`,
+      `${label}：可以潛行到**任何地点**，请点一个地点：${all.map((id) => roomName(state, id)).join('、')}。`,
       'killer',
     );
     return true;
@@ -858,13 +924,15 @@ export function stealthToPassage(state: GameState): boolean {
     if (e.bidirectional ?? true) rooms.add(e.to);
   }
   if (!rooms.size) {
-    log(state, '恐詭管道：这张地图没有秘密通道，改为〔潛行〕×0-1。');
+    log(state, `${label}：这张地图没有秘密通道，改为〔潛行〕×0-1。`);
     return beginStealthAnywhere(state, 1);
   }
   state.pendingPassagePick = [...rooms];
+  state.pendingPassageAnywhere = false;
+  log(state, `${k.name} 进入潜行。`, 'all', true);
   log(
     state,
-    `恐詭管道：请点一个有秘密通道的地点：${state.pendingPassagePick.map((id) => roomName(state, id)).join('、')}。`,
+    `${label}：请点一个有秘密通道的地点：${state.pendingPassagePick.map((id) => roomName(state, id)).join('、')}。`,
     'killer',
   );
   return true;
@@ -880,6 +948,7 @@ export function stealthToPassage(state: GameState): boolean {
 export function resolveStealthToPassage(state: GameState, roomId: string): void {
   const k = killerActor(state);
   const allowed = state.pendingPassagePick ?? [];
+  const label = state.pendingPassageLabel ?? '恐詭管道';
   /**
    * ⚠ 顺序要紧：**先校验、再清空**。
    * 以前是先 `pendingPassagePick = null` 再 `includes` 校验 ——
@@ -889,19 +958,21 @@ export function resolveStealthToPassage(state: GameState, roomId: string): void 
   if (!allowed.length) {
     state.pendingPassagePick = null;
     state.pendingPassageRoom = null;
+    state.pendingPassageAnywhere = false;
+    state.pendingPassageLabel = null;
     return;
   }
   if (!allowed.includes(roomId))
-    throw new Error(state.passageStealthAnywhere ? '那个地点不存在' : '那个地点没有秘密通道');
+    throw new Error(state.pendingPassageAnywhere ? '那个地点不存在' : '那个地点没有秘密通道');
   if (!k) return;
   /** 再点同一格 = 取消选择 */
   if (state.pendingPassageRoom === roomId) {
     state.pendingPassageRoom = null;
-    log(state, `恐詭管道：已取消「${roomName(state, roomId)}」。`, 'killer');
+    log(state, `${label}：已取消「${roomName(state, roomId)}」。`, 'killer');
     return;
   }
   state.pendingPassageRoom = roomId;
-  log(state, `恐詭管道：已选「${roomName(state, roomId)}」，点「确认潜入」才移动。`, 'killer');
+  log(state, `${label}：已选「${roomName(state, roomId)}」，点「确认潜入」才移动。`, 'killer');
 }
 
 /**
@@ -910,6 +981,7 @@ export function resolveStealthToPassage(state: GameState, roomId: string): void 
 export function confirmStealthToPassage(state: GameState): void {
   const k = killerActor(state);
   const roomId = state.pendingPassageRoom;
+  const label = state.pendingPassageLabel ?? '恐詭管道';
   if (!roomId)
     throw new Error('请先点一个地点');
   const allowed = state.pendingPassagePick ?? [];
@@ -917,9 +989,11 @@ export function confirmStealthToPassage(state: GameState): void {
     throw new Error('那个地点不在可选范围里');
   state.pendingPassagePick = null;
   state.pendingPassageRoom = null;
+  state.pendingPassageAnywhere = false;
+  state.pendingPassageLabel = null;
   if (!k) return;
   k.roomId = roomId;
-  log(state, `恐詭管道：潜入「${roomName(state, roomId)}」。`, 'killer');
+  log(state, `${label}：潜入「${roomName(state, roomId)}」。`, 'killer');
 }
 
 /**
@@ -1002,12 +1076,26 @@ function survivorsHere(state: GameState, roomId: string): PlayerState[] {
  *    否则减 1，等下回合开始时重新挂上
  */
 export function addPowerUntilNextTurn(state: GameState, n: number): void {
-  state.turnLingeringPower = (state.turnLingeringPower ?? 0) + n;
+  const cap = state.rules.killerPowerMax ?? 10;
+  const room = killerPowerHeadroom(state);
+  const gain = Math.max(0, Math.min(n, room));
+  if (gain <= 0) {
+    log(state, `力量已达上限 ${cap}，这次 +${n} 没有生效。`, 'all', true);
+    return;
+  }
+  state.turnLingeringPower = (state.turnLingeringPower ?? 0) + gain;
   /** 存一份给下回合——本回合结束时会被 `turnLingeringPower` 的清零带走，靠这个续上 */
-  state.carryPowerUntilNextTurn = (state.carryPowerUntilNextTurn ?? 0) + n;
+  state.carryPowerUntilNextTurn = (state.carryPowerUntilNextTurn ?? 0) + gain;
   /** 本回合是「刚启用」，还不是「带上来的」 */
   state.carryPowerActive = false;
-  log(state, `获得 +${n} 力量（到你的下回合结束时失效）。`);
+  log(
+    state,
+    gain < n
+      ? `获得 +${gain} 力量（原要 +${n}，上限 ${cap}；到你的下回合结束时失效）。`
+      : `获得 +${gain} 力量（到你的下回合结束时失效，上限 ${cap}）。`,
+    'all',
+    true,
+  );
 }
 
 /**
@@ -1045,6 +1133,8 @@ export function beginStealthAnywhere(state: GameState, max: number, min = 0): bo
   if (!k?.roomId) return false;
   setStealth(k, true);
   state.pendingPathDraft = { min, max, rooms: [k.roomId] };
+  /** 幸存者只知道正在潜行，点到哪一格不公开 */
+  log(state, `${k.name} 进入潜行。`, 'all', true);
   log(
     state,
     `请点相邻地点规划潜行路径（${min}–${max} 步），确认后移动（潜行目的地不告诉幸存者）。`,

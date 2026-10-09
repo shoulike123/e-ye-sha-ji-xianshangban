@@ -233,6 +233,47 @@ console.log('=== ⑥ 鏡之門戶（额外行动）===');
   ok(third?.includes('没有「鏡之門戶」'), '没遗物了才被拒（拒的理由不是"额外行动用完了"）', String(third));
 }
 
+/* ═══════════ ⑥-b 鏡之門戶：额外行动"按人"认（actorPlayerId） ═══════════ */
+console.log('=== ⑥-b 鏡之門戶：点谁的名字就谁传送 ===');
+{
+  const { giveRelic, mirrorTargets } = await import('../../server/dist/game/relic.js');
+  const st = mk();
+  /** 「当前行动者」= 没遗物的 A；持有遗物的是 B（额外行动弹窗按每个人列按钮） */
+  const [a, b] = Object.values(st.players).filter((p) => p.faction === 'survivor' && p.alive);
+  const targets = mirrorTargets(st);
+  st.phase = 'survivorMain';
+  st.pendingSurvivorPick = false;
+  st.activeSurvivorIndex = st.turnOrder.indexOf(a.id);
+  giveRelic(st, b, 'relic_mirror');
+  const bFrom = b.roomId;
+
+  /** 不带 `actorPlayerId` → 算到"当前行动者"A 头上 → A 没遗物，被拒 */
+  const noActor = (() => {
+    try {
+      handleAction(st, a.controllerId, { type: 'useMirrorPortal', toRoomId: targets[0] }, content);
+      return null;
+    } catch (e) { return e.message; }
+  })();
+  ok(noActor != null, '（对照）不带 `actorPlayerId` → 算到当前行动者头上、被拒', String(noActor));
+
+  /** 带上 B → 由 B 传送（虽然现在"行动"的是 A） */
+  const err = (() => {
+    try {
+      handleAction(
+        st, b.controllerId,
+        { type: 'useMirrorPortal', toRoomId: targets[0], actorPlayerId: b.id },
+        content,
+      );
+      return null;
+    } catch (e) { return e.message; }
+  })();
+  console.log(`  B 带 actorPlayerId 传送 → ${err ?? 'OK'}；${bFrom} → ${b.roomId}`);
+  ok(err == null, '**带 `actorPlayerId` 就能由那个人传送**（额外行动不看小回合）', String(err));
+  ok(b.roomId === targets[0], '是 B 过去了', `${bFrom} → ${b.roomId}`);
+  ok(a.roomId !== targets[0] || bFrom === targets[0], 'A 没被误传（认人是对的）');
+  ok(!b.items.relic_mirror, 'B 的遗物用掉了');
+}
+
 /* ═══════════ ⑦ 洞察之球：特殊行动，依次摸两张 ═══════════ */
 console.log('=== ⑦ 洞察之球（特殊行动）===');
 {

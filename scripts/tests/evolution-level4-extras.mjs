@@ -96,8 +96,18 @@ console.log('=== ① 谋杀者 4 级：力量 +1 且**立即要求封堵 4 扇�
 console.log('=== ② 雕像 4 级：把「圍困」从弃牌堆取回 ===');
 {
   const st = mkSolo('killer6', 'mansion');
-  /** 把「圍困」放进弃牌堆（模拟"已经打出去过"） */
-  st.killerDiscard = [...st.killerDiscard, 'statue_siege'];
+  /**
+   * 把「圍困」放进弃牌堆（模拟"已经打出去过"）。
+   *
+   * ⚠ 要**严格构造**：它是一份牌 —— 放进弃牌堆的同时，
+   * 手上 / 锁定区都不能还留着一份（真实时序里 3 级那次解锁已经把它拿到手、
+   * 打出去之后才在弃牌堆）。不这样摆的话，"已经在手牌里 → 跳过取回"
+   * 这条兜底会先生效（`evolution.ts` 里那道守卫），测不到取回本身。
+   */
+  const SIEGE0 = 'statue_siege';
+  st.killerHand = st.killerHand.filter((c) => c !== SIEGE0);
+  st.killerLocked = st.killerLocked.filter((c) => c !== SIEGE0);
+  st.killerDiscard = [...st.killerDiscard, SIEGE0];
   const beforePower = st.killerPower;
   const handBefore = st.killerHand.length;
   const err = levelTo4(st);

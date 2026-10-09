@@ -1024,6 +1024,21 @@ export function viewerFactionOf(state: PublicSnapshot): Faction | null {
       if (who?.faction === 'killer') return 'killer';
       if (who?.faction === 'survivor') return 'survivor';
     }
+    /**
+     * ⚠ **多人局里不许按"还有谁没选"猜界面**（用户口径：
+     * 「多人游戏中，幸存者和杀手方永远看不到对方界面」）。
+     *
+     * 下面那个兜底用的是 `traitPickerIds` —— 那是**全局**信息（两边都列在里面）。
+     * 于是多人局里"幸存者这边都选完、只剩杀手还在选"时，
+     * 幸存者玩家的界面会被**切成杀手界面**。
+     * 虽然快照仍是他自己那份（`traitDefs` / `yourTraitPick` 都按阵营裁过，
+     * 看不到杀手的候选卡），但界面壳子串了 —— 这就是那个例外。
+     *
+     * 所以兜底只留给**单人热座**（一个人管两边，需要自动切过去）；
+     * 其他模式一律留在**自己那一方**的界面等。
+     */
+    if (state.mode !== 'solo')
+      return state.you.faction === 'killer' ? 'killer' : 'survivor';
     /** 还没轮到自己：还在等杀手选就给杀手界面，否则留在幸存者界面等 */
     const waiting = (state.traitPickerIds ?? [])
       .map((id) => state.players.find((p) => p.id === id)?.faction)
@@ -1047,6 +1062,16 @@ export function viewerFactionOf(state: PublicSnapshot): Faction | null {
     return state.you.faction === 'survivor' ? 'survivor' : 'killer';
   }
   if (state.mode === 'solo') {
+    /**
+     * ⚠ **杀手欠着弃牌 → 先把界面切给杀手**。
+     *
+     * 这笔账可能出现在**幸存者大回合**里：幸存者的「長劍」让杀手摸牌，
+     * 加上【变体1】03「狡猾诡计」就是"先入手、等你自选弃置"。
+     * 服务端那边「还有弃牌没结清」会拦住所有其它动作，所以界面得先让杀手结账
+     * —— 不然玩家看到的是"幸存者点什么都被拒"，弃牌面板又在另一边，直接卡住。
+     */
+    if ((state.pendingKillerDiscards ?? 0) > 0)
+      return 'killer';
     if (
       state.pendingEvolutionAck ||
       state.pendingWhizSearch ||
@@ -1110,16 +1135,26 @@ const SPECTATOR_TOGGLE: Record<'survivor' | 'killer', 'killer' | 'survivor'> = {
 type PendingAct = { label: string; run: () => void };
 
 /** 杀手视角可以先把幸存者立绘摆在地图上（只自己看得见，不算正式位置） */
-function readPlacedStandee(key: string): Record<string, string> {
+function readPlaceFile(key: string): { rooms: Record<string, string>; rev: Record<string, number> } {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return {};
+    if (!raw) return { rooms: {}, rev: {} };
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed as Record<string, string>;
+    if (!parsed || typeof parsed !== 'object') return { rooms: {}, rev: {} };
+    const obj = parsed as { rooms?: unknown; rev?: unknown };
+    /** 新格式把摆放和「已经自动挪过的版本」放在一起，避免刷新后又被拽回去 */
+    if (obj.rooms && typeof obj.rooms === 'object') {
+      const rev = obj.rev && typeof obj.rev === 'object' ? (obj.rev as Record<string, number>) : {};
+      return { rooms: obj.rooms as Record<string, string>, rev };
+    }
+    return { rooms: parsed as Record<string, string>, rev: {} };
   } catch {
-    return {};
+    return { rooms: {}, rev: {} };
   }
+}
+
+function readPlacedStandee(key: string): Record<string, string> {
+  return readPlaceFile(key).rooms;
 }
 
 /** 这个房间有没有被封上的门 */
@@ -1354,6 +1389,30 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   /** 雕像：幸存者的「停滞雕像」选择面板 */
   const [haltStatueOpen, setHaltStatueOpen] = useState(false);
   /**
+   * 雕像进化里**已经选中、还没按「确认切换主雕像」**的那一尊
+   * （用户口径：「切换主雕像也要二次确认」）—— 只影响界面高亮，
+   * 真正记下这次切换是点了「确认切换主雕像」之后。
+   */
+  const [evoStatuePick, setEvoStatuePick] = useState<string | null>(null);
+  /**
+   * ⚠ **服务端说"现在不用决定要不要转主雕像" → 本地那个选中就作废**。
+   *
+   * 用户报的卡死就出在这里：上一级点过一尊（本地记住了），点了「不转换」之后
+   * 面板收起来了，可这个选中还留着 —— 到了下一级，进化确认面板一打开
+   * `pendingPick` 就被它顶成 true：**确认按钮永远是灰的**，而"确认切换主雕像"
+   * 那块面板又还没挂出来（它排在确认**之后**），玩家看到的就是
+   * 「请先按「确认切换主雕像」…」+ 一颗点不动的「确认新效果」，整局卡住。
+   */
+  useEffect(() => {
+    if (!state.pendingStatueEvoSwitch) setEvoStatuePick(null);
+  }, [state.pendingStatueEvoSwitch]);
+  /**
+   * 面板里**已经选中、还没确认**的那尊雕像（用户口径：
+   * 「被选定的雕像的地图上的立绘高亮显示」）。
+   * 点面板里的雕像、或直接点地图上的立绘 = 选中；「确认停滞」才发动作。
+   */
+  const [haltPickStatueId, setHaltPickStatueId] = useState<string | null>(null);
+  /**
    * 欧菲莉亚「言语鼓励」：点了「特殊行动」按钮后，在这里列目标让你挑。
    * 和威廉短跑的 `extraPick` 是同一套思路 —— 按钮先出，点了再选。
    */
@@ -1381,9 +1440,28 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    * （遗物**就是背包物品**，没有单独的遗物栏，所以不需要额外的查看状态。）
    */
   const [mirrorPicking, setMirrorPicking] = useState(false);
+  /**
+   * 【墓穴遗物】鏡之門戶：**已经点中、还没按「确认传送」**的那个 🌀 地点。
+   *
+   * 用户口径：「镜之门户的传送是额外行动，**在行动区做二次确认**」——
+   * 以前是点一下目标就直接传走（而且那排目标按钮还挂在「特殊行动」那一栏里）。
+   * 现在和"停滞雕像 / 陷阱重置"一个套路：先选中 → 行动区按「确认传送」。
+   */
+  const [mirrorPickRoom, setMirrorPickRoom] = useState<string | null>(null);
+  /**
+   * 【墓穴遗物】鏡之門戶：**是哪名幸存者要传送**。
+   *
+   * ⚠ 额外行动弹窗是**按每个幸存者**列按钮的（单人热座一个人管三名），
+   * 所以要把人记下来、动作里带上 `actorPlayerId` ——
+   * 不然会算到"当前行动者"头上（那人可能根本没这件遗物）。
+   */
+  const [mirrorActorId, setMirrorActorId] = useState<string | null>(null);
   /** 这些"选择中"的临时状态在条件消失时要收掉，免得下次进来还亮着 */
   useEffect(() => {
-    if (!state.canUseMirrorPortal) setMirrorPicking(false);
+    if (!state.canUseMirrorPortal) {
+      setMirrorPicking(false);
+      setMirrorPickRoom(null);
+    }
   }, [state.canUseMirrorPortal]);
   useEffect(() => {
     if (!state.canUseFirstAidKit) setFirstAidPicking(null);
@@ -1483,12 +1561,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    *
    * 单人模式一个人管杀手 + 三名幸存者，界面本来靠阶段自动推断；
    * 但自动推断偶尔会和玩家的预期不一致（例如坍塌砸到幸存者时没切过去），
-   * 所以给一个随时能自己切的按钮 —— **手动选择优先，直到玩家再切回来**。
+   * 所以给一个随时能自己切的按钮。
+   *
+   * ⚠ **手动选择只在本阶段内有效**（用户报的「女王4级选完后没有正常切回幸存者界面」）：
+   * 以前只存 `Faction`、一旦点过就**永久粘住** —— 为了处理某个待办切过去之后，
+   * 待办做完了界面还留在那一边，得再手动切回来。
+   * 现在把"切的时候是哪个阶段"一起记下来，**阶段一变就自动交还给推断**
+   * （女王 4 级那一下：`upkeep` 里选完 → 收尾 → `survivorMain`，界面自己就回幸存者了）。
    */
-  const [manualFaction, setManualFaction] = useState<Faction | null>(null);
+  const [manualPick, setManualPick] = useState<{ faction: Faction; phase: string } | null>(null);
+  const manualFaction = manualPick && manualPick.phase === state.phase ? manualPick.faction : null;
   useEffect(() => {
     /** 换模式 / 离开单人局时把手动选择清掉，免得残留到别的模式 */
-    if (state.mode !== 'solo') setManualFaction(null);
+    if (state.mode !== 'solo') setManualPick(null);
   }, [state.mode]);
   const viewerFaction = isSpectator
     ? spectatorView
@@ -1865,7 +1950,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   useEffect(() => {
     if (isSurvivorView) return;
     try {
-      localStorage.setItem(placeKey, JSON.stringify(placed));
+      const prev = readPlaceFile(placeKey);
+      localStorage.setItem(placeKey, JSON.stringify({ rooms: placed, rev: prev.rev }));
     } catch {
       /* ignore */
     }
@@ -1898,6 +1984,47 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       return changed ? next : prev;
     });
   }, [isSurvivorView, state.encounter]);
+
+  /**
+   * 单地点感知、惊吓过度发声：服务端把人记到 `witnessedAt`，版本号 +1。
+   * 只在版本变了时把立绘挪过去一次；杀手之后仍可用「移动立绘」再摆。
+   */
+  useEffect(() => {
+    if (isSurvivorView) return;
+    const at = state.witnessedAt ?? {};
+    const rev = state.witnessedRev ?? {};
+    const file = readPlaceFile(placeKey);
+    const pending: Array<[string, string, number]> = [];
+    for (const [id, roomId] of Object.entries(at)) {
+      const n = rev[id] ?? 0;
+      if (!roomId || n <= (file.rev[id] ?? 0)) continue;
+      if ((state.collapsedRooms ?? []).includes(roomId)) continue;
+      pending.push([id, roomId, n]);
+    }
+    if (!pending.length) return;
+    const rooms = { ...file.rooms };
+    const nextRev = { ...file.rev };
+    for (const [id, roomId, n] of pending) {
+      rooms[id] = roomId;
+      nextRev[id] = n;
+    }
+    try {
+      localStorage.setItem(placeKey, JSON.stringify({ rooms, rev: nextRev }));
+    } catch {
+      /* ignore */
+    }
+    setPlaced((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [id, roomId] of pending) {
+        if (next[id] !== roomId) {
+          next[id] = roomId;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [isSurvivorView, placeKey, state.witnessedAt, state.witnessedRev, state.collapsedRooms]);
 
   useEffect(() => {
     setExtraDest(null);
@@ -2026,6 +2153,58 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       return [first, state.pendingSensePair.secondRoomId];
     return [first];
   })();
+  /**
+   * **地图上"已经点选、还没确认"的地点 → 实心金圈**（用户口径：
+   * 「**所有在地图上预选的情况都应该这样**」）。
+   *
+   * ⚠ 和上面那个 `pickedSpotRooms` 分工不同：那个只管"画路径预览"，
+   * 这个只管"地图上的已选标记"。所以这里**必须把每种选点状态都列全**，
+   * 少一个就是"点了那格没亮"（用户报的「扼杀者 4 级放核心标记的预选地有高亮吗」）。
+   *
+   * 目前覆盖：
+   *  - 逻辑推理 / 感知相连两格（`pendingSensePair`）
+   *  - 恐詭管道（`pendingPassageRoom`）、猎手本能·君臨天下（`pendingSenseRoom`）
+   *  - 召唤石碑第一步（`pendingStatueSealFrom`）
+   *  - **扼杀者 4 级**选 2 个地点放核心标记（`pendingStranglerCoreRooms`）
+   *  - **女王 4 级**选 2 个地点生成丧尸（`pendingQueenSpawnRooms`）
+   *  - **屍群來了第一步**已经点过的"有僵尸的地点"（`pendingZombieHordeFrom`）
+   *  - **移动核心标记第一步**（`pendingCoreFrom`，从哪一格移走）
+   *  - 封堵：普通封堵 / 任选门封堵的两格（`pendingBlockadeJob`）/ 先拆再封时选中的门
+   *  - 【城堡】机关大门已经点的第一格
+   */
+  const pickedMapRooms = useMemo(() => {
+    const out = new Set<string>();
+    if (state.pendingSensePair?.firstRoomId) out.add(state.pendingSensePair.firstRoomId);
+    if (state.pendingSensePair?.secondRoomId) out.add(state.pendingSensePair.secondRoomId);
+    if (state.pendingPassageRoom) out.add(state.pendingPassageRoom);
+    if (state.pendingSenseRoom) out.add(state.pendingSenseRoom);
+    if (state.pendingStatueSealFrom) out.add(state.pendingStatueSealFrom);
+    for (const r of state.pendingStranglerCoreRooms ?? []) out.add(r);
+    for (const r of state.pendingQueenSpawnRooms ?? []) out.add(r);
+    for (const r of state.pendingZombieHordeFrom ?? []) out.add(r);
+    if (state.pendingCoreFrom) out.add(state.pendingCoreFrom);
+    if (blockadeDest) out.add(blockadeDest);
+    const job = state.pendingBlockadeJob;
+    if (job?.kind === 'anyDoors') {
+      if (job.firstRoomId) out.add(job.firstRoomId);
+      if (job.secondRoomId) out.add(job.secondRoomId);
+    }
+    if (gateUsable && gateDoorFrom) out.add(gateDoorFrom);
+    return [...out];
+  }, [
+    state.pendingSensePair,
+    state.pendingPassageRoom,
+    state.pendingSenseRoom,
+    state.pendingStatueSealFrom,
+    state.pendingStranglerCoreRooms,
+    state.pendingQueenSpawnRooms,
+    state.pendingZombieHordeFrom,
+    state.pendingCoreFrom,
+    state.pendingBlockadeJob,
+    blockadeDest,
+    gateUsable,
+    gateDoorFrom,
+  ]);
   const previewPath = pathDraftRooms.length
     ? pathDraftRooms
     : senseFirst
@@ -2090,6 +2269,103 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     !state.you.mainActionUsed;
   const canUnblockHere = roomHasBlockade(state.blockades, state.you.roomId);
   const canAxeUnblock = canUnblockHere && (state.you.items.axe ?? 0) > 0;
+  /**
+   * **某个地点上被封的门**（规范门号 `A|B`）。
+   *
+   * 用户口径：「幸存者移除封堵应该是**他自己选择移除**，不是自动」——
+   * 所以这块地点上有 2 块以上时，先让玩家点一块、再确认（见下面那块面板）；
+   * 只有 1 块时没得选，直接拆。
+   */
+  const blockedDoorsIn = (roomId: string | null | undefined): string[] => {
+    if (!roomId) return [];
+    const blocked = new Set(
+      (state.blockades ?? []).map((id) => {
+        const i = id.indexOf('|');
+        if (i < 0) return id;
+        const a = id.slice(0, i);
+        const b = id.slice(i + 1);
+        return a < b ? `${a}|${b}` : `${b}|${a}`;
+      }),
+    );
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const e of state.map.edges ?? []) {
+      if (e.pathType && e.pathType !== 'door') continue;
+      let other: string | null = null;
+      if (e.from === roomId) other = e.to;
+      else if ((e.bidirectional ?? true) && e.to === roomId) other = e.from;
+      if (!other) continue;
+      /**
+       * 门号必须用「当前地点 | 对面」，不能用边的 from。
+       * 边若是从对面指向这里，`e.from` 就是对面自己，拼出来会变成「B1|B1」，
+       * 这块封堵就从候选里消失，多块时被当成只有一块、直接拆掉。
+       */
+      const id = roomId < other ? `${roomId}|${other}` : `${other}|${roomId}`;
+      if (!blocked.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  };
+  /**
+   * 正在选"拆哪一块封堵"：记下**是谁、用哪种方式**（一般行动拆 / 手斧拆），
+   * 以及候选门。选完点「确认拆除」才真的发动作。
+   */
+  const [unblockPick, setUnblockPick] = useState<{
+    kind: 'action' | 'axe';
+    actorId: string;
+    roomId: string;
+    doors: string[];
+    doorId: string | null;
+  } | null>(null);
+  /** 拆封堵：一块就直接拆，多块先开选择面板 */
+  const startUnblock = (kind: 'action' | 'axe', actorId: string) => {
+    const piece = state.players.find((x) => x.id === actorId);
+    const roomId = piece?.roomId ?? null;
+    const doors = blockedDoorsIn(roomId);
+    if (!roomId || !doors.length) return;
+    if (doors.length === 1) {
+      sendUnblock(kind, actorId, doors[0]);
+      return;
+    }
+    setUnblockPick({ kind, actorId, roomId, doors, doorId: null });
+  };
+  const sendUnblock = (
+    kind: 'action' | 'axe',
+    actorId: string,
+    doorId: string,
+    alreadyConfirmed = false,
+  ) => {
+    if (kind === 'axe') {
+      void runSurvivor(
+        '用手斧拆除封堵',
+        {
+          type: 'useItem',
+          itemId: 'axe',
+          doorId,
+          actorPlayerId: actorId,
+        },
+        alreadyConfirmed,
+      );
+      return;
+    }
+    /**
+     * 多块时面板本身就是确认，直接拆选中的那一块。
+     * 只有一块时仍走行动区那条确认。
+     */
+    void runSurvivor('移除封堵', { type: 'removeBlockade', doorId }, alreadyConfirmed);
+  };
+  /** 地点 / 封堵一变，选择面板就作废（免得选的是已经不在的门） */
+  useEffect(() => {
+    if (!unblockPick) return;
+    const piece = state.players.find((x) => x.id === unblockPick.actorId);
+    const doors = blockedDoorsIn(piece?.roomId ?? null);
+    if (doors.length <= 1) setUnblockPick(null);
+    else if (doors.join(',') !== unblockPick.doors.join(',')) {
+      setUnblockPick({ ...unblockPick, doors, doorId: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.blockades, state.players]);
   const canClearFear = state.rules.enableFear !== false;
   /**
    * 个人物品只能本人使用（服务端也会拦）：索菲亚的相机、马尔科的医药包。
@@ -2108,6 +2384,48 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     const c = state.characters.find((x) => x.id === p.characterId);
     return /survivor6|乔治|george/i.test(`${p.characterId ?? ''} ${c?.name ?? ''} ${p.name}`);
   };
+  /** 拆封堵时，地图上能点的是「被封的门对面那一格」 */
+  const doorOtherRoom = (doorId: string, here: string): string | null => {
+    const i = doorId.indexOf('|');
+    if (i < 0) return null;
+    const a = doorId.slice(0, i);
+    const b = doorId.slice(i + 1);
+    if (a === here) return b;
+    if (b === here) return a;
+    return null;
+  };
+  const unblockMapRooms = unblockPick
+    ? unblockPick.doors
+        .map((d) => doorOtherRoom(d, unblockPick.roomId))
+        .filter((id): id is string => Boolean(id))
+    : [];
+  const georgeBlockRooms = (() => {
+    const pend = state.pendingGeorgeBlockade;
+    if (!isSurvivorView || !pend) return [] as string[];
+    const here = state.players.find((pl) => isGeorgePiece(pl))?.roomId;
+    if (!here) return [];
+    return pend.doors
+      .map((d) => doorOtherRoom(d, here))
+      .filter((id): id is string => Boolean(id));
+  })();
+  const unblockPickedRooms = (() => {
+    const out: string[] = [];
+    if (unblockPick?.doorId) {
+      const other = doorOtherRoom(unblockPick.doorId, unblockPick.roomId);
+      if (other) out.push(other);
+    }
+    const pend = state.pendingGeorgeBlockade;
+    if (isSurvivorView && pend) {
+      const here = state.players.find((pl) => isGeorgePiece(pl))?.roomId;
+      if (here) {
+        for (const d of pend.picked) {
+          const other = doorOtherRoom(d, here);
+          if (other) out.push(other);
+        }
+      }
+    }
+    return out;
+  })();
   const canUseOwnPersonalItem = (itemId: string) =>
     itemId === 'sophia_camera'
       ? isSophiaPiece(state.you)
@@ -2175,6 +2493,29 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     (Boolean(ch?.skills.some((s) => s.id === 'resourceful')) &&
       !state.you.skillUsedThisTurn.includes('resourceful') &&
       (marcoDiscardHas.adrenaline || marcoDiscardHas.sedative));
+  /**
+   * 六种一般行动（移动 / 搜索 / 修理 / 拆封堵 / 消恐惧 / 特殊）里，
+   * 一种还没确认时不能改做别的。确认之前都可以取消。
+   */
+  const generalPickLock: string | null = state.pendingCrossbow
+    ? '十字弩还没确认'
+    : state.pendingGeorgeBlockade
+      ? '乔治的笔记还没确认'
+      : coinPathDraft
+        ? '幸运币的移动还没确认'
+        : unblockPick
+          ? '拆除封堵还没确认'
+          : traitTargetPick
+            ? '特殊行动还没确认'
+            : extraPick
+            ? '当前行动还没确认'
+            : mirrorPicking
+              ? '鏡之門戶还没确认'
+              : pendingAct
+                ? '请先确认或取消当前行动'
+                : activeMoveDest
+                  ? '移动还没确认'
+                  : null;
   const mustDoGeneral =
     isActive &&
     isSurvivorView &&
@@ -2272,7 +2613,17 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
      * 【屍群來了】选了出发地之后，**点地图选目的地**。
      * 以前只显示了"请点一个目的地"的文字，地图点击没接上 → 选不了。
      */
+    if (state.pendingZombieHordeFrom) {
+      if (!state.pendingZombieHordeFrom.includes(roomId)) return;
+      void onAction({ type: 'pickZombieHorde', roomId });
+      return;
+    }
+    /**
+     * 第二步只能点距离 1 的格子（`legalMoves` 就是这些）。
+     * 点别的地方没有反应。
+     */
     if (state.pendingZombieHordeTo) {
+      if (state.legalMoves.length && !state.legalMoves.includes(roomId)) return;
       void onAction({ type: 'pickZombieHorde', roomId });
       return;
     }
@@ -2385,6 +2736,27 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       return;
     }
     /**
+     * 幸存者拆封堵：点被封的那扇门对面的格子 = 选中这一块。
+     * 再点同一格取消。行动区的按钮仍然可以选。
+     */
+    if (isSurvivorView && unblockPick) {
+      const here = unblockPick.roomId;
+      if (roomId === here) return;
+      const id = here < roomId ? `${here}|${roomId}` : `${roomId}|${here}`;
+      if (!unblockPick.doors.includes(id)) return;
+      setUnblockPick((cur) => (cur ? { ...cur, doorId: cur.doorId === id ? null : id } : cur));
+      return;
+    }
+    if (isSurvivorView && state.pendingGeorgeBlockade) {
+      const george = state.players.find((pl) => isGeorgePiece(pl));
+      const here = george?.roomId;
+      if (!here || roomId === here) return;
+      const id = here < roomId ? `${here}|${roomId}` : `${roomId}|${here}`;
+      if (!state.pendingGeorgeBlockade.doors.includes(id)) return;
+      void onAction({ type: 'pickNoteBlockade', doorId: id });
+      return;
+    }
+    /**
      * **威廉「短跑冲刺」**：和普通移动一样一步一步点，但**必须刚好 3 步**才能确认。
      * 必须放在 `if (extraPick)` 那支**之前** ——
      * 否则点击会被「威士忌/肾上腺素选目的地」那支吃掉，而短跑面板没有那个确认按钮 → 卡死。
@@ -2486,6 +2858,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       void onAction({ type: 'move', toRoomId: roomId });
       return;
     }
+    /**
+     * 另一种行动还没确认时，点地图不能开始移动。
+     * 正在点移动路线时（`activeMoveDest`）仍可以继续改这条路线。
+     */
+    if (isSurvivorView && generalPickLock && !activeMoveDest) return;
     if (isSurvivorView && canDraftSurvivorMove) {
       /** 草稿起点必须在数组里，否则第一次点击会因为没有末端被丢掉 */
       const draft = moveDraftRooms.length
@@ -2703,6 +3080,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       .filter(([roomId]) => sharedControl || roomId === state.you.roomId)
       .map(([roomId, list]) => ({ roomId, list }));
   })();
+  /**
+   * 【墓穴遗物】鏡之門戶：**正要传送的那名幸存者**（额外行动按人记）。
+   *
+   * ⚠ 不能用 `state.canUseMirrorPortal` 判 —— 那个字段是"针对 `state.you`"算的，
+   * 而额外行动弹窗是按每个人列按钮的：A 有遗物、当前行动的却是 B，
+   * 用那个字段就会出现"点了没反应"。
+   */
+  const mirrorActor = mirrorActorId
+    ? survivors.find((p) => p.id === mirrorActorId) ?? null
+    : null;
   /**
    * 【变体1】**每名杀手各自的特性卡**（用户要求：放进**各自**的卡牌区）。
    *
@@ -3210,6 +3597,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         rescueCountdown={state.rescueCountdown}
         /** 「分头行动」：顶栏钥匙区换成模式标识（钥匙各自保管） */
         split={state.split === true}
+        poisoned={state.poisoned ?? []}
       />
 
       <div className="table-map">
@@ -3249,7 +3637,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                      */
                     gateUsable
                     ? gatePickRooms
-                    : /**
+                    : unblockMapRooms.length > 0
+                      ? unblockMapRooms
+                      : georgeBlockRooms.length > 0
+                        ? georgeBlockRooms
+                        : /**
                      * **幸运币的草稿**：高亮「从草稿末端还能走到的格子」。
                      * 不能用 `state.legalMoves`（那是当前行动者的移动范围，
                      * 幸运币常在他做完一般行动之后，那时它是空的）。
@@ -3282,16 +3674,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
              * 以前只认 `blockadeDest` → 那两格在图上**一点标记都没有**
              * （用户报的「谋杀者 4 级放四个封堵预选时地点没高亮」）。
              */
-            pickedRoomIds={[
-              ...(blockadeDest ? [blockadeDest] : []),
-              /** 【城堡】机关大门：已经预选的那一格画实心金圈 */
-              ...(gateUsable && gateDoorFrom ? [gateDoorFrom] : []),
-              ...(state.pendingBlockadeJob?.kind === 'anyDoors'
-                ? [state.pendingBlockadeJob.firstRoomId, state.pendingBlockadeJob.secondRoomId].filter(
-                    (r): r is string => Boolean(r),
-                  )
-                : []),
-            ]}
+            pickedRoomIds={[...pickedMapRooms, ...unblockPickedRooms]}
             firecrackerRoomId={
               state.phase === 'noiseReport' ||
               state.phase === 'killerMain' ||
@@ -3377,6 +3760,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               if (viewerFaction === 'killer') {
                 if (state.statues?.find((s) => s.id === statueId)?.main) return;
                 onAction({ type: 'pickMainStatue', statueId });
+              } else if (haltStatueOpen) {
+                /**
+                 * ⚠ **「停滞雕像」面板开着的时候，点地图立绘 = 选中它**
+                 * （用户口径：「被选定的雕像的地图上的立绘高亮显示」）——
+                 * 这时候不能再去"猜主雕像"，那是另一回事。
+                 * 只认"与你同一地点、还没被停滞"的（和面板里那份清单同一口径）。
+                 */
+                const st = state.statues?.find((s) => s.id === statueId);
+                if (st && !st.halted && st.roomId && st.roomId === state.you.roomId)
+                  setHaltPickStatueId(statueId);
               } else if (!(state.split === true && state.you.alive === false)) {
                 void runSurvivorGuess(statueId);
               }
@@ -3398,7 +3791,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             /** 【变体3】地图上的计划标记（幸存者视角才有；杀手拿到的是空数组） */
             planMarkers={state.plans?.markers ?? []}
             zombies={state.zombies ?? []}
-            poisoned={state.poisoned ?? []}
             /** 杀手视角的右键菜单只在遭遇期间列幸存者 */
             encounterRoomId={state.encounter?.roomId ?? null}
             /** 地图特殊规则的标记：城堡的机关大门、实验室的急救箱 */
@@ -3418,8 +3810,14 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 ? state.trapPlacement.allowedRooms ?? []
                 : []
             }
-            /** 【雕像・停滞】正在选目标 → 可选的雕像立绘上下浮动 */
+            /**
+             * 【雕像・停滞】正在选目标 → **只有"你所在地点、还没被停滞"的雕像**
+             * 立绘上下浮动（够得着的才提示；以前全场都浮，容易看花眼）。
+             */
             statueHaltPickable={haltStatueOpen}
+            statueHaltRoomId={haltStatueOpen ? state.you.roomId ?? null : null}
+            /** 已经选中的那尊 → 地图立绘金边高亮（等「确认停滞」） */
+            haltPickedStatueId={haltStatueOpen ? haltPickStatueId : null}
             /** 【墓穴】坍塌板块 + 遗物标记正反面 */
             collapsedRooms={state.collapsedRooms ?? []}
             relicMarkerFaceUp={state.relicMarkerFaceUp !== false}
@@ -3592,7 +3990,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   type="button"
                   className="ghost-btn viewer-switch-btn"
                   onClick={() =>
-                    setManualFaction(viewerFaction === 'killer' ? 'survivor' : 'killer')}
+                    setManualPick({
+                      faction: viewerFaction === 'killer' ? 'survivor' : 'killer',
+                      /** ⚠ 记下"切的时候是哪个阶段" —— 阶段一变就自动交还给推断 */
+                      phase: state.phase,
+                    })}
                 >
                   切到{viewerFaction === 'killer' ? '幸存者' : '杀手'}界面
                 </button>
@@ -3604,6 +4006,37 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 求生者相关物品
               </button>
             </div>
+            {/**
+             * 【雕像・状态条】用户要求：「**在雕像行动区最上方写明主雕像和本轮被停滞的雕像**」
+             * ＋「写明雕塑几和位置」。
+             *
+             * 位置用 `roomDisplayName(..., 'killer')` —— 它本来就输出"编号+地名"
+             * （例如 `R1接待处`），所以"雕像几、在哪"一条就写全了。
+             *
+             * ⚠ **只给杀手看**：幸存者界面不能暴露哪尊是主雕像
+             * （`main` 只有 `viewerFaction === 'killer'` 时才画，地图立绘那边同理）。
+             */}
+            {!isSurvivorView &&
+              state.isStatueKiller &&
+              (state.statues?.length ?? 0) > 0 &&
+              (() => {
+                const statues = state.statues ?? [];
+                const main = statues.find((s) => s.main);
+                const halted = statues.filter((s) => s.halted);
+                const label = (s: { index: number; roomId: string | null }) =>
+                  `雕像 ${s.index}（${roomDisplayName(state.map, s.roomId, 'killer')}）`;
+                return (
+                  <div className="statue-status-bar">
+                    <span className="statue-status-item main">
+                      主雕像：{main ? label(main) : '未指定'}
+                    </span>
+                    <span className="statue-status-item halted">
+                      本回合被停滞：
+                      {halted.length > 0 ? halted.map(label).join('、') : '无（都能移动和搜索）'}
+                    </span>
+                  </div>
+                );
+              })()}
             {/**
              * 【变体3】**计划卡按钮**（幸存者行动区右侧）。
              *
@@ -3979,7 +4412,10 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {extraPick && extraPick.kind !== 'sprint' && (
               <div className="stack">
                 <p className="muted">
-                  点地图选择地点，再点同一格可取消。选好后确认。
+                  点地图选择地点，再点同一格可取消。选好后还要再确认一次。
+                  {extraPick.kind === 'whiskey' || extraPick.kind === 'adrenaline'
+                    ? '确认之前可以取消，物品还不会用掉。'
+                    : '确认之前可以取消。'}
                   {extraDest
                     ? ` 已选「${roomDisplayName(state.map, extraDest, viewerFaction)}」。`
                     : ''}
@@ -4045,46 +4481,21 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 <button type="button" onClick={() => setExtraOpen(true)}>
                   额外行动
                 </button>
-                {/*
-                  雕像：停滞。必须是这名幸存者本回合的唯一行动 ——
-                  做过其他任何行动（含额外行动、交换物品）就选不了。
-                  而且**只能停滞与自己同一地点的雕像**，所以所在地点没有雕像时不显示这个按钮。
-                */}
-                {state.isStatueKiller &&
-                  (state.statues ?? []).some(
-                    (st) => st.roomId && st.roomId === state.you.roomId && !st.halted,
-                  ) && (
-                    <button type="button" onClick={() => setHaltStatueOpen((v) => !v)}>
-                      停滞雕像
-                    </button>
-                  )}
                 {/**
-                 * 狼人宝藏：幸存者在自己所在地点有没开过的宝箱时，可以开一个。
-                 * 开箱 → 抽 1 张宝藏牌、那个宝箱图标消失。
+                 * ⚠ **「停滞雕像」已经不在这里** —— 它是**特殊行动**
+                 * （一般行动第 4 项），用户口径：「幸存者停滞雕像是特殊行动，
+                 * 要放在特殊行动处」。现在它和"工具箱修理 / 观察入微"那些一起
+                 * 画在下面的「特殊行动」区里（见 `specials` 那一支）。
                  */}
-                {(() => {
-                  const chestId = (state.treasureChests ?? []).find((id) =>
-                    (state.map.tokens ?? []).some(
-                      (t) => t.id === id && t.kind === 'treasureChest' && t.roomId === state.you.roomId,
-                    ),
-                  );
-                  if (!chestId) return null;
-                  return (
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={() =>
-                        void onAction({
-                          type: 'openChest',
-                          chestId,
-                          actorPlayerId: state.you.faction === 'survivor' ? state.you.id : undefined,
-                        })
-                      }
-                    >
-                      开宝箱（宝藏牌堆剩 {state.treasureDeckCount ?? 0}）
-                    </button>
-                  );
-                })()}
+                {/**
+                 * 狼人宝藏：开宝箱**是额外行动**（用户口径：
+                 * 「幸存者小回合执行完后如果有宝箱，行动区会放一个开宝箱的按钮，这不对。
+                 *   开宝箱算作额外行动」）。
+                 *
+                 * 所以行动区**不再放这颗按钮** —— 它只出现在左上角那颗
+                 * 「额外行动」弹窗里（见下面 `add('chest', …)` 那一处，
+                 * 那里是**按每个幸存者 `p` 逐个列**的，共享操控下也不会漏人）。
+                 */}
                 {state.survivorActionsDone && (
                   <button
                     type="button"
@@ -4099,17 +4510,25 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {state.isStatueKiller && isSurvivorView && haltStatueOpen && (
               <div className="statue-halt">
                 <p className="muted">
-                  选择要停滞的雕像：本回合该雕像不能移动和搜索。
+                  选择要停滞的雕像：本回合该雕像的移动和搜索会被跳过（可以做，但白做）。
                   <strong>只能停滞与你同一地点的雕像</strong>。
                   <strong>停滞必须是这名幸存者本回合的唯一行动</strong> ——
                   做过其他行动（含额外行动、交换物品）就不能再停滞。
+                  {/**
+                   * ⚠ **选完要点确认**（用户口径：「被选定的雕像的地图上的立绘高亮显示，
+                   * 而且取消怎么没用？」）。
+                   * 以前是"点一下雕像按钮就直接停滞"—— 没有选中态、
+                   * 地图上也没有高亮，那颗「取消」自然什么也取消不了。
+                   * 现在：点面板里的雕像 **或直接点地图上的立绘** = 选中（金边高亮），
+                   * 再按「确认停滞」才真的生效；「取消」清掉选中。
+                   */}
+                  {' '}点面板里的雕像或**直接点地图上的立绘**选中它（会金边高亮），再按「确认停滞」。
                 </p>
                 <div className="row">
                   {/**
                    * **只列"与你同一地点、且还没被停滞"的雕像**（用户要求：
                    * 「只有当地有未被停滞的雕像时才能选择停滞雕像，
                    * 只能选未被停滞的一个雕像」）。
-                   * 「停滞雕像」那颗按钮已经保证"当地至少有一尊可停滞"，所以这里不会空。
                    */}
                   {(state.statues ?? [])
                     .filter(
@@ -4123,21 +4542,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         <button
                           key={st.id}
                           type="button"
-                          /**
-                           * ⚠ **不给主雕像加高亮**：这是**幸存者**的面板，
-                           * 而"哪尊是主雕像"是杀手的秘密（用户要求：
-                           * 「雕像游戏中，幸存者界面不能有正确的主雕像的高亮显示」）。
-                           * 幸存者只能看到编号和所在地点，自己猜。
-                           */
-                          className="statue-pick"
-                          onClick={() =>
-                            void onAction({
-                              type: 'haltStatue',
-                              statueId: st.id,
-                              actorPlayerId:
-                                state.you.faction === 'survivor' ? state.you.id : undefined,
-                            })
-                          }
+                          className={`statue-pick${haltPickStatueId === st.id ? ' picked' : ''}`}
+                          onClick={() => setHaltPickStatueId(st.id)}
                         >
                           <span className="statue-pick-idx">雕像 {st.index}</span>
                           <span className="statue-pick-room">
@@ -4146,7 +4552,33 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         </button>
                       );
                     })}
-                  <button type="button" onClick={() => setHaltStatueOpen(false)}>
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!haltPickStatueId}
+                    onClick={() => {
+                      const id = haltPickStatueId;
+                      if (!id) return;
+                      setHaltPickStatueId(null);
+                      setHaltStatueOpen(false);
+                      void onAction({
+                        type: 'haltStatue',
+                        statueId: id,
+                        actorPlayerId:
+                          state.you.faction === 'survivor' ? state.you.id : undefined,
+                      });
+                    }}
+                  >
+                    确认停滞{haltPickStatueId ? '这尊' : ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      /** 「取消」先清选中；没选中时就把面板收起来（这才叫"有用"） */
+                      if (haltPickStatueId) setHaltPickStatueId(null);
+                      else setHaltStatueOpen(false);
+                    }}
+                  >
                     取消
                   </button>
                 </div>
@@ -4566,35 +4998,38 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                             const recvIds = ownedItemIds(receiver.items);
                             const recvCap = receiver.inventorySlots || 3;
                             const recvFull = inventoryUsed(receiver.items) >= recvCap;
-                            const canGive = !recvFull;
+                            /**
+                             * ⚠ **对方栏满也能给**（用户口径：「幸存者**任何时候**物品栏超限
+                             * 都是**选择弃置**」）—— 给过去之后由**收下的人自己**挑一件弃掉
+                             * （服务端 `enforceInventory` 挂 `pendingItemDiscard`）。
+                             * 以前这里 `canGive = !recvFull`：满栏连"给"的按钮都不画。
+                             */
                             const showSwap =
                               giveIds.length > 0 &&
                               recvIds.length > 0 &&
                               (sharedControl ? giver.id < receiver.id : true);
-                            const giveBtns = giveIds.map((itemId) =>
-                              canGive ? (
-                                <button
-                                  key={`${giver.id}-${receiver.id}-${itemId}-give`}
-                                  type="button"
-                                  onClick={() =>
-                                    void runSurvivor(
-                                      `让${giver.name}把${ITEM_LABEL[itemId] ?? itemId}给${receiver.name}`,
-                                      {
-                                        type: 'tradeItem',
-                                        fromPlayerId: giver.id,
-                                        targetPlayerId: receiver.id,
-                                        itemId,
-                                        amount: 1,
-                                      },
-                                    )
-                                  }
-                                >
-                                  {giver.name} 把 {ITEM_LABEL[itemId] ?? itemId}
-                                  {(giver.items[itemId] ?? 0) > 1 ? `×${giver.items[itemId]}` : ''} 给{' '}
-                                  {receiver.name}
-                                </button>
-                              ) : null,
-                            );
+                            const giveBtns = giveIds.map((itemId) => (
+                              <button
+                                key={`${giver.id}-${receiver.id}-${itemId}-give`}
+                                type="button"
+                                onClick={() =>
+                                  void runSurvivor(
+                                    `让${giver.name}把${ITEM_LABEL[itemId] ?? itemId}给${receiver.name}`,
+                                    {
+                                      type: 'tradeItem',
+                                      fromPlayerId: giver.id,
+                                      targetPlayerId: receiver.id,
+                                      itemId,
+                                      amount: 1,
+                                    },
+                                  )
+                                }
+                              >
+                                {giver.name} 把 {ITEM_LABEL[itemId] ?? itemId}
+                                {(giver.items[itemId] ?? 0) > 1 ? `×${giver.items[itemId]}` : ''} 给{' '}
+                                {receiver.name}
+                              </button>
+                            ));
                             const swapBtns =
                               showSwap
                                 ? giveIds.flatMap((itemId) =>
@@ -4623,13 +5058,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                                   )
                                 : [];
                             const blocked =
-                              !canGive && giveIds.length > 0 && recvIds.length === 0 ? (
+                              recvFull && giveIds.length > 0 ? (
                                 <p key={`${giver.id}-${receiver.id}-full`} className="muted">
-                                  {receiver.name} 栏已满且没有可换的装备，只能等对方先腾出空位再给予
-                                </p>
-                              ) : !canGive && giveIds.length > 0 ? (
-                                <p key={`${giver.id}-${receiver.id}-swap-only`} className="muted">
-                                  {receiver.name} 栏已满，只能互换
+                                  {receiver.name} 栏已满 —— 给过去之后由**他自己**选一件弃置
                                 </p>
                               ) : null;
                             return [...giveBtns, ...swapBtns, blocked];
@@ -5163,7 +5594,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                               /** `payForCard` 非空时，`playKillerCard` 这一支就是"选/取消支付" */
                               onClick={() => playKillerCard(cid)}
                             >
-                              <h4>{card?.name ?? cid}</h4>
+                              <h4>
+                                {cardArtSrc(card, cid) && (
+                                  <img
+                                    className="inline-card-art"
+                                    src={encodeURI(cardArtSrc(card, cid)!)}
+                                    alt=""
+                                  />
+                                )}
+                                {card?.name ?? cid}
+                              </h4>
                               <div className="muted">{card?.text}</div>
                             </button>
                           );
@@ -5268,6 +5708,17 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                             : '即使身上有加防物品，只要本场不使用，「坚韧不拔」也会 +1。'}
                         </p>
                       )}
+                      {(defenseItemId || shieldPicked) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDefenseItemId(null);
+                            setShieldPicked(false);
+                          }}
+                        >
+                          取消使用物品
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="primary"
@@ -5318,7 +5769,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           title={
                             (state.you.items.whiskey ?? 0) <= 0 ? '你没有威士忌酒瓶' : undefined
                           }
-                          onClick={() => void onAction({ type: 'confirmWhiskeyDefense', use: true })}
+                          onClick={() =>
+                            void runSurvivor('弃置威士忌酒瓶，防御 +2', {
+                              type: 'confirmWhiskeyDefense',
+                              use: true,
+                            })
+                          }
                         >
                           弃置威士忌酒瓶（+2）
                         </button>
@@ -5464,7 +5920,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <div className="stack">
                 <h4>正在行动：{state.you.name}</h4>
                 <p className="muted">
-                  {extraPick
+                  {generalPickLock && !extraPick && !activeMoveDest
+                    ? `${generalPickLock}。确认之前可以取消，这期间不能改做别的行动。`
+                    : extraPick
                     ? extraPick.kind === 'whiskey'
                       ? '点地图选一个相邻地点，再点同一格可取消，确认后才发出响声。'
                       : extraPick.kind === 'adrenaline'
@@ -5529,7 +5987,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 {extraPick && extraPick.kind !== 'sprint' && (
                   <div className="row">
                     <button type="button" onClick={() => { setExtraPick(null); setExtraDest(null); }}>
-                      取消
+                      取消（物品还不用掉）
                     </button>
                     {extraDest && (
                       <button type="button" className="primary" onClick={confirmExtraDest}>
@@ -5557,7 +6015,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {canSearchHere && (
                     <button
                       type="button"
-                      disabled={state.you.mainActionUsed || Boolean(activeMoveDest)}
+                      disabled={state.you.mainActionUsed || Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('搜索物资', { type: 'search' })}
                     >
                       搜索物资
@@ -5566,7 +6024,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {canRepairHere && (
                     <button
                       type="button"
-                      disabled={state.you.mainActionUsed || Boolean(activeMoveDest)}
+                      disabled={state.you.mainActionUsed || Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('修理', { type: 'repair' })}
                     >
                       修理
@@ -5575,7 +6033,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {canClearFear && (
                     <button
                       type="button"
-                      disabled={state.you.mainActionUsed || Boolean(activeMoveDest)}
+                      disabled={state.you.mainActionUsed || Boolean(generalPickLock)}
                       onClick={() => {
                         const n = state.you.fear ?? 0;
                         /** 确认放在**行动区**（原来这里是 window.confirm，会遮地图） */
@@ -5594,8 +6052,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {canUnblockHere && (
                     <button
                       type="button"
-                      disabled={state.you.mainActionUsed || Boolean(activeMoveDest)}
-                      onClick={() => void runSurvivor('移除封堵', { type: 'removeBlockade' })}
+                      disabled={state.you.mainActionUsed || Boolean(generalPickLock)}
+                      onClick={() => startUnblock('action', state.you.id)}
                     >
                       移除封堵
                     </button>
@@ -5606,7 +6064,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       <button
                         key={`fl-${rid}`}
                         type="button"
-                        disabled={state.you.mainActionUsed || Boolean(activeMoveDest)}
+                        disabled={state.you.mainActionUsed || Boolean(generalPickLock)}
                         onClick={() =>
                           void runSurvivor(`用手电通过秘密通道到${roomDisplayName(state.map, rid, viewerFaction)}`, {
                             type: 'useItem',
@@ -5621,7 +6079,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {(state.you.items.trap ?? 0) > 0 && (
                     <button
                       type="button"
-                      disabled={state.you.mainActionUsed || Boolean(activeMoveDest) || !state.you.roomId}
+                      disabled={state.you.mainActionUsed || Boolean(generalPickLock) || !state.you.roomId}
                       title={!state.you.roomId ? '不在地图上，无法放置陷阱' : undefined}
                       onClick={() =>
                         void runSurvivor('在此地放置陷阱', { type: 'useItem', itemId: 'trap' })
@@ -5644,7 +6102,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   const bookHere = Boolean(youRoom?.tags.includes('special-book'));
                   const brilliantLeft = !state.you.skillUsedThisTurn.includes('brilliant');
                   const canBrilliant =
-                    bookHere && !killerHere && brilliantLeft && !state.you.mainActionUsed && !activeMoveDest;
+                    bookHere && !killerHere && brilliantLeft && !state.you.mainActionUsed && !generalPickLock;
                   const noteIds = Object.keys(state.you.items).filter((id) =>
                     id.startsWith('george_note_'),
                   );
@@ -5710,6 +6168,62 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             )}
 
             {/**
+             * **拆封堵：选哪一块**（一般行动「移除封堵」/ 手斧拆除共用这块面板）。
+             *
+             * 用户口径：「幸存者移除封堵应该是**他自己选择移除**，不是自动」——
+             * 以前只传房间号，服务端在那间屋子的几块封堵里**随便挑一块**拆。
+             * 只有 1 块时不开这块面板（没得选，直接拆）。
+             */}
+            {isSurvivorView && unblockPick && unblockPick.doors.length > 1 && (
+              <div className="effect-choice">
+                <p className="muted">
+                  {unblockPick.kind === 'axe' ? '手斧拆除封堵' : '移除封堵'}：
+                  这个地点有 {unblockPick.doors.length} 块封堵，
+                  <strong>请选要拆哪一块</strong>
+                  （点行动区按钮，或点地图上那扇门对面的格子；再点一次取消），然后按「确认拆除」。
+                </p>
+                <div className="row">
+                  {unblockPick.doors.map((doorId) => {
+                    const picked = unblockPick.doorId === doorId;
+                    return (
+                      <button
+                        key={doorId}
+                        type="button"
+                        className={picked ? 'primary' : ''}
+                        onClick={() =>
+                          setUnblockPick((cur) =>
+                            cur ? { ...cur, doorId: cur.doorId === doorId ? null : doorId } : cur,
+                          )
+                        }
+                      >
+                        {picked ? '✓ ' : ''}拆除 {doorEndsLabel(state.map, doorId, viewerFaction)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!unblockPick.doorId}
+                    onClick={() => {
+                      const pick = unblockPick;
+                      setUnblockPick(null);
+                      if (pick?.doorId) sendUnblock(pick.kind, pick.actorId, pick.doorId, true);
+                    }}
+                  >
+                    确认拆除{unblockPick.doorId
+                      ? ` ${doorEndsLabel(state.map, unblockPick.doorId, viewerFaction)}`
+                      : ''}
+                  </button>
+                  <button type="button" onClick={() => setUnblockPick(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/**
              * 乔治「拆封堵」笔记：**由玩家选要拆哪几个**（最多 2 个）。
              * 打出笔记后进入这个状态；选完点确认才真的拆、才消耗笔记。
              * 0 个也能确认（等于放弃这张笔记）。
@@ -5717,7 +6231,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {state.pendingGeorgeBlockade && isSurvivorView && (
               <div className="stack">
                 <p className="muted">
-                  乔治的笔记（拆封堵）：请选要拆的封堵（最多 2 个，再点已选的取消）。
+                  乔治的笔记（拆封堵）：请选要拆的封堵（最多 2 个）。
+                  可以点下面的按钮，也可以点地图上那扇门对面的格子。再点已选的取消。
                   已选 {state.pendingGeorgeBlockade.picked.length}/2。
                 </p>
                 <div className="row">
@@ -5742,6 +6257,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     onClick={() => void onAction({ type: 'confirmNoteBlockade' })}
                   >
                     确认拆除 {state.pendingGeorgeBlockade.picked.length} 块
+                  </button>
+                  <button type="button" onClick={() => void onAction({ type: 'cancelNoteBlockade' })}>
+                    取消
                   </button>
                 </div>
               </div>
@@ -5815,7 +6333,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               </div>
             )}
 
-            {isActive && state.you.faction === 'killer' && state.pendingKillerDiscards > 0 && (
+            {/**
+             * **杀手手牌超额 → 自选弃哪张**（进化入手 / 【变体1】03「狡猾诡计」摸牌）。
+             *
+             * ⚠ 这里**不能**再要求 `isActive`，也**不能**看 `state.you.faction`：
+             * 这笔账可能出现在幸存者大回合里（幸存者的「長劍」+「狡猾诡计」），
+             * 那时"正在行动的人"是幸存者，可账必须先由杀手结掉。
+             * 所以改成"这个操控者能不能替杀手做事 + 现在看的是杀手界面"。
+             */}
+            {!isSpectator && viewerFaction === 'killer' && state.pendingKillerDiscards > 0 && (
               <div className="stack">
                 <p className="muted">
                   手牌超过上限，请弃置 {state.pendingKillerDiscards} 张。
@@ -6211,33 +6737,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               </div>
             )}
             {/**
-             * 迪伦·温「坚毅」：用坚毅标记挡掉这次伤害（或不用）。
+             * ⚠ 这里原来有「迪伦·温·坚毅标记：要不要用它免伤？」的询问面板 ——
+             * **已删除**：坚毅标记是**自动使用**的（用户口径：「坚毅标记自动使用」），
+             * 服务端 `effects.applyDamage` 里第一次即将受伤时直接生效，
+             * 从来没有代码会挂出那个待办，这块面板永远不会亮。
              */}
-            {isSurvivorView &&
-              state.pendingResilience &&
-              state.pendingResilience.playerId === state.you.id && (
-                <div className="effect-choice">
-                  <p className="muted">
-                    你受到 {state.pendingResilience.amount} 点伤害。
-                    要移除<strong>坚毅标记</strong>来防止这次伤害吗？（整局只有一次）
-                  </p>
-                  <div className="row">
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={() => void onAction({ type: 'confirmResilience', use: true })}
-                    >
-                      用坚毅标记免伤
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void onAction({ type: 'confirmResilience', use: false })}
-                    >
-                      照常受伤
-                    </button>
-                  </div>
-                </div>
-              )}
 
             {/**
              * **十字弩的选僵尸面板（已从杀手区块搬出）**。
@@ -6253,7 +6757,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <div className="effect-choice">
                 <p className="muted">
                   十字弩：请点选最多 {state.pendingCrossbow.max} 个要消灭的僵尸
-                  （已选 {crossbowPicked.length} 个）。
+                  （已选 {crossbowPicked.length} 个）。确认之前可以取消，这期间不能改做别的行动。
                 </p>
                 <div className="row">
                   {state.pendingCrossbow.zombieIds.map((zid) => {
@@ -6271,14 +6775,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     );
                   })}
                 </div>
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={crossbowPicked.length > state.pendingCrossbow.max}
-                  onClick={() => void onAction({ type: 'confirmCrossbow', zombieIds: crossbowPicked })}
-                >
-                  确认消灭 {crossbowPicked.length} 个
-                </button>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={crossbowPicked.length > state.pendingCrossbow.max}
+                    onClick={() => void onAction({ type: 'confirmCrossbow', zombieIds: crossbowPicked })}
+                  >
+                    确认消灭 {crossbowPicked.length} 个
+                  </button>
+                  <button type="button" onClick={() => void onAction({ type: 'cancelCrossbow' })}>
+                    取消
+                  </button>
+                </div>
               </div>
             )}
 
@@ -6352,22 +6861,34 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 {(state.pendingStatueEvoSwitch || state.pendingStatueEvoTarget) && (
                   <div className="effect-choice">
                     <p className="muted">
-                      雕像进化：你可以转换主雕像（也可以不切）。**选一尊**，再点下面的「确认新效果」。
+                      雕像进化：你可以转换主雕像（也可以不切）。
+                      **点一尊选中**（地图立绘会高亮），再按「确认切换主雕像」；
+                      切换会在点「确认新效果」时生效。
+                      <strong>当前主雕像不能选</strong> —— 要换就得换另一尊。
                     </p>
                     <div className="row">
                       {(state.statues ?? []).map((st) => {
-                        /** 已经点过但还没确认的那一尊（选择要确认，点了不立刻生效） */
-                        const picked = state.pendingStatueEvoTarget === st.id;
+                        /**
+                         * ⚠ **点一下只是"选中"，不立刻切换主雕像**（用户口径：
+                         * 「切换主雕像也要二次确认」）——
+                         * 和另外两处（开局准备 / 重整旗鼓）一样：
+                         * 选中 → 按「确认切换主雕像」→ 服务端才记下这次切换。
+                         */
+                        const picked =
+                          evoStatuePick === st.id || state.pendingStatueEvoTarget === st.id;
                         return (
                           <button
                             key={st.id}
                             type="button"
                             className={`statue-pick${st.main ? ' main' : ''}${picked ? ' picked' : ''}`}
                             /**
-                             * ⚠ 这里**只记下选择**，不立刻切换 ——
-                             * 用户要求"选择要确认"，切换在「确认新效果」时一并执行。
+                             * ⚠ **当前主雕像不能选**（用户口径：「雕像的进化切换主雕像
+                             * 不能选当前的主雕像转换」）—— 和「重整旗鼓」那块同一口径：
+                             * 切换必须换成另一尊；不换就按「不转换」。
                              */
-                            onClick={() => void onAction({ type: 'pickStatueEvoSwitch', statueId: st.id })}
+                            disabled={st.main}
+                            title={st.main ? '它已经是主雕像 —— 切换要选另一尊' : '选它作为新的主雕像'}
+                            onClick={() => setEvoStatuePick(st.id)}
                           >
                             <span className="statue-pick-idx">雕像 {st.index}</span>
                             <span className="statue-pick-room">
@@ -6377,10 +6898,58 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           </button>
                         );
                       })}
-                      <button type="button" onClick={() => void onAction({ type: 'skipStatueEvoSwitch' })}>
+                    </div>
+                    <div className="row">
+                      {/**
+                       * **二次确认**：选中之后按这里，服务端才记下"要切到这一尊"。
+                       * `pickStatueEvoSwitch` 本身**也不立刻切换** ——
+                       * 真正的切换在「确认新效果」结算时执行。
+                       */}
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={
+                          !evoStatuePick ||
+                          evoStatuePick === state.pendingStatueEvoTarget ||
+                          /** ⚠ 当前主雕像不能选（同一口径，服务端也会拒） */
+                          (state.statues ?? []).find((x) => x.id === evoStatuePick)?.main === true
+                        }
+                        onClick={() => {
+                          const id = evoStatuePick;
+                          if (!id) return;
+                          setEvoStatuePick(null);
+                          void onAction({ type: 'pickStatueEvoSwitch', statueId: id });
+                        }}
+                      >
+                        确认切换主雕像
+                      </button>
+                      {evoStatuePick && (
+                        <button type="button" onClick={() => setEvoStatuePick(null)}>
+                          取消选择
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          /** ⚠ 放弃切换要把**本地选中的那尊**也清掉，否则面板收起来后它还挂着 */
+                          setEvoStatuePick(null);
+                          void onAction({ type: 'skipStatueEvoSwitch' });
+                        }}
+                      >
                         不转换
                       </button>
                     </div>
+                    {state.pendingStatueEvoTarget && (
+                      <p className="muted">
+                        已确认切换到
+                        <strong>
+                          雕像{' '}
+                          {(state.statues ?? []).find((x) => x.id === state.pendingStatueEvoTarget)
+                            ?.index ?? '?'}
+                        </strong>
+                        —— 点「确认新效果」后生效（想反悔就点「不转换」）。
+                      </p>
+                    )}
                   </div>
                 )}
                 {(() => {
@@ -6395,12 +6964,44 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     state.pendingUnlockChoice ||
                       state.pendingEvolutionCardPick ||
                       state.pendingStatueEvoSwitch ||
-                      state.pendingStatueEvoTarget,
+                      state.pendingStatueEvoTarget ||
+                      /** 进化入手牌后超额 → 还没弃完（弃牌面板在上面那块） */
+                      (state.pendingKillerDiscards ?? 0) > 0 ||
+                      /**
+                       * ⚠ **本地选中的那尊只有在"转主雕像面板还开着"时才算数**。
+                       *
+                       * 以前只看 `evoStatuePick`：面板已经收起来（服务端那两项都清了，
+                       * 例如点了「不转换」）但本地还留着选中 → 面板没了、确认按钮却一直
+                       * 灰着，只剩一句"请先按「确认切换主雕像」"，**卡死到刷新页面为止**
+                       * （用户截图里就是这个状态）。
+                       */
+                      (state.pendingStatueEvoSwitch && evoStatuePick),
                   );
+                  /**
+                   * ⚠ **已经点过「确认新效果」了** —— 这时还挂着选择只是"效果里的步骤没做完"，
+                   * 那颗按钮必须**收起来**（再点一次会把这一级结算两遍），提示语也要换掉，
+                   * 不能再说"请先按确认切换主雕像，进化才会继续结算"（会让人以为还没确认）。
+                   */
+                  if (state.pendingEvolutionAck?.acked) {
+                    return (
+                      <p className="muted">
+                        已确认新效果。
+                        {state.pendingStatueEvoSwitch && evoStatuePick && !state.pendingStatueEvoTarget
+                          ? '已选中一尊雕像 —— 按「确认切换主雕像」才会记下（或按「不转换」放弃）。'
+                          : pendingPick
+                            ? '请先做完上面的选择，进化就会继续结算。'
+                            : '正在结算…'}
+                      </p>
+                    );
+                  }
                   return (
                     <>
                       {pendingPick && (
-                        <p className="muted">请先在上面选好，进化才会继续结算。</p>
+                        <p className="muted">
+                          {evoStatuePick && !state.pendingStatueEvoTarget
+                            ? '请先按「确认切换主雕像」（或「不转换」），进化才会继续结算。'
+                            : '请先在上面选好，进化才会继续结算。'}
+                        </p>
                       )}
                       <button
                         type="button"
@@ -6413,6 +7014,59 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     </>
                   );
                 })()}
+              </div>
+            )}
+
+            {/**
+             * **进化 4 级的「选 2 个地点 → 再确认」**（女王生成丧尸 / 扼杀者放核心标记）。
+             *
+             * ⚠ **必须画在这一层、不能放进下面的"杀手行动区"**（用户报的
+             * 「扼杀者，女王4级进化效果行动区无法确认」）：
+             *  - 这两个选择是**回合收尾时**挂出来的（扼杀者那一路 `phase` 已经是
+             *    `upkeep`），而行动区整个被 `state.phase === 'killerMain'` 挡着
+             *    （见下面那一支），放进去**按钮根本不画出来**；
+             *  - 女王那一路 `pendingEvolutionAck` 也还挂着，行动区同样进不去。
+             *
+             * 这里和上面的「进化确认」面板同层 —— 它本来就证明了"这一段在
+             * 收尾阶段画得出来"（`!isActive` 那个坎也一起过了：`isActive` =
+             * 服务端说"现在该你操作"）。
+             */}
+            {isActive && state.you.faction === 'killer' && state.pendingQueenSpawnRooms != null && (
+              <div className="stack">
+                <p className="muted">
+                  女王进化 4 级：请在任意 2 个<strong>不同</strong>地点各生成一个丧尸
+                  （已选 {state.pendingQueenSpawnRooms.length}/2）。
+                  点地图选中（再点同一格取消），按「确认生成丧尸」才生效。
+                </p>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={state.pendingQueenSpawnRooms.length !== 2}
+                    onClick={() => void onAction({ type: 'confirmEvoRooms' })}
+                  >
+                    确认生成丧尸
+                  </button>
+                </div>
+              </div>
+            )}
+            {isActive && state.you.faction === 'killer' && state.pendingStranglerCoreRooms != null && (
+              <div className="stack">
+                <p className="muted">
+                  扼杀者进化 4 级：请在任意 2 个<strong>不同</strong>地点各放置一个核心标记
+                  （已选 {state.pendingStranglerCoreRooms.length}/2）。
+                  点地图选中（再点同一格取消），按「确认放置核心标记」才生效。
+                </p>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={state.pendingStranglerCoreRooms.length !== 2}
+                    onClick={() => void onAction({ type: 'confirmEvoRooms' })}
+                  >
+                    确认放置核心标记
+                  </button>
+                </div>
               </div>
             )}
 
@@ -6660,26 +7314,29 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   </div>
                 )}
                 {/**
-                 * 扼杀者等级 4：点 2 个不同地点各放 1 个核心标记。
+                 * 扼杀者等级 4 / 女王等级 4：**已挪到上面的「进化确认」那一层** ——
+                 * 它们在**回合收尾（`upkeep`）** 时挂出来，而这块"杀手行动区"
+                 * 整个被 `state.phase === 'killerMain'` 挡着（见下面那一支的条件），
+                 * 留在这里就是**按钮根本不画出来**（用户报的
+                 * 「扼杀者，女王4级进化效果行动区无法确认」）。
                  */}
-                {!isSurvivorView && state.pendingStranglerCoreRooms != null && (
-                  <div className="effect-choice">
-                    <p className="muted">
-                      扼杀者进化 4 级：请在任意 2 个<strong>不同</strong>地点各放置一个核心标记
-                      （已选 {state.pendingStranglerCoreRooms.length}/2）。
-                    </p>
-                  </div>
-                )}
                 {/**
-                 * 【恐詭管道】落点：**点地图只是选中，按这里才真的潜行过去**
-                 * （用户口径：选择了地点后要确认）。
+                 * **〔潛行〕落点**（恐詭管道 / 保護色版 / 女猎手「陷阱重置」）：
+                 * **点地图只是选中，按这里才真的潜行过去**（用户口径：选择了地点要确认）。
+                 *
+                 * ⚠ 提示语看 `pendingPassageAnywhere`（**这一次**的落点范围），
+                 * 不能看 `passageStealthAnywhere`（那是"保護色常驻被动"）——
+                 * 女猎手「陷阱重置」也是"任意地点"，但来源不同、措辞要跟来源一致。
                  */}
                 {!isSurvivorView && (state.pendingPassagePick?.length ?? 0) > 0 && (
                   <div className="effect-choice">
                     <p className="muted">
-                      {state.passageStealthAnywhere
-                        ? '【保護色】恐詭管道：可以潛行到**任何地点**。'
-                        : '恐詭管道：请点一个有秘密通道的地点。'}
+                      {(() => {
+                        const label = state.pendingPassageLabel ?? '恐詭管道';
+                        if (state.pendingPassageAnywhere)
+                          return `${label}：可以潛行到**任何地点**。`;
+                        return `${label}：请点一个有秘密通道的地点。`;
+                      })()}
                       {state.pendingPassageRoom
                         ? `已选「${roomDisplayName(state.map, state.pendingPassageRoom, viewerFaction)}」，`
                         : '还没选地点，'}
@@ -6701,16 +7358,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   </div>
                 )}
                 {/**
-                 * 女王等级 4：点 2 个不同地点各生成 1 个僵尸。
+                 * 女王等级 4：**同扼杀者那处，已挪到「进化确认」那一层**（不看阶段）。
                  */}
-                {!isSurvivorView && (state.pendingQueenSpawnRooms?.length ?? 0) > 0 && (
-                  <div className="effect-choice">
-                    <p className="muted">
-                      女王进化 4 级：请在任意 2 个<strong>不同</strong>地点各生成一个丧尸
-                      （已选 {state.pendingQueenSpawnRooms!.length}/2）。
-                    </p>
-                  </div>
-                )}
+                {/* 女王 4 级那块见上面 `pendingQueenSpawnRooms` 的面板 */}
                 {/**
                  * 女王（killer9）：移动时选「带几个僵尸一起走」。
                  */}
@@ -6771,8 +7421,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   <div className="effect-choice">
                     <p className="muted">
                       {state.pendingZombieHordeFrom
-                        ? '屍群來了：请点一个有僵尸的地点作为出发地。'
-                        : `屍群來了：出发地「${state.pendingZombieHordeTo ? roomDisplayName(state.map, state.pendingZombieHordeTo, viewerFaction) : ''}」，请点一个目的地。`}
+                        ? '屍群來了：先点要移动的僵尸（同一地点的会一起走）。'
+                        : `屍群來了：僵尸在「${state.pendingZombieHordeTo ? roomDisplayName(state.map, state.pendingZombieHordeTo, viewerFaction) : ''}」，只能再点距离 1 的地点。`}
                     </p>
                     {state.pendingZombieHordeFrom && (
                       <div className="row">
@@ -7071,6 +7721,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           <button
                             key={`${itemId}-${t.id}`}
                             type="button"
+                            disabled={Boolean(generalPickLock)}
                             onClick={() =>
                               void runSurvivor(`用${ITEM_LABEL[itemId] ?? itemId}治疗${t.name}`, {
                                 type: 'useItem',
@@ -7108,6 +7759,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="whiskey"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => setExtraPick({ kind: 'whiskey', rooms: whiskeyRooms })}
                     >
                       额外行动：威士忌（相邻地点响声）
@@ -7119,6 +7771,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="adrenaline"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => setExtraPick({ kind: 'adrenaline', rooms: adrenalineRooms })}
                     >
                       额外行动：肾上腺素（移动 1）
@@ -7130,6 +7783,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="sedative"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('使用镇静剂', { type: 'useItem', itemId: 'sedative' })}
                     >
                       额外行动：镇静剂
@@ -7141,6 +7795,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="firecracker"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('点燃爆竹', { type: 'useItem', itemId: 'firecracker' })}
                     >
                       额外行动：爆竹
@@ -7152,7 +7807,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="axe"
                       type="button"
-                      onClick={() => void runSurvivor('用手斧拆除封堵', { type: 'useItem', itemId: 'axe' })}
+                      disabled={Boolean(generalPickLock)}
+                      onClick={() => startUnblock('axe', state.you.id)}
                     >
                       额外行动：用手斧拆除封堵
                     </button>,
@@ -7163,6 +7819,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="suitcase"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('打开手提箱', { type: 'useSuitcase' })}
                     >
                       额外行动：打开手提箱（摸一张发现牌）
@@ -7259,6 +7916,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="crossbow"
                       type="button"
+                      disabled={Boolean(generalPickLock) || state.you.mainActionUsed}
                       onClick={() => void runSurvivor('使用十字弩', { type: 'useCrossbow' })}
                     >
                       用十字弩消灭至多 2 个僵尸
@@ -7274,6 +7932,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="remove-core"
                       type="button"
+                      disabled={Boolean(generalPickLock) || state.you.mainActionUsed}
                       onClick={() =>
                         void runSurvivor('移除核心标记', {
                           type: 'removeCoreMarker',
@@ -7328,40 +7987,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   );
                 }
                 /**
-                 * **【墓穴遗物】鏡之門戶**：额外行动，传送到 🌀 螺旋地点。
-                 * 点了进入"选地点"模式：下面列出所有螺旋地点，点一个就传送。
+                 * ⚠ **【墓穴遗物】鏡之門戶不在这里** —— 它也是**额外行动**，
+                 * 入口只放在「额外行动」弹窗里（用户口径：「额外行动就不要放在
+                 * 额外行动弹窗以外了」），选地点 + 二次确认在行动区那块面板
+                 * （见下面的「額外行動：鏡之門戶」）。以前这里连"目标按钮"一起塞进
+                 * `extras`、还被 `EXTRA_KEEP` 放行到「特殊行动」那一栏里，挂错了地方。
                  */
-                if (state.canUseMirrorPortal) {
-                  extras.push(
-                    <button
-                      key="relic-mirror"
-                      type="button"
-                      className={mirrorPicking ? 'primary' : ''}
-                      onClick={() => setMirrorPicking((cur) => !cur)}
-                    >
-                      额外行动：鏡之門戶 → 传送到 🌀 地点
-                      {mirrorPicking ? '（点下面的地点）' : ''}
-                    </button>,
-                  );
-                  if (mirrorPicking) {
-                    for (const rid of state.mirrorTargets ?? []) {
-                      extras.push(
-                        <button
-                          key={`mirror-${rid}`}
-                          type="button"
-                          onClick={() =>
-                            void runSurvivor(
-                              `鏡之門戶传送到${roomDisplayName(state.map, rid, viewerFaction)}`,
-                              { type: 'useMirrorPortal', toRoomId: rid },
-                            )
-                          }
-                        >
-                          🌀 {roomDisplayName(state.map, rid, viewerFaction)}
-                        </button>,
-                      );
-                    }
-                  }
-                }
                 /**
                  * ⚠ **额外行动一律只从「额外行动」弹窗进**（用户要求：
                  * 「额外行动就不要放在额外行动弹窗以外了」）。
@@ -7369,15 +8000,17 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                  * 这个 `extras` 数组里混着两类东西，这里只放行**不是额外行动**的那些：
                  *  - `crossbow`（用十字弩）/ `remove-core`（移除核心标记）
                  *    —— 它们是**特殊行动**（属于一般行动），本来就该在行动区；
-                 *  - `crossbow-holder`（开局指定十字弩持有者）—— 开局准备动作；
-                 *  - `mirror-*` —— 点了弹窗里的「鏡之門戶」之后的**目标选择**按钮，
-                 *    不是入口（入口已经收进弹窗了）。
+                 *  - `crossbow-holder`（开局指定十字弩持有者）—— 开局准备动作。
                  *
                  * 被滤掉的：威士忌 / 肾上腺素 / 镇静剂 / 爆竹 / 手斧 / 手提箱 /
-                 * 机械知识 / 观察入微 / 抽取遗物 / 鏡之門戶（入口）——
+                 * 机械知识 / 观察入微 / 抽取遗物 / 鏡之門戶 ——
                  * 它们在弹窗里都有，而且**不受小回合限制**，做完小回合也能用。
+                 *
+                 * ⚠ 以前 `EXTRA_KEEP` 里还放行 `mirror-*`，于是鏡之門戶的**目标按钮**
+                 * 挂到了「特殊行动」这一栏下面（用户报的「你写到特殊行动去了」）。
+                 * 现在它整个搬去行动区那块面板做"选中 → 确认传送"。
                  */
-                const EXTRA_KEEP = /^(crossbow$|remove-core$|crossbow-holder$|mirror-)/;
+                const EXTRA_KEEP = /^(crossbow$|remove-core$|crossbow-holder$)/;
                 const shown = extras.filter((el) => EXTRA_KEEP.test(String(el.key ?? '')));
                 if (shown.length === 0) return null;
                 return (
@@ -7387,6 +8020,81 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   </div>
                 );
               })()}
+
+            {/**
+             * 【墓穴遗物】**鏡之門戶：选 🌀 地点 → 在行动区「确认传送」**（二次确认）。
+             *
+             * 用户口径：「镜之门户的传送是**额外行动**，在行动区做**二次确认**」。
+             *  - 入口：左上角「额外行动」弹窗里的那颗（额外行动只从弹窗进）；
+             *  - 这里只负责"选中 + 确认"：点一个 🌀 地点变金框，再按「确认传送」才真的走。
+             *
+             * ⚠ 以前是"点一下目标就传走"，而且那排目标按钮挂在**「特殊行动」**那栏下面
+             * （`EXTRA_KEEP` 放行了 `mirror-*`）—— 既没有二次确认、也挂错了栏。
+             */}
+            {isSurvivorView &&
+              mirrorPicking &&
+              mirrorActor &&
+              (mirrorActor.items?.relic_mirror ?? 0) > 0 &&
+              !mirrorActor.haltedThisRound &&
+              (state.mirrorTargets ?? []).length > 0 && (
+              <div className="effect-choice">
+                <p className="muted">
+                  額外行動：{mirrorActor.name} 用鏡之門戶 —— 请点一个 🌀 螺旋地点
+                  {mirrorPickRoom
+                    ? `（已选「${roomDisplayName(state.map, mirrorPickRoom, viewerFaction)}」）`
+                    : '（还没选）'}
+                  ，再按「确认传送」。
+                </p>
+                <div className="row">
+                  {(state.mirrorTargets ?? []).map((rid) => (
+                    <button
+                      key={`mirror-${rid}`}
+                      type="button"
+                      className={mirrorPickRoom === rid ? 'primary' : ''}
+                      onClick={() => setMirrorPickRoom((cur) => (cur === rid ? null : rid))}
+                    >
+                      {mirrorPickRoom === rid ? '✓ ' : ''}🌀{' '}
+                      {roomDisplayName(state.map, rid, viewerFaction)}
+                    </button>
+                  ))}
+                </div>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!mirrorPickRoom}
+                    onClick={() => {
+                      const rid = mirrorPickRoom;
+                      if (!rid) return;
+                      setMirrorPickRoom(null);
+                      setMirrorPicking(false);
+                      void runSurvivor(
+                        `鏡之門戶传送到${roomDisplayName(state.map, rid, viewerFaction)}`,
+                        {
+                          type: 'useMirrorPortal',
+                          toRoomId: rid,
+                          /** ⚠ 认人：额外行动是按每个人列按钮的（见 `mirrorActor`） */
+                          actorPlayerId: mirrorActor.id,
+                        },
+                      );
+                    }}
+                  >
+                    确认传送{mirrorPickRoom
+                      ? `到${roomDisplayName(state.map, mirrorPickRoom, viewerFaction)}`
+                      : ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMirrorPickRoom(null);
+                      setMirrorPicking(false);
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/**
              * 幸存者「特殊行动」—— 属于**一般行动**，所以必须是当前行动者本人。
@@ -7407,7 +8115,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               (() => {
                 const specials: ReactElement[] = [];
                 const used = (id: string) => state.you.skillUsedThisTurn.includes(id);
-                const mainGone = state.you.mainActionUsed || Boolean(activeMoveDest);
+                const mainGone =
+                  state.you.mainActionUsed || Boolean(generalPickLock && !traitTargetPick);
                 /**
                  * 【变体1】**特殊行动型特性卡** —— 只放在这个「特殊行动」区
                  * （用户要求：特殊行动的只放特殊行动的地方）。
@@ -7419,6 +8128,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 if (!mainGone) {
                   const actorId = state.you.id;
                   for (const t of mySpecialTraits) {
+                    if (traitTargetPick && t.id !== traitTargetPick) continue;
                     if (t.id === 'trait_s08') {
                       specials.push(
                         <button
@@ -7446,6 +8156,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                             </span>,
                           );
                         }
+                        specials.push(
+                          <button
+                            key="trait-08-cancel"
+                            type="button"
+                            onClick={() => setTraitTargetPick(null)}
+                          >
+                            取消
+                          </button>,
+                        );
                         for (const s of here) {
                           specials.push(
                             <button
@@ -7568,6 +8287,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <button
                       key="toolbox"
                       type="button"
+                      disabled={Boolean(generalPickLock)}
                       onClick={() => void runSurvivor('用工具箱修理', { type: 'useItem', itemId: 'toolbox' })}
                     >
                       特殊行动：使用工具箱修理（+{2 + (/约翰逊|engineer|survivor2/i.test(`${ch.id} ${ch.name}`) ? 1 : 0)}）
@@ -7649,7 +8369,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   );
                 }
                 /**
-                 * 【墓穴遗物】**洞察之球**：**特殊行动** —— 在可搜索的地点**依次摸两张牌**。
+                 * 【墓穴遗物】**洞察之球**：**特殊行动** —— 在可搜索的地点**【搜索】两次**。
                  * 两张各自完整结算（各自可能出钥匙上架并可能直接获胜）。
                  */
                 if (state.canUseInsightOrb && !mainGone) {
@@ -7659,18 +8379,20 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       type="button"
                       onClick={() => void runSurvivor('使用洞察之球', { type: 'useInsightOrb' })}
                     >
-                      特殊行动：洞察之球（依次摸两张牌）
+                      特殊行动：洞察之球（【搜索】两次）
                     </button>,
                   );
                 }
                 /**
                  * 欧菲莉亚「言语鼓励」：和短跑冲刺同一个结构 ——
                  * 先在「特殊行动」里出一个按钮，点了再选目标（不限地点）。
+                 *
+                 * ⚠ **已经有鼓励标记的人照样能选**（用户口径：
+                 * 「言语鼓励可以对任意幸存者做，**如果他已有鼓励标记就只清除其恐惧**」）——
+                 * 以前这里把有标记的人从候选里滤掉了，服务端也会拒。
                  */
                 const encourage = ch.skills.find((s) => s.id === 'encourage');
-                const encourageCands = survivors.filter(
-                  (sp) => sp.alive && !(state.encouragedIds ?? []).includes(sp.id),
-                );
+                const encourageCands = survivors.filter((sp) => sp.alive);
                 if (encourage && !mainGone && encourageCands.length > 0) {
                   specials.push(
                     <button
@@ -7812,6 +8534,39 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     specials.push(...planSpecialEls);
                   }
                 }
+                /**
+                 * **雕像：幸存者的「停滞雕像」** —— 它是**特殊行动**
+                 * （一般行动第 4 项：使用一个特殊行动），用户口径：
+                 * 「幸存者停滞雕像是特殊行动，要放在特殊行动处」。
+                 *
+                 * 条件：
+                 *  - 雕像局；
+                 *  - 你**所在地点**至少有一尊还没被停滞的雕像（只能停滞同地点的）；
+                 *  - 一般行动还没用掉（`mainGone` 之外还要看额外行动/交换 ——
+                 *    规则要求"停滞必须是本大回合的唯一行动"，其余由服务端再兜一道）。
+                 */
+                if (
+                  !mainGone &&
+                  state.isStatueKiller &&
+                  !state.you.extraActionUsedThisTurn &&
+                  (state.statues ?? []).some(
+                    (st) => st.roomId && st.roomId === state.you.roomId && !st.halted,
+                  )
+                ) {
+                  specials.push(
+                    <button
+                      key="halt-statue"
+                      type="button"
+                      className={haltStatueOpen ? 'primary' : ''}
+                      onClick={() => {
+                        setHaltPickStatueId(null);
+                        setHaltStatueOpen((v) => !v);
+                      }}
+                    >
+                      特殊行动：停滞雕像
+                    </button>,
+                  );
+                }
                 if (specials.length === 0) return null;
                 return (
                   <div className="stack">
@@ -7823,7 +8578,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
 
             {/**
              * 欧菲莉亚「言语鼓励」选目标：点了「特殊行动：言语鼓励」之后出现。
-             * 不限地点，所以直接把所有还没持标记的存活幸存者列出来。
+             * 不限地点，所以直接把**所有存活幸存者**列出来 ——
+             * ⚠ 已经有鼓励标记的**也要列**（用户口径：那种情况只清他的恐惧）。
              */}
             {isActive &&
               isSurvivorView &&
@@ -7835,9 +8591,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   : undefined;
                 const ch = state.characters.find((c) => c.id === actor?.characterId);
                 if (!ch?.skills.some((s) => s.id === 'encourage')) return null;
-                const cands = survivors.filter(
-                  (sp) => sp.alive && !(state.encouragedIds ?? []).includes(sp.id),
-                );
+                const cands = survivors.filter((sp) => sp.alive);
                 if (!cands.length) return null;
                 return (
                   <div className="stack">
@@ -7845,6 +8599,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     <p className="muted">
                       移除目标的所有恐惧，并给他一个鼓励标记
                       （该标记会在「增加恐惧前」或「遭遇加防御前」自动生效一次）。
+                      已经有鼓励标记的人也能选 —— 那种情况**只清他的恐惧**。
                     </p>
                     <div className="row">
                       {cands.map((sp) => (
@@ -7861,6 +8616,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           }}
                         >
                           鼓励 {sp.name}
+                          {(state.encouragedIds ?? []).includes(sp.id) ? '（已有标记：只清恐惧）' : ''}
                         </button>
                       ))}
                       <button type="button" onClick={() => setEncouragePicking(null)}>
@@ -8037,7 +8793,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
           <h3>战报</h3>
           {/* 战报历史全程保留：从开局到现在都看得到，最新的一条在最下面并自动滚动过去 */}
           <div className="log-box" ref={logBoxRef}>
-            {state.logs.map((l, i) => (
+            {(isSurvivorView ? state.logs.filter((l) => l.vis !== 'killer') : state.logs).map((l, i) => (
               <div key={`${l.t}-${i}`}>{l.text}</div>
             ))}
           </div>
@@ -8376,7 +9132,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <button type="button" onClick={() => setExtraOpen(false)}>关闭</button>
             </div>
             <p className="muted">
-              {sharedControl
+              {generalPickLock
+                ? `${generalPickLock}。确认或取消之前，不能再开始别的行动。`
+                : sharedControl
                 ? state.mode === 'vs2'
                   ? '两人都可以点。一般行动和额外行动需另一人确认后才生效。'
                   : '任何幸存者都可以在幸存者大回合内使用，不受小回合限制。'
@@ -8389,7 +9147,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 const planExtras: ReactElement[] = [];
                 const add = (key: string, label: string, act: () => void) => {
                   buttons.push(
-                    <button key={`${p.id}-${key}`} type="button" onClick={() => { act(); setExtraOpen(false); }}>
+                    <button
+                      key={`${p.id}-${key}`}
+                      type="button"
+                      disabled={Boolean(generalPickLock)}
+                      onClick={() => { act(); setExtraOpen(false); }}
+                    >
                       {p.name}：{label}
                     </button>,
                   );
@@ -8473,13 +9236,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   );
                 }
                 if (roomHasBlockade(state.blockades, p.roomId) && (p.items.axe ?? 0) > 0) {
-                  add('axe', '手斧拆除封堵', () =>
-                    void runSurvivor(`${p.name}用手斧拆除封堵`, {
-                      type: 'useItem',
-                      itemId: 'axe',
-                      actorPlayerId: p.id,
-                    }),
-                  );
+                  /** 多块时开"选哪一块"面板（用户口径：由他自己选，不是自动） */
+                  add('axe', '手斧拆除封堵', () => startUnblock('axe', p.id));
                 }
                 if (canOpenSuitcase(state, p.roomId)) {
                   add('suitcase', '打开手提箱（摸一张发现牌）', () =>
@@ -8628,14 +9386,22 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 }
                 /**
                  * 【墓穴遗物】**鏡之門戶**（额外行动）：传送到 🌀 地点。
-                 * 点了先进"选地点"模式（下面那一列 🌀 按钮）。
+                 *
+                 * 点了之后**弹窗自己关掉**（`add` 的按钮点击后会 `setExtraOpen(false)`），
+                 * 然后到**行动区**那块「額外行動：鏡之門戶」面板里：
+                 * 先点一个 🌀 地点选中，再按「确认传送」（用户口径：
+                 * 「镜之门户的传送是额外行动，在行动区做二次确认」）。
                  */
                 if (
                   (p.items.relic_mirror ?? 0) > 0 &&
                   !p.haltedThisRound &&
                   (state.mirrorTargets ?? []).length > 0
                 ) {
-                  add('mirror', '鏡之門戶（传送到 🌀 地点）', () => setMirrorPicking(true));
+                  add('mirror', '鏡之門戶（传送到 🌀 地点）', () => {
+                    setMirrorActorId(p.id);
+                    setMirrorPickRoom(null);
+                    setMirrorPicking(true);
+                  });
                 }
                 /**
                  * 迪伦「机械知识」：在锤子地点从弃牌堆拿回工具箱。
@@ -8776,7 +9542,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       <button
                         key={`${p.id}-plan-${card.id}-${i}`}
                         type="button"
-                        disabled={a.used || (mine && a.usable === false)}
+                        disabled={Boolean(generalPickLock) || a.used || (mine && a.usable === false)}
                         title={
                           a.used
                             ? '这一条本局已经用过了'
@@ -9181,7 +9947,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       <button
                         key={c.id}
                         type="button"
-                        className="killer-info-piece card"
+                        /**
+                         * ⚠ **已经拿到手的那张锁定牌要金色高亮**（用户口径：
+                         * 「查看杀手信息中杀手选择的锁定牌也要高光」）——
+                         * 和上面"已获得的进化卡牌"同一套金边样式。
+                         * `obtained` 由服务端算好（还锁着的 / 二选一作废的都不算）。
+                         */
+                        className={`killer-info-piece card${c.obtained ? ' card-obtained' : ''}`}
                         style={boxAt(info.locked, i)}
                         /**
                          * 走 'setInspectCardId'（带「行动 / 消耗 / 效果」文字的卡牌详请），

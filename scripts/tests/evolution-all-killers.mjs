@@ -91,12 +91,25 @@ function resolveOneChoice(st) {
     const id = st.pendingUnlockChoice[0];
     return { acted: !tryIt(st, { type: 'pickUnlockChoice', cardId: id }), what: `解锁二选一 ${id}` };
   }
-  /** 女王 4 级：点 2 个地点 */
+  /** 女王 4 级：点 2 个地点 → **再按「确认生成丧尸」**（选完两个才确认） */
   if (st.pendingQueenSpawnRooms) {
-    const rooms = st.map.rooms.slice(0, 2).map((r) => r.id);
-    let acted = true;
-    for (const rid of rooms) acted = !tryIt(st, { type: 'pickQueenSpawnRoom', roomId: rid }) && acted;
-    return { acted, what: '女王生成丧尸' };
+    const picked = st.pendingQueenSpawnRooms;
+    if (picked.length < 2) {
+      const rid = st.map.rooms[picked.length].id;
+      return { acted: !tryIt(st, { type: 'pickQueenSpawnRoom', roomId: rid }), what: '女王选地点' };
+    }
+    return { acted: !tryIt(st, { type: 'confirmEvoRooms' }), what: '女王确认生成丧尸' };
+  }
+  /** 扼杀者 4 级：同样"选 2 个地点 → 再确认" */
+  if (st.pendingStranglerCoreRooms) {
+    const picked = st.pendingStranglerCoreRooms;
+    /** ⚠ 要避开**已经有核心标记**的地点（扼杀者 2 级在自己地点放过一个） */
+    const free = st.map.rooms.map((r) => r.id).filter((id) => !(st.coreMarkers ?? []).includes(id));
+    if (picked.length < 2) {
+      const rid = free[picked.length] ?? st.map.rooms[picked.length].id;
+      return { acted: !tryIt(st, { type: 'pickStranglerCoreRoom', roomId: rid }), what: '扼杀者选地点' };
+    }
+    return { acted: !tryIt(st, { type: 'confirmEvoRooms' }), what: '扼杀者确认放核心标记' };
   }
   /** 特性 17/18 之类（变体1 才有） */
   if (st.pendingTraitVictim) {

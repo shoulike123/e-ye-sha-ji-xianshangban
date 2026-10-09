@@ -13,7 +13,7 @@
       { "id": "sk_toolbox_1", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
       { "id": "sk_toolbox_2", "name": "工具箱", "type": "search", "text": "在修理点特殊行动：+2 修理进度并在你的地点发出响声。", "makesNoise": true, "effects": [{ "op": "gainItem", "itemId": "toolbox", "amount": 1 }] },
 
-      { "id": "sk_lamp", "name": "煤油灯", "type": "search", "text": "+1 防御值；或额外行动：移动通过一条秘密通道。可反复使用。", "effects": [{ "op": "gainItem", "itemId": "lamp", "amount": 1 }] },
+      { "id": "sk_lamp", "name": "煤油灯", "type": "search", "text": "+1 防御值；或额外行动：移动通过一条秘密通道。一次性。", "effects": [{ "op": "gainItem", "itemId": "lamp", "amount": 1 }] },
       { "id": "sk_parcel", "name": "神秘包裹", "type": "search", "text": "额外行动：从发现牌堆抽取一张卡牌，并在你的地点发出响声。", "effects": [{ "op": "gainItem", "itemId": "parcel", "amount": 1 }] },
       { "id": "sk_lucky_dice", "name": "鸿运当骰", "type": "search", "text": "（本卡牌不算作防御物品）在遭遇期间，你可以重掷任意数量的骰子。", "effects": [{ "op": "gainItem", "itemId": "lucky_dice", "amount": 1 }] }
     ],

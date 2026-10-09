@@ -45,6 +45,25 @@ export function useGameSocket() {
   /** 同队幸存者正在预选的地点（1对2 / 1对3 里用来互看鼠标预选） */
   const [cursors, setCursors] = useState<Array<{ playerId: string; roomId: string }>>([]);
 
+  /**
+   * 服务器为了省流量，**只有第一次**（以及换地图 / 重连）才把 `cardById`（全部卡牌定义，
+   * 约 43 KB）和 `map`（地图坐标，约 11 KB）一起发过来 —— 这两块占了整份快照的四分之三，
+   * 每点一次行动都重发一遍，异地联机就会明显卡。之后的快照里没有这两个字段，
+   * 这里把它们缓存起来补回去，界面代码照旧读 `state.cardById` / `state.map`。
+   *
+   * （它只碰 ref 和 `setState`，引用永远稳定 —— 所以用到它的 effect / useCallback
+   *   依赖数组里不必列它。）
+   */
+  const bigStaticRef = useRef<Pick<PublicSnapshot, 'cardById' | 'map'> | null>(null);
+  const applySnapshot = useCallback((snap: PublicSnapshot) => {
+    // 两块一起到了才更新缓存（服务器也是两块一起省掉的）
+    if (snap.cardById && snap.map) {
+      bigStaticRef.current = { cardById: snap.cardById, map: snap.map };
+    }
+    const cached = bigStaticRef.current;
+    setState(cached ? { ...snap, ...cached } : snap);
+  }, []);
+
   // 打开网页就接上对讲机；关掉页面时挂断
   useEffect(() => {
     /**
@@ -66,7 +85,7 @@ export function useGameSocket() {
         (res: { ok: boolean; state?: PublicSnapshot; error?: string }) => {
           if (cancelled) return;
           if (res?.ok && res.state) {
-            setState(res.state);
+            applySnapshot(res.state);
             setError(null);
             return;
           }
@@ -119,7 +138,7 @@ export function useGameSocket() {
         setError(null);
         return;
       }
-      setState(snap);
+      applySnapshot(snap);
       setError(null);
     });
     // 同队其他人的鼠标预选：服务器每次发完整列表，直接覆盖
@@ -169,7 +188,7 @@ export function useGameSocket() {
         s.emit('createRoom', { name, mapId }, (res: { ok: boolean; state?: PublicSnapshot; error?: string }) => {
           if (res?.ok && res.state) {
             writeRoomSession(res.state.roomCode, name);
-            setState(res.state);
+            applySnapshot(res.state);
             resolve(res.state);
           } else reject(new Error(res?.error ?? 'create failed'));
         });

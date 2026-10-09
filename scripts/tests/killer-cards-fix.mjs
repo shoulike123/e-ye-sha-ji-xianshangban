@@ -16,7 +16,7 @@ import {
   createLobby, createPlayer, startGame, buildSnapshot, handleAction,
 } from '../../server/dist/game/engine.js';
 import { doorId, isDoorBlocked } from '../../server/dist/game/effects.js';
-import { zombiePower, zombiePowerInRoom } from '../../server/dist/game/zombies.js';
+import { zombiePower, zombiePowerInRoom, hordeMove } from '../../server/dist/game/zombies.js';
 import { attackCardConditionBlockReason } from '../../server/dist/game/killerCards.js';
 import { beginRemoveFromDiscardPermanent } from '../../server/dist/game/killerSpecials.js';
 
@@ -578,9 +578,58 @@ console.log('=== ⑩ 屍群來了（选目的地）===');
   const dest = 'B4';
   handleAction(st, 'h', { type: 'pickZombieHorde', roomId: dest }, content);
   ok(st.pendingZombieHordeTo === null, '目的地选完清空');
-  const moved = st.zombies.filter((z) => z.roomId === dest).length;
-  ok(moved === 2, '**B1 的两个僵尸一起走到了目的地**', String(moved));
+  /**
+   * ⚠ **只走 1 格**（用户口径：「女王的尸群来了只能移动一格」）：
+   * 目的地可以点很远，但这一群只朝那个方向走 ×1 —— 不是直接飞过去。
+   */
+  const z1 = st.zombies.find((z) => z.id === 'z1');
+  const z2 = st.zombies.find((z) => z.id === 'z2');
+  console.log(`  B1 → 目的地「B4」：僵尸走到 ${z1.roomId} / ${z2.roomId}`);
+  ok(st.zombies.filter((z) => z.roomId === dest).length === 0,
+    '**没有直接飞到目的地**', `${dest} 里 ${st.zombies.filter((z) => z.roomId === dest).length} 个`);
+  ok(z1.roomId === z2.roomId, '**整群一起走**（不拆开）', `${z1.roomId} / ${z2.roomId}`);
+  ok(z1.roomId !== 'B1', '确实挪了一格', String(z1.roomId));
+  ok(st.logs.some((l) => l.text.includes('移動×1')), '战报写的是 移動×1');
   ok(st.zombies.filter((z) => z.roomId === 'R1').length === 1, '别的僵尸不动');
+
+  /** 再打第二张：接着朝同一个目的地走，第二格 */
+  const at1 = z1.roomId;
+  st.killerHand = ['q_horde_2', fodder];
+  st.killerTurnStep = 'fast';
+  st.killerMainChoice = null;
+  handleAction(st, 'h', { type: 'playKillerCard', cardId: 'q_horde_2', payCardIds: [fodder] }, content);
+  handleAction(st, 'h', { type: 'pickZombieHorde', roomId: at1 }, content);
+  handleAction(st, 'h', { type: 'pickZombieHorde', roomId: 'B4' }, content);
+  console.log(`  第二张：${at1} → ${z1.roomId}`);
+  ok(z1.roomId !== at1, '**第二张再走一格**（朝同一个目的地）', `${at1} → ${z1.roomId}`);
+  ok(z1.roomId === z2.roomId, '整群还是一起走', `${z1.roomId} / ${z2.roomId}`);
+}
+
+/* ═══════════ ⑪ 屍群來了：小屋的杀手密道算 1 格 ═══════════ */
+console.log('=== ⑪ 屍群來了：小屋杀手密道（R5–G2）算一格 ===');
+{
+  /** 小屋地图上 `R5–G2` 是 `pathType:'killer'` 的杀手密道 */
+  const cabin = loadContent().maps.find((m) => m.id === 'cabin');
+  const killerEdge = (cabin?.edges ?? []).find((e) => e.pathType === 'killer');
+  ok(killerEdge?.from === 'R5' && killerEdge?.to === 'G2',
+    '（前提）小屋地图上有杀手密道 R5–G2', JSON.stringify(killerEdge));
+
+  const st = mk('cabin', 'killer9');
+  st.zombies = [{ id: 'z1', roomId: 'G2', art: 1 }];
+  st.logs = [];
+  const moved = hordeMove(st, 'G2', 'R5', 1);
+  console.log(`  G2 → R5（杀手密道）：动了 ${moved} 个 → ${st.zombies[0].roomId}`);
+  ok(moved === 1 && st.zombies[0].roomId === 'R5',
+    '**走杀手密道算 1 格，能过去**', String(st.zombies[0].roomId));
+  ok(st.logs.some((l) => l.text.includes('移動×1') && l.text.includes('已到目的地')),
+    '战报：移動×1、已到目的地',
+    st.logs.map((l) => l.text).find((t) => t.includes('屍群來了')) ?? '');
+
+  /** 反向也成立 */
+  const st2 = mk('cabin', 'killer9');
+  st2.zombies = [{ id: 'z1', roomId: 'R5', art: 1 }];
+  hordeMove(st2, 'R5', 'G2', 1);
+  ok(st2.zombies[0].roomId === 'G2', '反向 R5 → G2 也一样', String(st2.zombies[0].roomId));
 }
 
 console.log(`\n杀手牌补齐：${pass} 通过 / ${fail} 失败`);

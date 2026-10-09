@@ -79,11 +79,11 @@ import {
   resolveSixthSense,
   roomName,
   runEffects,
-  searchDrawMultiple,
   usableDefenseItemIds,
   withinKillerDistance,
   defenseItemHint,
   senseRooms,
+  noteSingleRoomSense,
   setOnSurvivorDownHandler,
   setOnSurvivorDamagedHandler,
   setOverFearHandler,
@@ -91,14 +91,18 @@ import {
   setLeverGateChecker,
   setRoomGoneChecker,
   setGuardStoneChecker,
+  setSlyTrickChecker,
+  blockedDoorsAt,
   setStealth,
   setUpgradeHandler,
+  resumeDeferredDeckRecycle,
   pathRooms,
   shuffle,
   setKillerInfo,
   splitEscapeKeysNeeded,
   survivorDiscardHasItem,
   survivorActionVis,
+  isSurvivorPrivatePhase,
   survivorsInRoom,
   takeEarliestFromSurvivorDiscard,
   takeItem,
@@ -201,7 +205,7 @@ import {
   beginSlimeGlandPick,
   setupCoreMarkers,
 } from './killerSpecials.js';
-import { isQueenKiller, zombiesIn, zombieCount, moveZombie, removeZombie, hordeMove, sacrificeZombieForPoison, poisonSurvivor, crossbowTargets, zombiePowerInRoom, spawnZombieAt, clearPoisonOnDeath, zombiePower, spawnZombieAtQueen, clearPoisonOnHeal, } from './zombies.js';
+import { isQueenKiller, zombiesIn, zombieCount, moveZombie, removeZombie, hordeMove, hordeStepRooms, sacrificeZombieForPoison, poisonSurvivor, crossbowTargets, spawnZombieAt, clearPoisonOnDeath, zombiePower, spawnZombieAtQueen, clearPoisonOnHeal, } from './zombies.js';
 import {
   EVOLUTION_TEXT,
   activeEvolutionLines,
@@ -216,6 +220,7 @@ import {
   evolutionLevelJump,
   formatKillerPowerLabel,
   huntressCostDiscount,
+  huntressTrackerFollowupMove,
   killerKindOf,
   markWhizFollowup,
   pickAnyDoorRoom,
@@ -373,6 +378,11 @@ function upgradeKillerWithCollapse(s: GameState): void {
     /** 到这里 `pendingEvolutionAck` 已经挂好，等玩家点「确认新效果」→ 那时才坍塌 */
 }
 setUpgradeHandler((s) => upgradeKillerWithCollapse(s));
+/**
+ * 【变体1】特性 03「狡猾诡计」的查询注入给 `effects.ts`
+ * （那边不能 import traits.ts，会成环）。
+ */
+setSlyTrickChecker((s) => Boolean(s.variant1 && s.killerId && hasTrait(s, s.killerId, 'trait_k03')));
 setEvolutionCollapseGate((s, fromLv, toLv) => interceptEvolutionForCollapse(s, fromLv, toLv));
 import { completeKillerCardMove, confirmPathDraft, finishKillerCardMove, confirmAmuletUse, continueKillerQueue, effectiveCardSpeed, finishLurkPick, forcedRevealAndSearch, encounterCardAttackBonus, canPlayAsEncounterAttack, runAttackTimingExtras, runOptionalEffect, hasPendingKillerChoice, resolveSenseColor, colorPrefixRooms, flushDeferredPlayedCard, queenSenseFear, setMoveSurvivorDoneHandler, setSearchFoundHandler, interruptCurrentCardEffects, pickStatueStepAction, fearAtRange, attackCardConditionBlockReason, cardRequirementBlockReason, } from './killerCards.js';
 /**
@@ -1006,12 +1016,14 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         pendingCollapseMoves: null,
         relicMarkerFaceUp: true,
         relicDeck: [],
+        pendingInsightSearches: 0,
         pendingSenseRoom: null,
         killerSenseRoomActive: false,
         /** 打牌后拿到的信息（行动区显示 + 确认后才继续） */
         killerIntel: [],
         currentKillerCardId: null,
         pendingSenseMoveAfter: false,
+        witnessedRev: {},
         pendingMoveSurvivorPick: null,
         pendingMoveSurvivorId: null,
         witnessedAt: {},
@@ -1028,6 +1040,8 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         revealSearchHappened: false,
         passagePowerBonus: 0,
         passageStealthAnywhere: false,
+        pendingPassageAnywhere: false,
+        pendingPassageLabel: null,
         sonarRevealActive: false,
         slimeGlandActive: false,
         chosenEvolutionCards: [],
@@ -1091,7 +1105,6 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         stealthRevealKind: null,
         pendingLurkPick: false,
         pendingAmulet: null,
-        pendingResilience: null,
         pendingSixthSense: null,
         repairedThisPhase: false,
         firecrackerThisRound: false,
@@ -1412,14 +1425,6 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
             if (hostOverride && socketId === state.hostId && sid)
                 return sid;
         }
-        /** 迪伦·温「坚毅」：由那名幸存者的操控者决定 */
-        if (action.type === 'confirmResilience' && state.pendingResilience) {
-            const sid = state.pendingResilience.playerId;
-            if (sid && operatedBy(sid))
-                return sid;
-            if (hostOverride && socketId === state.hostId && sid)
-                return sid;
-        }
         if (action.type === 'discardItem' && state.pendingItemDiscard) {
             const sid = state.pendingItemDiscard.playerId;
             if (sid && operatedBy(sid))
@@ -1459,7 +1464,7 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
             if (hostOverride && socketId === state.hostId && sid)
                 return sid;
         }
-        if ((action.type === 'useItem' || action.type === 'useSkill' || action.type === 'useSuitcase' || action.type === 'removeCoreMarker' || action.type === 'useEncourage' || action.type === 'useLuckyCoin' || action.type === 'useMechanicalKnack' || action.type === 'drawRelic' || action.type === 'placeLeverGate') &&
+        if ((action.type === 'useItem' || action.type === 'useSkill' || action.type === 'useSuitcase' || action.type === 'removeCoreMarker' || action.type === 'useEncourage' || action.type === 'useLuckyCoin' || action.type === 'useMechanicalKnack' || action.type === 'drawRelic' || action.type === 'placeLeverGate' || action.type === 'useMirrorPortal') &&
             action.actorPlayerId &&
             operatedBy(action.actorPlayerId)) {
             return action.actorPlayerId;
@@ -1487,7 +1492,7 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
         /**
          * 十字弩：由**那名幸存者**的操控者执行。
          */
-        if (action.type === 'useCrossbow' || action.type === 'confirmCrossbow') {
+        if (action.type === 'useCrossbow' || action.type === 'confirmCrossbow' || action.type === 'cancelCrossbow') {
             const sid = state.pendingCrossbow?.survivorId ?? action.actorPlayerId;
             if (sid && operatedBy(sid))
                 return sid;
@@ -1682,13 +1687,14 @@ export function beginKillerTurn(state: GameState) {
      * **欧菲莉亚「言语鼓励」的公开说明放在这里**（用户要求：
      * 「欧菲莉亚给幸存者鼓励标记放在杀手回合开始时说明」）。
      *
-     * 幸存者大回合里发动时只写**幸存者战报**（谁给谁、放在谁身上都不给杀手看）；
-     * 到了杀手回合开始，只公开一句"场上有鼓励标记"——
-     * **不点名是谁**，因为规则上鼓励标记本来就不让杀手看到
-     * （快照里 `hasEncourageToken` 对杀手恒为 false）。
+     * ⚠ **但这条只给幸存者看**（用户口径：「鼓励标记和迪伦的坚毅标记
+     * **只有触发时才告诉杀手**」）——
+     * 以前它是 `'all', needsCommon = true`，等于杀手回合一开始就被告知
+     * "场上有鼓励标记"，那是"标记**存在**"的情报，不是"标记**触发**"的情报。
+     * 触发那两条（取消恐惧 / 遭遇防御 +1）照旧 `'all', true`，杀手当场就知道。
      */
     if (Object.values(state.players).some((pl) => pl.faction === 'survivor' && pl.encourageToken)) {
-        log(state, '幸存者方场上有**鼓励标记**（遭遇时防御 +1，恐惧 +1 时自动抵消一次）。', 'all', true);
+        log(state, '幸存者方场上有**鼓励标记**（遭遇时防御 +1，恐惧 +1 时自动抵消一次）。', 'survivor');
     }
     /** 乔治「思维敏捷」每个大回合只能给一次笔记 */
     state.georgeNoteGivenThisRound = false;
@@ -1844,7 +1850,78 @@ export function advanceSplitFirst(state: GameState): void {
     state.splitFirstId = alive[(idx + 1) % alive.length] ?? null;
 }
 
+/**
+ * 还没确认的选择（十字弩选僵尸、乔治笔记选封堵）。
+ * 正常流程里必须自己取消或确认，不能改做别的行动。
+ * 这里只在新的大回合开始时清掉漏网的，免得留到下一轮。
+ *
+ * `playerId` 为空 = 这一轮里所有没确认的都收掉。
+ */
+function abandonUnconfirmedSurvivorPick(state: GameState, playerId: string | null) {
+    const cb = state.pendingCrossbow;
+    if (cb && (playerId == null || cb.survivorId === playerId)) {
+        const name = state.players[cb.survivorId]?.name ?? '幸存者';
+        state.pendingCrossbow = null;
+        log(state, `${name} 收起十字弩，没有选择僵尸。`, 'survivor');
+    }
+    if (state.pendingGeorgeBlockade) {
+        const george = Object.values(state.players).find(
+            (pl) => pl.faction === 'survivor' && isGeorge(state, pl.id),
+        );
+        if (george && (playerId == null || george.id === playerId)) {
+            state.pendingGeorgeBlockade = null;
+            log(state, `${george.name} 收起「乔治的笔记」，没有拆除封堵。`, 'survivor');
+        }
+    }
+}
+
+/**
+ * 一般行动有六种：移动、搜索物资、修理、拆除封堵、消除恐惧、特殊行动。
+ * 其中一种还没确认时，不能改做别的行动。取消或确认这一件才放行。
+ */
+function survivorPickInProgressError(state: GameState, playerId: string, action: ClientAction): string | null {
+    /**
+     * 这些不是「再开一次行动」，是必须立刻回答的询问
+     * （护符、弃牌、交换确认等）。不能被未确认的行动卡住。
+     */
+    if (action.type === 'confirmAmulet' ||
+        action.type === 'discardItem' ||
+        action.type === 'resolveSixthSense' ||
+        action.type === 'resolveQuietSearch' ||
+        action.type === 'respondTrade' ||
+        action.type === 'respondCoopAction' ||
+        action.type === 'guessMainStatue')
+        return null;
+    const cb = state.pendingCrossbow;
+    if (cb && cb.survivorId === playerId) {
+        if (action.type === 'confirmCrossbow' || action.type === 'cancelCrossbow')
+            return null;
+        return '十字弩还没确认。请先确认消灭，或取消。这期间不能做别的行动。';
+    }
+    if (state.pendingGeorgeBlockade) {
+        const george = Object.values(state.players).find(
+            (pl) => pl.faction === 'survivor' && isGeorge(state, pl.id),
+        );
+        if (george && george.id === playerId) {
+            if (action.type === 'pickNoteBlockade' ||
+                action.type === 'confirmNoteBlockade' ||
+                action.type === 'cancelNoteBlockade')
+                return null;
+            return '乔治的笔记还没确认。请先确认拆除，或取消。这期间不能做别的行动。';
+        }
+    }
+    const draft = state.pendingPathDraft;
+    if (draft?.owner === 'survivor' && draft.actorId === playerId) {
+        if (action.type === 'move' || action.type === 'finishPendingMove' || action.type === 'resetPathDraft')
+            return null;
+        return '幸运币的移动还没确认。请先确认，或选择留在原地。这期间不能做别的行动。';
+    }
+    return null;
+}
+
 export function startRound(state: GameState) {
+    /** 上一轮没确认的幸存者选择不能再出现 */
+    abandonUnconfirmedSurvivorPick(state, null);
     /**
      * 【变体3】新的大回合开始：重置"本回合已经推进过进度"
      * （规则：**每个大回合最多推进一个进度**）。
@@ -2105,8 +2182,21 @@ export function initPiece(state: GameState, content: GameContent, p: PlayerState
     if (p.faction === 'survivor') {
         const sk = ch.skills.some((s) => s.id === 'resilient');
         p.resilienceToken = Boolean(sk);
-        if (sk)
-            log(state, `${p.name} 开局获得一个坚毅标记（可防止第一次伤害）。`);
+        if (sk) {
+            /**
+             * ⚠ **只给幸存者看**（用户口径）。
+             *
+             * 坚毅标记是迪伦自己的**私密标记** —— 快照里 `hasResilienceToken`
+             * 对杀手恒为 `false`（`engine.ts:12021`），界面上也不给杀手画。
+             * 这条开局战报以前走默认可见性（非幸存者私有阶段 → `'all'`），
+             * 于是**只有战报漏了底**：杀手一开局就知道迪伦身上有免伤标记。
+             *
+             * 口径和鼓励标记一致（`useEncourage` 那条也是 `'survivor'`）：
+             * **谁有标记不给杀手看；标记"触发"的那一刻才明确告诉他**
+             * （见 `effects.ts` 的 `坚毅标记自动生效，防止了这次伤害`）。
+             */
+            log(state, `${p.name} 开局获得一个坚毅标记（可防止第一次伤害）。`, 'survivor');
+        }
     }
     if (p.faction === 'survivor') {
         const startItems = startingItemsFor(ch.id, ch.name);
@@ -3016,6 +3106,7 @@ function planDrawSearchCard(state: GameState, p: PlayerState, reason: string): v
     log(state, `【变体3】${reason}：${p.name} 抽取「${card?.name ?? cardId}」。`, 'survivor');
     if (card && isKeyCard(card)) {
         const added = addKeys(state, 1, p.id);
+        /** 【杀手该知道什么】同上：钥匙上架立即告知杀手，**分头行动那支保持私密** */
         log(
             state,
             state.split
@@ -3023,7 +3114,8 @@ function planDrawSearchCard(state: GameState, p: PlayerState, reason: string): v
                 : added > 0
                     ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
                     : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
-            'survivor',
+            state.split ? 'survivor' : 'all',
+            !state.split,
         );
     }
     else if (card) {
@@ -3267,11 +3359,10 @@ export function applyVariant1Setup(state: GameState): void {
                     state.killerHand = [];
                     const cap8 = state.rules.killerPowerMax ?? 10;
                     state.killerPower = Math.max(0, Math.min(cap8, state.killerPower - 1));
-                    log(
+                    logSplit(
                         state,
+                        `${name} 的开局特性「压抑怒火」：弃掉全部起始手牌、力量 -1。`,
                         `${name} 的开局特性「压抑怒火」：弃掉全部起始手牌（${dropped} 张）、力量 -1。`,
-                        'all',
-                        true,
                     );
                     break;
                 }
@@ -3712,6 +3803,19 @@ export function applyKillerOrderPick(state: GameState): void {
 /** 房主按下开始：按模式走对应的开局 */
 export function startGame(state: GameState, content: GameContent, hostSocketId: string): void
 {
+    /**
+     * **每局游戏开始时清空战报**（用户口径）。
+     *
+     * 大厅阶段写进来的那些（「房间 X 已创建。」、换地图 / 开变体 / 有人准备了…）
+     * 都是**开局之前**的事，进了对局还留在战报里只会盖住真正的开局信息 ——
+     * 客户端"本大回合战报"那块又会按 `round` 把它们一起捞出来。
+     *
+     * ⚠ **清在这里、不是清在 `finishStartCommon` 里**：
+     * 每个棋子的开局准备（`initPiece`：开局手牌 / 起始物品 /
+     * 「迪伦 开局获得一个坚毅标记」这类）都跑在 `finishStartCommon` **之前**，
+     * 清晚了会把它们一起抹掉。
+     */
+    state.logs = [];
     if (state.mode === 'solo') {
         startSoloGame(state, content, hostSocketId);
     }
@@ -4002,6 +4106,21 @@ export function fastForwardKiller(state: GameState) {
             return;
         if (hasPendingKillerChoice(state) || state.killerMainActionsLeft <= 0)
             break;
+        /**
+         * ⚠ **快进里被停滞的雕像也要跳过搜索**（用户口径：
+         * 「单人模式的快进中被停滞的雕像也要跳过搜索」）。
+         *
+         * 和手动搜索同一个处理：这次普通行动照常消耗，但**不搜索**
+         * （不发现人、不冒遭遇）。用 `continue` 不用 `break` ——
+         * 两次普通行动都要各扣一次，扣完再照常结束回合。
+         */
+        if (k.statueIndex != null && k.statueHalted) {
+            state.killerMainActionsLeft -= 1;
+            k.actionsLeft = state.killerMainActionsLeft;
+            log(state, `雕像 ${k.statueIndex} 本回合被停滞，这次搜索被跳过（不搜索）。`, 'killer');
+            maybeFinishKillerMain(state);
+            continue;
+        }
         setStealth(k, false);
         state.killerMainActionsLeft -= 1;
         k.actionsLeft = state.killerMainActionsLeft;
@@ -4148,7 +4267,12 @@ export function suitcaseRoomId(state: GameState) {
 export function keepSuitcaseDiscovery(state: GameState, actorId: string, cardId: string) {
     const kept = state.cardById[cardId];
     const noisy = discoveryCardNoisy(state, cardId);
-    state.lastDiscoveryCardId = cardId;
+    /**
+     * ⚠ **不写 `lastDiscoveryCardId`**（用户口径：翻找手提箱**不算发现**，
+     * 只算额外行动）—— 那个字段是"本大回合**发现阶段**翻到的那张牌"，
+     * 客户端在发现面板里拿它显示「已留下：X」。
+     * 手提箱 / 神秘包裹都是额外行动，写进去会冒充发现牌。
+     */
     if (kept) {
         const fx = kept.effects.filter((e) => e.op !== 'noise');
         if (fx.length)
@@ -4295,10 +4419,10 @@ export function advanceAfterSurvivor(state: GameState, endedPlayerId: string) {
 
 /**
  * 乔治的「思维敏捷」判定：条件满足就停下来等他挑，返回 true 表示先别往下走。
- * 杀手潜行时按「进入潜行的位置」算距离（本格 + 相邻格）。
  *
- * 雕像杀手：**所有雕像都视为杀手** —— 任意一尊雕像距离 0-1 就算满足，
- * 不要求是主雕像。
+ * 杀手潜行时拿不了笔记（不按进入潜行的格子，也不按潜行后的格子）。
+ * 雕像是例外：主雕像潜行时，乔治仍可在**次雕像**旁边（同格或相邻）拿笔记。
+ * 没人潜行时，雕像局每一尊都算杀手。
  */
 export function maybeOfferGeorgeNote(state: GameState, george: PlayerState) {
     if (!isGeorge(state, george.id))
@@ -4307,19 +4431,25 @@ export function maybeOfferGeorgeNote(state: GameState, george: PlayerState) {
         return false;
     if (state.notesDeck.length === 0)
         return false;
-    /** 收集所有「杀手棋子」的位置（雕像的话是 4 尊都在场） */
-    const killerRooms = [];
-    for (const p of statuePieces(state)) {
-        if (p.alive && p.roomId)
+    const killerRooms: string[] = [];
+    const statues = statuePieces(state);
+    if (statues.length) {
+        const mainStealth = Boolean(mainStatue(state)?.stealth);
+        for (const p of statues) {
+            if (!p.alive || !p.roomId || p.stealth)
+                continue;
+            /** 主雕像正在潜行：只认次雕像 */
+            if (mainStealth && p.id === state.killerId)
+                continue;
             killerRooms.push(p.roomId);
+        }
     }
-    if (!killerRooms.length) {
+    else {
         const k = state.killerId ? state.players[state.killerId] : null;
-        if (!k?.alive)
+        if (!k?.alive || k.stealth)
             return false;
-        const kRoom = k.stealth ? k.stealthOriginRoomId : k.roomId;
-        if (kRoom)
-            killerRooms.push(kRoom);
+        if (k.roomId)
+            killerRooms.push(k.roomId);
     }
     if (!killerRooms.length)
         return false;
@@ -4459,12 +4589,14 @@ export function georgeDraw(state: GameState, p: PlayerState) {
     if (card && isKeyCard(card)) {
         /** ⚠ 分头行动下钥匙**单独保管**（记到这个人身上、不上架、不报告杀手） */
         const added = addKeys(state, 1, p.id);
+        /** 【杀手该知道什么】同上：钥匙上架立即告知杀手，**分头行动那支保持私密** */
         log(state, state.split
             ? `${p.name} 获得 ${added} 把钥匙（单独保管，共 ${p.keys ?? 0} 把）。`
             : added > 0
                 ? `钥匙放入钥匙架（${state.keysCollected}/${state.rules.keysNeeded}）。`
                 : `钥匙架已有 ${state.keysCollected}/${state.rules.keysNeeded} 把，多出来的钥匙不再上架。`,
-            'survivor');
+            state.split ? 'survivor' : 'all',
+            !state.split);
     }
     else if (card) {
         const gains = card.effects.filter((e) => e.op === 'gainItem');
@@ -4514,6 +4646,12 @@ export function finishSurvivorPhase(state: GameState) {
         throw new Error('请先确认或取消物品交换');
     if (state.pendingCoopAction)
         throw new Error('请先确认或取消幸存者行动');
+    if (state.pendingCrossbow)
+        throw new Error('请先确认或取消十字弩');
+    if (state.pendingGeorgeBlockade)
+        throw new Error('请先确认或取消乔治的笔记');
+    if (state.pendingPathDraft?.owner === 'survivor')
+        throw new Error('请先确认或取消幸运币的移动');
     const left = unactedAliveSurvivorIds(state);
     for (const id of left) {
         if (survivorHasGeneralAction(state, id)) {
@@ -4556,7 +4694,11 @@ function settleHeroicBlock(state: GameState): void {
 }
 
 /**
- * 【变体1】特性 03「狡猾诡计」：这名杀手能不能弃**任意**手牌？
+ * 【变体1】特性 03「狡猾诡计」：这名杀手是不是"可以弃任意手牌"？
+ *
+ * ⚠ **这条只跟"抽牌超上限"有关**（用户口径：「特性三只影响抽牌，
+ * 不影响这种锁定牌加入手牌和雕像 4 级」）—— 锁定牌入手 / 雕像 4 级取回「圍困」
+ * 那两类超额弃牌**不看**它（见 `discardKillerCard`）。
  *
  * 条件只看"当前行动的这名杀手有没有这张特性"（2对3 里按切片各算各的）。
  */
@@ -4629,7 +4771,7 @@ export function reportHaltedStatues(state: GameState) {
     const halted = statuePieces(state).filter((p) => p.statueHalted);
     if (!halted.length)
         return;
-    log(state, `本回合被停滞的雕像：${halted.map((p) => `${p.statueIndex} 号（${roomName(state, p.roomId)}）`).join('、')}。本回合它们不能移动和搜索。`, 'killer');
+    log(state, `本回合被停滞的雕像：${halted.map((p) => `${p.statueIndex} 号（${roomName(state, p.roomId)}）`).join('、')}。本回合它们的移动和搜索会被跳过。`, 'killer');
 }
 
 /** 轮到杀手了 */
@@ -4938,9 +5080,29 @@ export function maybeCloseKillerUpkeep(state: GameState) {
     // 挡住弃牌 / 长剑摸牌可能在遭遇中途升级。确认效果时遭遇还在，不能切收尾或结束回合。
     if (state.encounter)
         return;
+    /**
+     * ⚠ **不在杀手回合的阶段里，一律不"收尾"**（独立判断）。
+     *
+     * 这个函数是给"杀手回合收尾"用的，但**账可能在幸存者大回合里冒出来**：
+     * 幸存者的「長劍」会让杀手摸牌，配上【变体1】03「狡猾诡计」就会
+     * "先入手、等你自选弃置" —— 这时"正在行动的人"是幸存者。
+     * 一路走到底会 `closeKillerTurn`：把**还没开始的杀手回合**直接勾掉、
+     * 把幸存者这一轮截断（阶段还会被改成 `upkeep`）。
+     *
+     * 所以这里按阶段独立判断：幸存者私有阶段只当"没这回事"，
+     * 欠的弃牌照样挂着（服务端的 `pendingKillerDiscards` 闸门会拦住别人，
+     * 杀手那边界面上有弃牌面板，弃完这一轮正常继续）。
+     */
+    if (isSurvivorPrivatePhase(state))
+        return;
     if (state.pendingUnlockDiscard && state.pendingKillerDiscards > 0) {
         state.phase = 'upkeep';
-        log(state, '进化入手锁定牌后手牌超额，请自选弃牌再结束回合。');
+        /**
+         * ⚠ 措辞保持中性：这一笔账现在有两个来源 ——
+         * 进化入手的锁定牌/圍困，以及【变体1】03「狡猾诡计」摸进来的牌。
+         * 具体是哪种，战报在"入手那一刻"已经写过了。
+         */
+        log(state, '手牌超过上限，请自选弃牌再结束回合。');
         return;
     }
     if (state.pendingEvolutionAck) {
@@ -4966,6 +5128,17 @@ export function maybeCloseKillerUpkeep(state: GameState) {
         state.phase = 'upkeep';
         return;
     }
+    /**
+     * ⚠ **收尾之前必须把"进化欠下的洗牌 / 摸牌"结清**（兜底闸门）。
+     *
+     * 那些摸牌是**这个杀手回合**的账（回合结束摸牌、以及当回合打出的
+     * 「巡邏」/「重整旗鼓」等），被进化挡下时先记着，等效果结算完再补。
+     * 一旦回合真的收了尾，再补就补到幸存者大回合里去了（战报还会被判成
+     * 幸存者私有、杀手看不见 —— 用户报的「雕像 3 级进化后没有洗牌」）。
+     *
+     * `resumeDeferredDeckRecycle` 自己会在"没欠东西 / 进化还没确认"时直接返回。
+     */
+    resumeDeferredDeckRecycle(state);
     state.pendingKillerDiscards = 0;
     state.killerTurnPowerBonus = 0;
     closeKillerTurn(state);
@@ -5337,6 +5510,38 @@ export function maybeStartEncounter(state: GameState) {
     startEncounter(state, k.roomId);
 }
 
+/**
+ * 这一击的攻击力。
+ * 力量（永久 / 本回合 / 持续 / 下一次攻击 / 永久加攻）已经收成一个数，并且不超过上限。
+ * 攻击牌的「本次 +N」另加，不算进力量上限。
+ * 女王只算遭遇地点里的女王和僵尸：女王不在场就是 0，每个僵尸各一份同样的力量。
+ */
+function encounterStrike(state: GameState, roomId: string): {
+    totalAtk: number;
+    powerNow: number;
+    queenHere: boolean;
+    zombieAdd: number;
+    zombieN: number;
+    tempBoost: number;
+} {
+    const killer = state.killerId ? state.players[state.killerId] : null;
+    const tempBoost = state.encounterTailBonus ?? 0;
+    const powerNow = effectiveKillerPower(state);
+    const queen = isQueenKiller(state);
+    const queenHere = queen && Boolean(killer?.roomId && killer.roomId === roomId);
+    const basePower = queen ? (queenHere ? powerNow : 0) : powerNow;
+    const zombieN = queen ? zombiesIn(state, roomId).length : 0;
+    const zombieAdd = queen ? zombieN * powerNow : 0;
+    return {
+        totalAtk: basePower + tempBoost + zombieAdd,
+        powerNow,
+        queenHere,
+        zombieAdd,
+        zombieN,
+        tempBoost,
+    };
+}
+
 /** 比大小：力量 + 永久加攻 + 本次卡牌加攻 vs 加防物品（+ 威廉坚韧）
  *  `diceValues` 有值就用它（「鸿运当骰」重掷后的点数），否则现掷。 */
 export function resolveEncounterCombat(state: GameState, diceValues: number[] | null) {
@@ -5354,41 +5559,12 @@ export function resolveEncounterCombat(state: GameState, diceValues: number[] | 
         endKillerTurn(state);
         return;
     }
-    const killer = state.players[state.killerId];
-    const tempBoost = state.encounterTailBonus ?? 0;
-    const powerNow = effectiveKillerPower(state);
-    /**
-     * 两类额外力量：
-     *  - turnLingeringPower：持续到**本回合结束**（如保護色「移动通过秘密通道 +3」）
-     *  - pendingAttackPower：只对**下一次攻击**有效（如保護色「重现时 +3」），用掉就清
-     */
-    const lingering = state.turnLingeringPower ?? 0;
-    const attackOnce = state.pendingAttackPower ?? 0;
-    /**
-     * 女王：**攻击力只按「遭遇地点里」的女王和僵尸算**。
-     *
-     *  - 女王本体**就在这个地点**才算她的力量；不在就只有僵尸
-     *  - 每个僵尸固定 **2**（见 `ZOMBIE_POWER`）
-     *
-     * 例：此地 1 个僵尸、女王不在 → 攻击力 2；此地 2 个僵尸、女王不在 → 2+2=4。
-     * （以前是"每个僵尸 = 女王力量"，而且女王不管在哪都算进来 —— 与规则不符。）
-     */
-    const queenHere = isQueenKiller(state) && Boolean(killer?.roomId && killer.roomId === enc.roomId);
-    const basePower = isQueenKiller(state) ? (queenHere ? powerNow : 0) : powerNow;
-    const zombieAdd = isQueenKiller(state) ? zombiePowerInRoom(state, enc.roomId) : 0;
-    const zombieN = isQueenKiller(state) ? zombiesIn(state, enc.roomId).length : 0;
-    const totalAtk = basePower + (killer?.attackBonus ?? 0) + tempBoost + lingering + attackOnce + zombieAdd;
+    const { totalAtk, powerNow, queenHere, zombieAdd, zombieN, tempBoost } = encounterStrike(state, enc.roomId);
     const parts = [isQueenKiller(state)
-        ? (queenHere ? `女王力量 ${formatKillerPowerLabel(state)}` : '女王不在本地点（0）')
-        : `力量 ${formatKillerPowerLabel(state)}`];
-    if (killer?.attackBonus)
-        parts.push(`永久 +${killer.attackBonus}`);
-    if (lingering)
-        parts.push(`本回合 +${lingering}`);
-    if (attackOnce)
-        parts.push(`本次攻击 +${attackOnce}`);
+        ? (queenHere ? `女王力量 ${powerNow}` : '女王不在本地点（0）')
+        : `力量 ${powerNow}`];
     if (zombieAdd)
-        parts.push(`${zombieN} 个僵尸 +${zombieAdd}`);
+        parts.push(`${zombieN} 个僵尸各 ${powerNow}（+${zombieAdd}）`);
     if (tempBoost) {
         const cardName = enc.attackCardId ? state.cardById[enc.attackCardId]?.name : null;
         parts.push(cardName ? `「${cardName}」本次 +${tempBoost}` : `本次加攻 +${tempBoost}`);
@@ -5586,7 +5762,7 @@ export function resolveEncounterCombat(state: GameState, diceValues: number[] | 
         const execId = enc.executeStatueId ?? state.killerId;
         const execStatue = execId ? state.players[execId] : null;
         const execPower = execStatue
-            ? state.killerPower + (execStatue.attackBonus ?? 0) + (state.encounterTailBonus ?? 0)
+            ? effectiveKillerPower(state) + (state.encounterTailBonus ?? 0)
             : totalAtk;
         if (execPower >= defenseValue + 3) {
             log(state, `處決生效：力量 ${execPower} 高出 ${surv.name} 的防御 ${defenseValue} 达 3 点以上，消灭目标。`, 'all', true);
@@ -5651,8 +5827,7 @@ export function rollEncounterDefense(state: GameState) {
     const dieFaces = [1, 0, 1, 1, 0, 3];
     const nDice = Math.max(2, 4 - Math.min(surv.fear, 2));
     const values = Array.from({ length: nDice }, () => dieFaces[Math.floor(Math.random() * dieFaces.length)]);
-    const killer = state.killerId ? state.players[state.killerId] : null;
-    const totalAtk = effectiveKillerPower(state) + (killer?.attackBonus ?? 0) + (state.encounterTailBonus ?? 0);
+    const totalAtk = encounterStrike(state, enc.roomId).totalAtk;
     const extra = luckyDiceCount(surv);
     if (extra <= 0) {
         resolveEncounterCombat(state, values);
@@ -5827,6 +6002,24 @@ export function finishPendingCardMove(state: GameState) {
     }
 }
 
+/**
+ * 弃牌堆移除选完之后往下走。
+ * 變形走打牌队列；戰鬥適應还停在遭遇的攻击步骤，选完才进入防御。
+ */
+function finishDiscardRemove(state: GameState) {
+    if (state.phase === 'encounter' && state.encounter?.step === 'attack') {
+        state.encounter.step = 'defend';
+        return;
+    }
+    /**
+     * ⚠ **必须走 `resumeAfterKillerChoice`（打牌流程的真正出口）**，
+     * 不能只 `continueKillerQueue` —— 那样"打出的这张牌"不会落定、
+     * 速度标记不会清掉，**回合也永远停在 main、进不了慢速阶段**
+     * （用户报的"【變形】做完后没有自动转到慢速阶段"）。
+     */
+    resumeAfterKillerChoice(state);
+}
+
 /** 封堵、感知等点选完成后，继续结算这张牌剩下的效果 */
 export function resumeAfterKillerChoice(state: GameState) {
     if (hasPendingKillerChoice(state))
@@ -5859,16 +6052,17 @@ export function assertTradeLegal(state: GameState, giver: PlayerState, target: P
     if (receiveItemId) {
         if ((target.items[receiveItemId] ?? 0) < 1)
             throw new Error('对方没有这件装备');
-        const nextMine = itemCount(giver.items) - amount + 1;
-        const nextTheirs = itemCount(target.items) - 1 + amount;
-        if (nextMine > inventorySlotsFor(state, giver.id))
-            throw new Error('交换后给予者的装备栏会超员');
-        if (nextTheirs > inventorySlotsFor(state, target.id))
-            throw new Error('交换后对方装备栏会超员');
+        /**
+         * ⚠ **不再因为"换完会超员"拒绝**（用户口径：「幸存者**任何时候**物品栏超限
+         * 都是**选择弃置**」）—— 换完谁超员，就挂出"请自选弃置"让他自己挑。
+         * 以前这里直接抛错，等于把"超限"这件事挡在门外，玩家只能干看着。
+         */
     }
-    else if (itemCount(target.items) + amount > inventorySlotsFor(state, target.id)) {
-        throw new Error('对方装备栏已满，只能互换');
-    }
+    /**
+     * ⚠ 同理：**对方栏满也能给**（用户口径：「马尔科物品满时拿镇静剂或肾上腺素
+     * 应该是选择弃置」）。以前这里抛「对方装备栏已满，只能互换」，
+     * 现在改成"收下 → `applyResolvedTrade` 里挂 `pendingItemDiscard` 让他自己弃"。
+     */
 }
 
 export function applyResolvedTrade(state: GameState, giver: PlayerState, target: PlayerState, itemId: string, amount: number, receiveItemId: string | null | undefined) {
@@ -5878,11 +6072,21 @@ export function applyResolvedTrade(state: GameState, giver: PlayerState, target:
         giver.items[receiveItemId] = (giver.items[receiveItemId] ?? 0) + 1;
         target.items[itemId] = (target.items[itemId] ?? 0) + amount;
         log(state, `${giver.name} 用 ${itemName(itemId)} 与 ${target.name} 交换了 ${itemName(receiveItemId)}。`);
+        /**
+         * ⚠ **换完谁超员就请他自选弃置**（用户口径：「幸存者任何时候物品栏超限
+         * 都是选择弃置」）。`pendingItemDiscard` 只记得下一个人，所以先记接受方；
+         * 交换是 1 换 1、两边件数不变，一般轮不到给予者（只有 amount > 1 才可能）。
+         */
+        enforceInventory(state, target.id);
+        if (!state.pendingItemDiscard)
+            enforceInventory(state, giver.id);
     }
     else {
         takeItem(giver, itemId, amount);
         target.items[itemId] = (target.items[itemId] ?? 0) + amount;
         log(state, `${giver.name} 将 ${amount}×${itemName(itemId)} 交给 ${target.name}。`);
+        /** 收下之后超了 → **他自己**选弃哪件（以前是直接拒绝这笔给予） */
+        enforceInventory(state, target.id);
     }
 }
 
@@ -6089,13 +6293,15 @@ function settleConfirmedEvolution(state: GameState): void {
     /** 这一轮进化的等级（跳级判定要拿它比） */
     const baseLevel = ack.toLevel;
     /**
-     * 力量 / 解锁入手 / 手牌超限 → 挂 `pendingKillerDiscards`。
-     * ⚠ **只结算当前这名杀手**：2对3 里两人各自确认、各自结算。
-     */
-    resolveDeferredEvolution(state, state.killerId);
-    /**
-     * **已选好的"转换主雕像"到这里才真正生效**（用户要求"选择要确认"）。
-     * 点那一尊的时候只记在 `pendingStatueEvoTarget` 里。
+     * **已选好的"转换主雕像"放在最前面执行**（用户口径：
+     * 「应该在执行进化效果时**最早**执行」）。
+     *
+     * 规则原文是「每当你升级时，你都可以转换主雕像」—— 它是这一级
+     * **首先执行**的一步；后面那些进化效果（力量 / 取回圍困 / 解锁入手）
+     * 都该算在**换完之后**的主雕像头上。
+     *
+     * 点那一尊的时候只记在 `pendingStatueEvoTarget` 里（"选择要确认"），
+     * 到这里才真正切换。
      *
      * ⚠ 不给幸存者写战报 —— 用户要求「是否切换主雕像不能写在幸存者战报里」。
      */
@@ -6110,6 +6316,11 @@ function settleConfirmedEvolution(state: GameState): void {
     }
     state.pendingStatueEvoSwitch = false;
     /**
+     * 力量 / 解锁入手 / 手牌超限 → 挂 `pendingKillerDiscards`。
+     * ⚠ **只结算当前这名杀手**：2对3 里两人各自确认、各自结算。
+     */
+    resolveDeferredEvolution(state, state.killerId);
+    /**
      * ⚠ **2对3：还有人没结算就"先不结束本次升级"**（用户口径：
      * 两人做完各自的升级效果、等对方完成本次升级再继续）。
      *
@@ -6122,6 +6333,8 @@ function settleConfirmedEvolution(state: GameState): void {
         const next = (ack.killerIds ?? []).find((id) => !done.includes(id));
         if (next) {
             state.pendingEvolutionAck = ack;
+            /** 换人了：下一名杀手还没点「确认新效果」，那颗按钮要重新出现 */
+            ack.acked = false;
             switchActiveKiller(state, next);
             /** 换人了：下一名杀手的 ③④ 要各自重新走一遍 */
             state.evolutionChoiceIssuedAtLevel = 0;
@@ -6202,6 +6415,11 @@ function settleConfirmedEvolution(state: GameState): void {
      */
     if (state.pendingKillerDiscards > 0)
         return;
+    /**
+     * ⚠ **进化效果全部结算完之后**才补那次欠下的洗牌 / 摸牌
+     * （用户口径：「杀手先执行进化效果再洗牌」）。
+     */
+    resumeDeferredDeckRecycle(state);
     maybeCloseKillerUpkeep(state);
 }
 
@@ -6210,6 +6428,36 @@ function killerIdsForAck(state: GameState): string[] {
     return state.mode === '2v3' && state.killerIds.length
         ? [...state.killerIds]
         : (state.killerId ? [state.killerId] : []);
+}
+
+/**
+ * 【墓穴遗物】洞察之球：**特殊行动 = 搜索两次**（用户口径：
+ * 「洞察之球的特殊行动是**搜索两次**！能触发欧菲莉亚的第六感」）。
+ *
+ * 以前是"自己一次摸 2 张"（`searchDrawMultiple`）—— 绕过了正常搜索流程，
+ * 所以第六感、逐张响声那些规则都不走。现在两次都走 `doSearch`：
+ * 每张各自判响声、各自可能上钥匙架，欧菲莉亚的第六感也照常触发。
+ *
+ * ⚠ **第六感会挂出"摸 2 选 1"把流程停住**：那时本函数先返回，
+ * 等玩家选完由 `resolveSixthSense` 那一支把**剩下的搜索**接着跑完
+ * （`pendingInsightSearches` 记着还剩几次）。
+ */
+function runInsightOrbSearch(state: GameState, playerId: string): void {
+    while ((state.pendingInsightSearches ?? 0) > 0) {
+        const searcher = state.players[playerId];
+        if (!searcher?.alive || state.phase !== 'survivorMain')
+            break;
+        state.pendingInsightSearches -= 1;
+        /** 第二次不能再被"本回合已经搜索过物资了"拦下（`extraSearch`） */
+        doSearch(state, playerId, { extraSearch: true });
+        /** 第六感挂着待选 → 先停，选完再继续 */
+        if (state.pendingSixthSense)
+            return;
+    }
+    state.pendingInsightSearches = 0;
+    const p = state.players[playerId];
+    if (p?.alive && state.phase === 'survivorMain')
+        advanceAfterSurvivor(state, playerId);
 }
 /**
  * 进化带来的弃牌弃完了 → 把杀手回合收尾。
@@ -6220,12 +6468,13 @@ function maybeFinishAfterEvolutionDiscard(state: GameState): void {
         return;
     if (state.pendingKillerDiscards > 0)
         return;
+    /** 同上：进化（含这次弃牌）都完事了，才补那次欠下的洗牌 / 摸牌 */
+    resumeDeferredDeckRecycle(state);
     maybeCloseKillerUpkeep(state);
 }
 
 export function handleAction(state: GameState, socketId: string, action: ClientAction, content: GameContent): void
-{
-    /**
+{    /**
      * 2v3：两个杀手各有一套牌库/手牌/弃牌堆。进入行动前先把**当前行动杀手**的切片
      * 读进顶层字段，返回时再存回 —— 这样既有的 500 多处 `state.killerHand` 代码不用改。
      * 行动途中换人（`switchActiveKiller`）时会即时存旧读新，最后由这里收尾。
@@ -6317,12 +6566,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
     if (state.pendingKillerDiscards > 0 && action.type !== 'discardKillerCard') {
         throw new Error('请先弃置多余手牌');
     }
-    if (state.pendingAmulet && action.type !== 'confirmAmulet' && action.type !== 'confirmResilience') {
+    /** 护符询问：只放行它自己的动作（坚毅标记没有询问，见 `applyDamage`） */
+    if (state.pendingAmulet && action.type !== 'confirmAmulet') {
         throw new Error('请先决定是否出示古代护符');
-    }
-    /** 坚毅标记的询问：只放行它自己的动作 */
-    if (state.pendingResilience && action.type !== 'confirmResilience') {
-        throw new Error('请先决定是否使用坚毅标记');
     }
     /** 第六感待选：只放行选择动作 */
     if (state.pendingSixthSense && action.type !== 'resolveSixthSense') {
@@ -6341,13 +6587,12 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
      *
      * 例外（必须放行，否则会卡死）：
      *  - `collapseMove` 本人：就是这一步
-     *  - `confirmAmulet` / `confirmResilience`：坍塌那 1 点伤害正常走护符/坚毅，
-     *    它们会停下来问一句，得让人答得出来
+     *  - `confirmAmulet`：坍塌那 1 点伤害正常走护符，会停下来问一句，得让人答得出来
+     *    （坚毅标记**不问**，它自动生效，所以这里没有它的份）
      *  - `discardKillerCard`：进坍塌前如果正欠着弃牌，先把账结清
      */
     const collapseFloorAction = action.type === 'collapseMove'
         || action.type === 'confirmAmulet'
-        || action.type === 'confirmResilience'
         || action.type === 'discardKillerCard';
     if (state.pendingCollapseMoves && !collapseFloorAction) {
         throw new Error('坍塌还没收尾：先让屋里的人轮流走一步离开');
@@ -6363,6 +6608,21 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         action.type !== 'pickUnlockChoice' &&
         // 女王等级 4：先点 2 个地点生成僵尸
         action.type !== 'pickQueenSpawnRoom' &&
+        /**
+         * ⚠ **「确认生成丧尸 / 确认放置核心标记」也必须放行** —— 否则真死锁。
+         *
+         * 女王 4 级的"选 2 个地点"是在 `ackEvolution` 的 ④ 步
+         * （`advanceEvolutionChoices`）挂出来的，那时 `pendingEvolutionAck`
+         * **还没清**（它在最后一步 `settleConfirmedEvolution` 里才置 null）。
+         * 所以点完 2 个地点之后按「确认」会被这里拦下、报"请先确认进化效果"，
+         * 而那条路又会因为 `pendingQueenSpawnRooms` 已经挂着直接跳过挂选择、
+         * 直接结算 —— 丧尸不会生成，`pendingQueenSpawnRooms` 还永远留着，
+         * 回合收尾被 `hasEvolutionChoicePending` 一直挡住。**整局卡死。**
+         *
+         * 扼杀者 4 级是"结算完之后"才挂的（那时 ack 已清），走不到这条闸门；
+         * 但两个动作共用一个 handler，一起放行没有副作用。
+         */
+        action.type !== 'confirmEvoRooms' &&
         // 可选效果（「可以」）：先决定执行或跳过
         action.type !== 'resolveOptionalEffect' &&
         /**
@@ -6396,14 +6656,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
          */
         action.type !== 'collapseMove' &&
         /**
-         * ⚠ **坍塌那 1 点伤害引出的护符 / 坚毅询问也必须放行**（否则真死锁）：
-         *   坍塌伤害会挂起「是否出示古代护符」/「是否使用坚毅标记」，
-         *   而这时 `pendingEvolutionAck` 还挂着 —— 拦住它们玩家就答不了，
-         *   坍塌走不完、进化也继续不了，整局卡死。
-         *   （墓穴测试里"护符要能问得出来、答得下去"那一段抓到的。）
+         * ⚠ **坍塌那 1 点伤害引出的护符询问也必须放行**（否则真死锁）：
+         *   坍塌伤害会挂起「是否出示古代护符」，而这时 `pendingEvolutionAck` 还挂着 ——
+         *   拦住它玩家就答不了，坍塌走不完、进化也继续不了，整局卡死。
+         *   （墓穴测试里"护符要能问得出来、答得下去"那一段抓到的。
+         *    坚毅标记**不问**，自动生效，没有这个待办。）
          */
-        action.type !== 'confirmAmulet' &&
-        action.type !== 'confirmResilience') {
+        action.type !== 'confirmAmulet') {
         throw new Error('请先确认进化效果');
     }
     /**
@@ -6493,6 +6752,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         return;
     }
     if (needsCoopConfirm(state, action, p)) {
+        /**
+         * ⚠ **先判"这一步该不该你动"，再谈要不要队友确认。**
+         *
+         * 原来这里只挂确认、不判 active，于是**杀手回合里幸存者发 `search`**
+         * 会被显示成"等队友确认"（不报错），等队友点了确认之后才失败 ——
+         * 用户口径：「**杀手大回合本来幸存者就不能搜索**」，该直接报"还没轮到你"。
+         *
+         * 这道判定不影响任何合法行为：1对2 的幸存者本来就要满足 `active === 自己`
+         * （`assertActive` 的 multi/2v3 豁免不含 vs2），而且每个动作的 case
+         * 内部也都会再调一次 `assertActive`。
+         */
+        assertActive(state, p.id);
         if (state.pendingCoopAction)
             throw new Error('已有一笔行动等待队友确认');
         const partner = otherConnectedSurvivorOperator(state, socketId);
@@ -6517,10 +6788,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
      *
      * 例外（必须放行，否则会卡死）：
      *  - `collapseMove` 本人：就是这一步
-     *  - `confirmAmulet` / `confirmResilience`：坍塌那 1 点伤害正常走护符/坚毅，
-     *    它们会停下来问一句，得让人答得出来
+     *  - `confirmAmulet`：坍塌那 1 点伤害正常走护符，会停下来问一句，得让人答得出来
      *  - `discardKillerCard`：进坍塌前如果正欠着弃牌，先把账结清
      */
+    if (p.faction === 'survivor' && state.phase === 'survivorMain') {
+        const blocked = survivorPickInProgressError(state, p.id, action);
+        if (blocked)
+            throw new Error(blocked);
+    }
     switch (action.type) {
         // —— 大厅：改名字、选模式、选角色、准备、开打 ——
         case 'setName': {
@@ -6605,7 +6880,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
          * 第一次选 = 确认计划；之后再选 = 改变计划。**每一次都要所有幸存者玩家各自同意**。
          */
         case 'pickPlan': {
-            if (p.faction !== 'survivor' && !(isSharedSurvivorMode(state) && state.killerId))
+            /**
+             * ⚠ 同 `discardKillerCard`，方向反过来：豁免要认清
+             * "这根网线是否真的在操作**幸存者**"，不能只看"这局有杀手"。
+             * 原来那句会让 1对1 / 1对2 里的**杀手玩家替幸存者方选计划**。
+             * 写法对齐 `finishSurvivorPhase` 那处的 `isSurvivorOperator`。
+             */
+            if (p.faction !== 'survivor' &&
+                !(isSharedSurvivorMode(state) && isSurvivorOperator(state, socketId)))
                 throw new Error('只有幸存者方可以选计划');
             if (!controlsPiece(state, socketId, p))
                 throw new Error('无权操作');
@@ -6839,6 +7121,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         const near = who.roomId ? moveAdjacentRooms(state, who.roomId, who.id) : [];
                         const list = [who.roomId, ...near].filter(Boolean) as string[];
                         const witnessed = senseRooms(state, list);
+                        noteSingleRoomSense(state, list, witnessed);
                         queenSenseFear(state, witnessed);
             /** 【变体1】感知命中 → 挂出可发动的特性卡（10/15/16） */
             offerSenseTraits(state, witnessed);
@@ -6889,12 +7172,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         setStealth(who, true);
                         state.pendingMoveRange = 2;
                         state.pendingMoveMin = 0;
+                        log(state, `【变体1】${who.name}「危险伏击」：进入潜行。`, 'all', true);
                         log(
                             state,
-                            `【变体1】${who.name}「危险伏击」：弃掉 ${need} 张卡牌，进入【潜行】，` +
-                                '可以点地图【移动】0–2 格（不走就留在原地）。',
-                            'all',
-                            true,
+                            `「危险伏击」：可以点地图移动 0–2 格（不走就留在原地）。`,
+                            'killer',
                         );
                         break;
                     }
@@ -7747,7 +8029,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             }
             const k0 = state.killerId ? state.players[state.killerId] : null;
             draft.rooms = k0?.roomId ? [k0.roomId] : [];
-            log(state, `已清空路径，从「${k0?.roomId ? roomName(state, k0.roomId) : '原地'}」重新规划。`);
+            log(state, `已清空路径，从「${k0?.roomId ? roomName(state, k0.roomId) : '原地'}」重新规划。`, 'killer');
             break;
         }
         case 'move': {
@@ -7935,7 +8217,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                      */
                     if (draft.rooms.length > 1 && action.toRoomId === last) {
                         draft.rooms = draft.rooms.slice(0, -1);
-                        log(state, `已取消该步。路径：${draft.rooms.map((id) => roomName(state, id)).join(' → ')}`);
+                        log(state, `已取消该步。路径：${draft.rooms.map((id) => roomName(state, id)).join(' → ')}`, 'killer');
                         break;
                     }
                     if (!moveAdjacentRooms(state, last, state.killerId).includes(action.toRoomId)) {
@@ -7945,14 +8227,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     if (taken >= draft.max)
                         throw new Error('步数已用完，请点确认');
                     draft.rooms.push(action.toRoomId);
-                    log(state, `路径：${draft.rooms.map((id) => roomName(state, id)).join(' → ')}（再点末端可取消，确认后才结算）`);
+                    log(state, `路径：${draft.rooms.map((id) => roomName(state, id)).join(' → ')}（再点末端可取消，确认后才结算）`, 'killer');
                     break;
                 }
                 if (state.pendingSensePair) {
                     const pending = state.pendingSensePair;
                     if (pending.secondRoomId && action.toRoomId === pending.secondRoomId) {
                         pending.secondRoomId = null;
-                        log(state, `已取消「${roomName(state, action.toRoomId)}」。请再选第二个地点或确认。`);
+                        log(state, `已取消「${roomName(state, action.toRoomId)}」。请再选第二个地点或确认。`, 'killer');
                         break;
                     }
                     if (pending.firstRoomId && action.toRoomId === pending.firstRoomId) {
@@ -7967,7 +8249,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         if (!state.map.rooms.some((r) => r.id === action.toRoomId))
                             throw new Error('未知地点');
                         pending.firstRoomId = action.toRoomId;
-                        log(state, `已选「${roomName(state, action.toRoomId)}」，请再选一个与它相连的地点，然后确认。再点同一格可取消。`);
+                        log(state, `已选「${roomName(state, action.toRoomId)}」，请再选一个与它相连的地点，然后确认。再点同一格可取消。`, 'killer');
                         break;
                     }
                     if (pending.secondRoomId) {
@@ -7977,7 +8259,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         throw new Error('这两个地点不相连');
                     }
                     pending.secondRoomId = action.toRoomId;
-                    log(state, `已选「${roomName(state, pending.firstRoomId)}」与「${roomName(state, action.toRoomId)}」，请点确认感知。`);
+                    log(state, `已选「${roomName(state, pending.firstRoomId)}」与「${roomName(state, action.toRoomId)}」，请点确认感知。`, 'killer');
                     break;
                 }
                 if (state.pendingTrackerPick) {
@@ -8101,6 +8383,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     if (gateDoor)
                         log(state, `${p.name} 潜行通过机关大门（不弃牌、大门不拆）。`, 'killer');
                 }
+                /**
+                 * ⚠ **被停滞的雕像"能做、但执行时被跳过"**（用户口径：
+                 * 「雕像被停滞后，移动和搜索在执行时被跳过，**而不是不能做**」）。
+                 *
+                 * 所以这里不抛错：照常消耗这次普通行动，但雕像**不移动**
+                 * （战报写一句，让杀手知道这次白点了）。
+                 */
+                if (p.statueIndex != null && p.statueHalted) {
+                    state.killerMainActionsLeft -= 1;
+                    p.actionsLeft = state.killerMainActionsLeft;
+                    log(state, `雕像 ${p.statueIndex} 本回合被停滞，这次移动被跳过（雕像不移动）。`, 'killer');
+                    maybeFinishKillerMain(state);
+                    break;
+                }
                 const range = state.rules.killerMoveRange + p.moveBonus;
                 const ok = tryMove(state, playerId, action.toRoomId, range);
                 if (!ok)
@@ -8141,6 +8437,19 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 }
                 if (state.killerMainActionsLeft <= 0)
                     throw new Error('没有剩余主要行动');
+                /**
+                 * ⚠ **被停滞的雕像"能做、但执行时被跳过"**（用户口径：
+                 * 「雕像被停滞后，移动和搜索在执行时被跳过，**而不是不能做**」）。
+                 *
+                 * 不抛错：照常消耗这次普通行动，但**不搜索**（战报写一句）。
+                 */
+                if (p.statueIndex != null && p.statueHalted) {
+                    state.killerMainActionsLeft -= 1;
+                    p.actionsLeft = state.killerMainActionsLeft;
+                    log(state, `雕像 ${p.statueIndex} 本回合被停滞，这次搜索被跳过（不搜索）。`, 'killer');
+                    maybeFinishKillerMain(state);
+                    break;
+                }
                 setStealth(p, false);
                 state.killerMainActionsLeft -= 1;
                 p.actionsLeft = state.killerMainActionsLeft;
@@ -8287,6 +8596,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             /** 额外行动：不占一般行动，所以**不结束小回合** */
             break;
         }
+        /** 乔治「拆封堵」笔记：取消这次选择，笔记不消耗 */
+        case 'cancelNoteBlockade': {
+            const pend = state.pendingGeorgeBlockade;
+            if (!pend)
+                break;
+            const actor = Object.values(state.players).find(
+                (pl) => pl.faction === 'survivor' && isGeorge(state, pl.id),
+            );
+            if (!actor || !controlsPiece(state, socketId, actor))
+                throw new Error('只有乔治可以取消拆除封堵');
+            state.pendingGeorgeBlockade = null;
+            log(state, `${actor.name} 取消使用「乔治的笔记」，没有拆除封堵。`, 'survivor');
+            break;
+        }
         case 'chooseGeorgeNote': {
             const actor = Object.values(state.players).find((pl) => pl.faction === 'survivor' && isGeorge(state, pl.id));
             if (!actor)
@@ -8316,10 +8639,22 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('本局未启用封堵');
             if (!p.roomId)
                 throw new Error('不在地图上');
-            if (!doorsAt(state, p.roomId).some((d) => isDoorBlocked(state, d.id))) {
+            /**
+             * ⚠ **拆哪一块由玩家自己选**（用户口径：「幸存者移除封堵应该是
+             * **他自己选择移除**，不是自动」）——
+             * 以前这里只传房间号，`removeBlockade` 在屋里几块封堵里**随便挑一块**。
+             * 现在：给 `doorId` 就拆那一扇；没给的话只有"这儿正好一块"才成立。
+             */
+            const removable = blockedDoorsAt(state, p.roomId);
+            if (!removable.length) {
                 throw new Error('当前地点没有可拆的门封堵');
             }
-            removeBlockade(state, p.roomId, p.id);
+            const door = action.doorId ? canonicalDoorId(action.doorId) : null;
+            if (door && !removable.includes(door))
+                throw new Error('这块封堵不在你所在地点');
+            if (!door && removable.length > 1)
+                throw new Error('这个地点有多块封堵，请选择要拆除哪一块');
+            removeBlockade(state, door ?? p.roomId, p.id);
             p.mainActionUsed = true;
             p.moveLeft = 0;
             advanceAfterSurvivor(state, p.id);
@@ -8859,12 +9194,23 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (action.itemId === 'axe' && action.toRoomId === undefined && !action.targetPlayerId) {
                 if (!p.roomId)
                     throw new Error('不在地图上');
-                if (!doorsAt(state, p.roomId).some((d) => isDoorBlocked(state, d.id))) {
+                /**
+                 * ⚠ **拆哪一块由玩家自己选**（同 `removeBlockade`：用户口径
+                 * 「幸存者移除封堵应该是他自己选择移除，不是自动」）。
+                 * 校验放在**消耗手斧之前** —— 选错了不该白扔一把手斧。
+                 */
+                const removable = blockedDoorsAt(state, p.roomId);
+                if (!removable.length) {
                     throw new Error('当前地点没有可拆的封堵');
                 }
+                const door = action.doorId ? canonicalDoorId(action.doorId) : null;
+                if (door && !removable.includes(door))
+                    throw new Error('这块封堵不在你所在地点');
+                if (!door && removable.length > 1)
+                    throw new Error('这个地点有多块封堵，请选择要拆除哪一块');
                 takeItem(p, 'axe', 1);
                 discardConsumedItem(state, 'axe', 1);
-                removeBlockade(state, p.roomId, p.id);
+                removeBlockade(state, door ?? p.roomId, p.id);
                 log(state, `${p.name} 用手斧拆除了封堵。`, 'survivor');
                 break;
             }
@@ -8879,12 +9225,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 advanceAfterSurvivor(state, p.id);
                 break;
             }
-            // 煤油灯：额外行动穿过秘密通道
+            // 煤油灯：额外行动穿过秘密通道（**一次性**，用掉就进弃牌堆）
             if (action.itemId === 'lamp') {
                 if (!action.toRoomId)
                     throw new Error('请选择秘密通道出口');
                 trySecretPassage(state, playerId, action.toRoomId);
-                log(state, `${p.name} 使用煤油灯穿过秘密通道。`);
+                takeItem(p, 'lamp', 1);
+                discardConsumedItem(state, 'lamp', 1);
+                log(state, `${p.name} 使用煤油灯穿过秘密通道（煤油灯已用掉）。`);
                 break;
             }
             // 神秘包裹：额外行动，从发现牌堆抽一张，并在自己所在格发出响声
@@ -8999,6 +9347,19 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('仅幸存者大回合可打开手提箱');
             if (!controlsPiece(state, socketId, p))
                 throw new Error('无权操作该幸存者');
+            /**
+             * ⚠ **翻找手提箱 = 额外行动，不是"发现"**（用户口径）。
+             *
+             * 所以和「开宝箱」同一套：**不查** `assertActive` / `mainActionUsed`
+             * （额外行动不受小回合限制），但**停滞过就不能用**，
+             * 用了记 `extraActionUsedThisTurn`（「停滞雕像」那一步要看）。
+             *
+             * 另外它**不再写 `lastDiscoveryCardId`**（见 `keepSuitcaseDiscovery`）——
+             * 那个字段是"本大回合翻到的发现牌"，会把箱子/包裹里的牌
+             * 冒充成发现阶段翻的那张。
+             */
+            if (p.haltedThisRound)
+                throw new Error('本大回合已经执行过停滞，不能再做额外行动');
             const room = suitcaseRoomId(state);
             if (!room)
                 throw new Error('当前地图没有手提箱');
@@ -9010,6 +9371,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!cardId)
                 throw new Error('发现牌堆已空');
             state.suitcaseAvailable = false;
+            p.extraActionUsedThisTurn = true;
             keepSuitcaseDiscovery(state, p.id, cardId);
             break;
         }
@@ -9311,8 +9673,19 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             const idx = state.killerDiscard.indexOf(action.cardId);
             if (idx < 0)
                 throw new Error('那张牌不在弃牌堆里');
-            if (job.excludeCardIds.includes(action.cardId))
-                throw new Error('不能移除刚打出的这张牌');
+            /**
+             * ⚠ **按"份数"判，不能按 id 判**（用户口径：「只排除当前这张」）。
+             *
+             * `job.options` 就是"还能选的每一份"，每选一次下面会 `splice` 掉一份；
+             * 所以同名多份时，只有**份数用光**才算选不了 ——
+             * 以前 `excludeCardIds.includes(id)` 会把同名另一份也一起禁掉。
+             */
+            const left = (job.options ?? []).filter((x) => x === action.cardId).length;
+            if (left <= 0) {
+                throw new Error(job.excludeCardIds.includes(action.cardId)
+                    ? '不能移除刚打出的这张牌'
+                    : '这张牌的份数已经选够了');
+            }
             state.killerDiscard.splice(idx, 1);
             if (!state.killerRemovedPermanently) state.killerRemovedPermanently = [];
             state.killerRemovedPermanently.push(action.cardId);
@@ -9338,20 +9711,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 if (!job.options.length) {
                     log(state, `${job.cardName}：弃牌堆里没有别的牌可移除了。`, 'killer');
                     state.pendingDiscardRemove = null;
-                    /**
-                     * ⚠ **必须走 `resumeAfterKillerChoice`（打牌流程的真正出口）**，
-                     * 不能只 `continueKillerQueue` —— 那样"打出的这张牌"不会落定、
-                     * 速度标记不会清掉，**回合也永远停在 main、进不了慢速阶段**
-                     * （用户报的"【變形】做完后没有自动转到慢速阶段"）。
-                     */
-                    resumeAfterKillerChoice(state);
+                    finishDiscardRemove(state);
                 } else {
                     log(state, `${job.cardName}：还要再选 ${job.remaining} 张。`, 'killer');
                 }
             } else {
                 state.pendingDiscardRemove = null;
-                /** 同上：选完了要接回打牌流程的出口 */
-                resumeAfterKillerChoice(state);
+                finishDiscardRemove(state);
             }
             break;
         }
@@ -9420,13 +9786,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
          * 用完卡进遗物弃牌堆。
          */
         case 'useMirrorPortal': {
-            if (p.faction !== 'survivor' || !p.alive)
+            /**
+             * ⚠ **按 `actorPlayerId` 认人**（和 `drawRelic` / `openChest` 同一套写法）：
+             * 额外行动弹窗是**按每个幸存者**列按钮的，共享控制 / 单人热座下
+             * 点谁的名字就该谁传送 —— 不带它就会被算到"当前行动者"头上，
+             * 于是"做完小回合的另一个人想传送"会报「这名幸存者没有「鏡之門戶」」。
+             */
+            const mir = state.players[action.actorPlayerId ?? playerId];
+            if (!mir || mir.faction !== 'survivor' || !mir.alive)
                 throw new Error('只有存活幸存者可以使用鏡之門戶');
             if (state.phase !== 'survivorMain')
                 throw new Error('仅幸存者大回合可使用鏡之門戶');
-            if (!controlsPiece(state, socketId, p))
+            if (!controlsPiece(state, socketId, mir))
                 throw new Error('无权操作该幸存者');
-            if (!hasRelic(p, 'mirror'))
+            if (!hasRelic(mir, 'mirror'))
                 throw new Error('这名幸存者没有「鏡之門戶」');
             /**
              * ⚠ **只拦"停滞"**（停滞过的幸存者本大回合不能再做额外行动）。
@@ -9434,7 +9807,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              * 所以**不再**用 `extraActionUsedThisTurn` 拦第二次使用 ——
              * 那张遗物本来就是一次性的，能不能再用取决于还有没有第二张。
              */
-            if (p.haltedThisRound)
+            if (mir.haltedThisRound)
                 throw new Error('本大回合已经执行过停滞，不能再做额外行动');
             if (!action.toRoomId)
                 throw new Error('请选一个螺旋地点');
@@ -9443,7 +9816,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              * 额外行动不受小回合限制，做完了小回合照样能用。
              * 能不能再用的唯一上限是「还有没有第二张鏡之門戶」（那张牌本身是一次性的）。
              */
-            useMirror(state, p, action.toRoomId);
+            useMirror(state, mir, action.toRoomId);
             break;
         }
         /**
@@ -9468,17 +9841,23 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('本大回合已经执行过停滞，不能再做特殊行动');
             assertActive(state, playerId);
             assertSurvivorMainAction(p);
-            /** 先记下战报，再摸牌（摸到的牌自己会写各自的战报） */
             log(
                 state,
-                `${p.name} 使用遗物「洞察之球」（特殊行动）：在「${roomName(state, p.roomId)}」依次摸两张牌。`,
+                `${p.name} 使用遗物「洞察之球」（特殊行动）：在「${roomName(state, p.roomId)}」搜索两次。`,
                 survivorActionVis(state),
             );
             consumeInsight(state, p);
-            searchDrawMultiple(state, p.id, 2);
             p.mainActionUsed = true;
             p.moveLeft = 0;
-            advanceAfterSurvivor(state, p.id);
+            /**
+             * ⚠ **特殊行动 = 搜索两次**（用户口径：「洞察之球的特殊行动是搜索两次！
+             * 能触发欧菲莉亚的第六感」）—— 以前是"自己一次摸 2 张"，
+             * 绕过了正常搜索流程，所以第六感、响声那些都不走。
+             * 现在两次都走 `doSearch`：第六感会挂起"摸 2 选 1"，
+             * 第二次搜索等那次选完再接着跑（见 `runInsightOrbSearch`）。
+             */
+            state.pendingInsightSearches = 2;
+            runInsightOrbSearch(state, p.id);
             break;
         }
         /**
@@ -9519,6 +9898,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 state.pendingCoreRooms = [];
                 state.pendingCoreOverflowPlaceAt = null;
                 resumeAfterKillerChoice(state);
+                /**
+                 * ⚠ 这一路也可能是**进化 4 级的两个核心标记**（撞上 5 个上限、
+                 * 玩家选完要移除哪一个之后补放）—— 那条同样要收尾，
+                 * 否则 `phase` 停在 `upkeep`（同 `confirmEvoRooms` 的注释）。
+                 */
+                if (state.phase === 'upkeep')
+                    maybeCloseKillerUpkeep(state);
                 break;
             }
             if (state.pendingCorePick !== 'place')
@@ -9676,6 +10062,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             }
             if (state.pendingZombieHordeTo) {
                 const from = (state.pendingZombieHordeTo as unknown as { from: string }).from;
+                const steps = hordeStepRooms(state, from);
+                if (!steps.includes(action.roomId))
+                    throw new Error('屍群來了只能移动到距离 1 的地点');
                 state.pendingZombieHordeTo = null;
                 hordeMove(state, from, action.roomId, 1);
                 resumeAfterKillerChoice(state);
@@ -9751,24 +10140,55 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     throw new Error('选的僵尸不在可消灭范围内');
             }
             const actor = state.players[p.id];
+            /**
+             * 先按僵尸所在地点归堆，再移除。
+             * 战报只能说「哪里的僵尸被十字弩消灭了」，不能说弩是在哪个地点使用的。
+             */
+            const byRoom = new Map<string, number>();
+            for (const zid of picked) {
+                const z = (state.zombies ?? []).find((x) => x.id === zid);
+                if (!z?.roomId) continue;
+                byRoom.set(z.roomId, (byRoom.get(z.roomId) ?? 0) + 1);
+            }
             state.pendingCrossbow = null;
             for (const zid of picked)
-                removeZombie(state, zid);
+                removeZombie(state, zid, true);
             if (actor) {
                 /** 十字弩无限使用、也不消耗 —— 只消耗这次一般行动 */
                 actor.mainActionUsed = true;
                 actor.moveLeft = 0;
             }
-            logSplit(
-                state,
-                `${p.name} 用十字弩消灭了 ${picked.length} 个僵尸。`,
-                /** 杀手只知道"哪里消灭了几个僵尸"，**不点名** */
-                p.roomId
-                    ? `十字弩在「${roomName(state, p.roomId)}」消灭了 ${picked.length} 个僵尸。`
-                    : `十字弩消灭了 ${picked.length} 个僵尸。`,
-            );
+            const where = [...byRoom.entries()]
+                .map(([room, n]) => `「${roomName(state, room)}」的 ${n} 个僵尸`)
+                .join('、');
+            if (where) {
+                logSplit(
+                    state,
+                    `${p.name} 用十字弩消灭了${where}。`,
+                    /** 杀手只知道哪些地点的僵尸没了，不知道弩在谁手里、在哪开的 */
+                    [...byRoom.entries()]
+                        .map(([room, n]) => `「${roomName(state, room)}」的 ${n} 个僵尸被十字弩消灭了。`)
+                        .join(''),
+                );
+            }
+            else {
+                log(state, `${p.name} 收起十字弩，没有消灭僵尸。`, 'survivor');
+            }
             if (actor)
                 advanceAfterSurvivor(state, actor.id);
+            break;
+        }
+        /** 十字弩：取消这次选择，不消耗一般行动 */
+        case 'cancelCrossbow': {
+            const cb = state.pendingCrossbow;
+            if (!cb || cb.survivorId !== p.id)
+                throw new Error('当前没有待确认的十字弩');
+            if (p.faction !== 'survivor' || !p.alive)
+                throw new Error('只有存活幸存者可使用十字弩');
+            if (!controlsPiece(state, socketId, p))
+                throw new Error('无权操作该幸存者');
+            state.pendingCrossbow = null;
+            log(state, `${p.name} 取消使用十字弩，没有选择僵尸。`, 'survivor');
             break;
         }
         /**
@@ -9784,27 +10204,88 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('当前不需要选择放置核心标记的地点');
             if (!state.map.rooms.some((r) => r.id === action.roomId))
                 throw new Error('地点不存在');
-            if (picked.includes(action.roomId))
-                throw new Error('不能选同一个地点');
+            /**
+             * ⚠ 再点**已经选过**的地点 = 取消那一格
+             * （用户口径「选择要确认」，点错了得能反悔）。
+             */
+            if (picked.includes(action.roomId)) {
+                picked.splice(picked.indexOf(action.roomId), 1);
+                log(state, `扼杀者 4 级：已取消「${roomName(state, action.roomId)}」（已选 ${picked.length}/2）。`, 'killer');
+                break;
+            }
+            if (picked.length >= 2)
+                throw new Error('已经选满 2 个地点，请点「确认放置核心标记」或取消其中一个');
             picked.push(action.roomId);
             if (picked.length < 2) {
                 log(state, `扼杀者 4 级：已选「${roomName(state, action.roomId)}」，请再点一个不同地点。`, 'killer');
                 break;
             }
-            state.pendingStranglerCoreRooms = null;
-            /** 逐个放；第一个就触发「选移除」的话，剩下的等移除完再补（记在队列里） */
-            const [r1, r2] = picked;
-            const overflow1 = r1 ? placeCoreAt(state, r1) : false;
-            if (overflow1) {
-                /** 已进入"选移除"流程：把第二个地点挂起来，移除完再放 */
-                state.pendingCoreOverflowPlaceAtAfter = r2 ?? null;
+            /** ⚠ 选满了**不立刻放** —— 等点「确认放置核心标记」 */
+            log(state, `扼杀者 4 级：已选「${picked.map((r) => roomName(state, r)).join('」与「')}」，点「确认放置核心标记」后生效（再点同一格可取消）。`, 'killer');
+            break;
+        }
+        /**
+         * 【进化 4 级】**确认**已经在地图上选好的那 2 个地点。
+         *
+         * 用户口径：「**选择要确认**」—— 原来选满 2 个就直接生效，点错了没法反悔。
+         * 一个动作管两种（同构）：女王生成丧尸 / 扼杀者放核心标记。
+         */
+        case 'confirmEvoRooms': {
+            if (p.faction !== 'killer')
+                throw new Error('仅杀手可执行');
+            /** ① 女王 4 级：生成丧尸 */
+            const queenRooms = state.pendingQueenSpawnRooms;
+            if (queenRooms) {
+                if (queenRooms.length !== 2)
+                    throw new Error('请先选满 2 个地点再确认');
+                state.pendingQueenSpawnRooms = null;
+                for (const rid of queenRooms)
+                    spawnZombieAt(state, rid);
+                /** 这一项选完了 → 问下一项，或做实际结算 */
+                advanceEvolutionAfterChoice(state);
+                if (state.phase === 'upkeep')
+                    maybeCloseKillerUpkeep(state);
                 break;
             }
-            if (r2) {
-                const overflow2 = placeCoreAt(state, r2);
-                if (overflow2) state.pendingCoreOverflowPlaceAtAfter = null;
+            /** ② 扼杀者 4 级：放 2 个核心标记 */
+            const coreRooms = state.pendingStranglerCoreRooms;
+            if (coreRooms) {
+                if (coreRooms.length !== 2)
+                    throw new Error('请先选满 2 个地点再确认');
+                state.pendingStranglerCoreRooms = null;
+                /** 逐个放；第一个就触发「选移除」的话，剩下的等移除完再补（记在队列里） */
+                const [cr1, cr2] = coreRooms;
+                const overflow1 = cr1 ? placeCoreAt(state, cr1) : false;
+                if (overflow1) {
+                    /** 已进入"选移除"流程：把第二个地点挂起来，移除完再放 */
+                    state.pendingCoreOverflowPlaceAtAfter = cr2 ?? null;
+                    break;
+                }
+                if (cr2) {
+                    const overflow2 = placeCoreAt(state, cr2);
+                    if (overflow2) {
+                        state.pendingCoreOverflowPlaceAtAfter = null;
+                        break;
+                    }
+                }
+                /**
+                 * ⚠ **扼杀者这一路要自己把流程推完**（用户报的
+                 * 「扼杀者 4 级选完后没有正常切回幸存者界面」）：
+                 *
+                 * 女王那一路的"选 2 个地点"是在 `ackEvolution` 的第 ④ 步挂出来的，
+                 * 那时 `pendingEvolutionAck` **还挂着** → `advanceEvolutionAfterChoice`
+                 * 会把后面的结算 / 回合收尾一路走完。
+                 * 而扼杀者这两个标记是**结算过程中**挂出来的，回到这里时
+                 * `pendingEvolutionAck` **已经是 null** → `advanceEvolutionAfterChoice`
+                 * 直接返回，`phase` 就永远停在 `upkeep`：
+                 * 界面不回幸存者，而且**幸存者那一轮根本开始不了**。
+                 */
+                advanceEvolutionAfterChoice(state);
+                if (state.phase === 'upkeep')
+                    maybeCloseKillerUpkeep(state);
+                break;
             }
-            break;
+            throw new Error('当前没有待确认的地点选择');
         }
         /**
          * **雕像「巡邏 / 圍困」：杀手选下一尊要移动 / 搜索的雕像。**
@@ -9825,7 +10306,17 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              */
             state.encounterTriggerPieceId = action.statueId;
             const encounterRoom = pickStatueStepAction(state, action.statueId);
-            if (encounterRoom) state.statueEncounterRoom = encounterRoom;
+            /**
+             * 雕像搜索命中要**立刻**开战。
+             * 5 级「攻击前伤害」挂在 `startEncounter` 上，
+             * 次雕像搜到人和主杀手自己搜到人走同一条。
+             */
+            if (encounterRoom) {
+                state.statueEncounterRoom = encounterRoom;
+                maybeStartEncounter(state);
+                if (state.encounter || state.phase === 'gameOver')
+                    break;
+            }
             /** 还在等下一次选择 / 正在走路径 → 就停在这儿 */
             if (state.pendingStatuePick || state.pendingStatueStepId)
                 break;
@@ -9852,24 +10343,33 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('当前不需要选择生成僵尸的地点');
             if (!state.map.rooms.some((r) => r.id === action.roomId))
                 throw new Error('地点不存在');
-            if (picked.includes(action.roomId))
-                throw new Error('不能选同一个地点');
+            /**
+             * ⚠ 再点**已经选过**的地点 = 取消那一格（同扼杀者那处）。
+             */
+            if (picked.includes(action.roomId)) {
+                picked.splice(picked.indexOf(action.roomId), 1);
+                log(state, `女王 4 级：已取消「${roomName(state, action.roomId)}」（已选 ${picked.length}/2）。`, 'killer');
+                break;
+            }
+            if (picked.length >= 2)
+                throw new Error('已经选满 2 个地点，请点「确认生成丧尸」或取消其中一个');
             picked.push(action.roomId);
             if (picked.length < 2) {
                 log(state, `女王 4 级：已选「${roomName(state, action.roomId)}」，请再点一个不同地点。`, 'killer');
                 break;
             }
-            state.pendingQueenSpawnRooms = null;
-            for (const rid of picked)
-                spawnZombieAt(state, rid);
-            /** 这一项选完了 → 问下一项，或做实际结算 */
-            advanceEvolutionAfterChoice(state);
+            /** ⚠ 选满了**不立刻生成** —— 等点「确认生成丧尸」 */
+            log(state, `女王 4 级：已选「${picked.map((r) => roomName(state, r)).join('」与「')}」，点「确认生成丧尸」后生效（再点同一格可取消）。`, 'killer');
             break;
         }
         /**
          * 欧菲莉亚「言语鼓励」（一般行动·特殊行动）：
          * 移除**任意**幸存者的所有恐惧，并在目标上放置一个**鼓励标记**。
          * 不限地点；每个幸存者至多一个鼓励标记。
+         *
+         * ⚠ **目标已经有鼓励标记时不再拒绝**（用户口径：
+         * 「言语鼓励可以对任意幸存者做，**如果他已有鼓励标记就只清除其恐惧**」）——
+         * 这时就只是"清恐惧"，不会再多一个标记（每人至多一个）。
          */
         case 'useEncourage': {
             if (p.faction !== 'survivor' || !p.alive)
@@ -9885,8 +10385,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             const target = state.players[targetId];
             if (!target || target.faction !== 'survivor' || !target.alive)
                 throw new Error('请指定一名存活幸存者');
-            if (target.encourageToken)
-                throw new Error(`${target.name} 已经有鼓励标记了（每人至多一个）`);
+            /** 已经有标记了 → 这次只清恐惧 */
+            const alreadyHadToken = target.encourageToken;
             /**
              * 「特殊行动」= 一般行动第 4 项，会消耗行动并结束小回合。
              */
@@ -9894,12 +10394,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             assertSurvivorMainAction(p);
             target.fear = 0;
             target.overFear = false;
-            target.encourageToken = true;
+            /** 每人至多一个：已经有就不再加 */
+            if (!alreadyHadToken)
+                target.encourageToken = true;
             p.mainActionUsed = true;
             p.moveLeft = 0;
             log(
                 state,
-                `${p.name} 发动「言语鼓励」：移除 ${target.name} 的所有恐惧，并在其身上放置一个鼓励标记。`,
+                alreadyHadToken
+                    ? `${p.name} 发动「言语鼓励」：移除 ${target.name} 的所有恐惧（他已经有鼓励标记了，不再多放一个）。`
+                    : `${p.name} 发动「言语鼓励」：移除 ${target.name} 的所有恐惧，并在其身上放置一个鼓励标记。`,
                 'survivor',
             );
             advanceAfterSurvivor(state, p.id);
@@ -9996,11 +10500,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              * 也**不设** `extraActionUsedThisTurn` / `mechanicalKnackUsedThisTurn`
              * —— 唯一的上限就是"弃牌堆里还有没有工具箱"。
              */
-            const toolboxId = 'toolbox';
-            const idx = (state.searchDiscard ?? []).findIndex((id) => id === toolboxId);
-            if (idx < 0)
+            /**
+             * 用掉或弃掉的工具箱在**场上弃牌堆**（`survivorDiscard`），
+             * 不是搜索牌库那一摞里的字面 id `'toolbox'`。
+             * 以前只翻 `searchDiscard`，弃牌堆里明明有工具箱也报「没有」。
+             * 和女王在不在锤子地点无关。
+             */
+            if (!takeEarliestFromSurvivorDiscard(state, 'toolbox'))
                 throw new Error('弃牌堆里没有工具箱，不能用');
-            state.searchDiscard.splice(idx, 1);
             p.items.toolbox = (p.items.toolbox ?? 0) + 1;
             log(state, `${p.name} 发动「机械知识」：从弃牌堆获得一张工具箱。`, 'survivor');
             enforceInventory(state, p.id);
@@ -10414,7 +10921,20 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             break;
         }
         case 'discardKillerCard': {
-            if (p.faction !== 'killer' && !(isSharedSurvivorMode(state) && state.killerId)) {
+            /**
+             * ⚠ 豁免要给**真的在操作杀手**的那根网线，不能只看"这局有杀手"。
+             *
+             * `isSharedSurvivorMode` 在 1对1 / 1对2 里也是 true（一个玩家管 3 枚幸存者），
+             * 所以原来那句 `&& state.killerId` 会让**对面那个幸存者玩家替杀手弃牌**
+             * —— 实测确认：1对1 里幸存者发 `discardKillerCard`，服务端接受。
+             *
+             * 换成 `controlsPiece` 之后：
+             *   · solo（房主一人全控）→ 仍然成立，热座不受影响
+             *   · 1对1 / 1对2 的幸存者玩家 → 不成立，正确拒绝
+             */
+            if (p.faction !== 'killer' &&
+                !(isSharedSurvivorMode(state) && state.killerId &&
+                    controlsPiece(state, socketId, state.players[state.killerId]))) {
                 throw new Error('仅杀手可弃牌');
             }
             const hand = state.killerHand;
@@ -10424,15 +10944,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (state.pendingKillerDiscards <= 0)
                 throw new Error('当前不需要弃牌');
             /**
-             * 【变体1】特性 03「狡猾诡计」：
-             * 「在游戏期间，如果你超出了手牌上限，你可以弃掉**任意**手牌，
-             *   而不是只能弃掉新抽到的卡牌。」
-             * 所以带这张卡时，"刚入手的锁定牌不能弃"这条限制**整个跳过**。
+             * ⚠ **"刚由进化入手的牌本次不能弃"没有例外**（用户口径：
+             * 「特性三只影响抽牌，**不影响这种锁定牌加入手牌和雕像 4 级**」）。
+             *
+             * 【变体1】特性 03「狡猾诡计」写的是「如果你超出了手牌上限，你可以
+             * 弃掉任意手牌，而不是**只能弃掉新抽到的卡牌**」—— 那是**抽牌**那一侧
+             * 的事；锁定牌入手、雕像 4 级取回「圍困」都不是"抽到的牌"，
+             * 所以带这张特性也照样不能把它们弃掉。
+             *
+             * （以前这里带特性就整个跳过限制，等于"弃一张再拿围困"白拿。）
              */
-            const slyTrick =
-                state.variant1 && who0HasSlyTrick(state, action.cardId, playerId);
-            if (!slyTrick && (state.justUnlockedCards ?? []).includes(action.cardId)) {
-                throw new Error('刚由进化入手的牌本次不能弃置（有「狡猾诡计」才能弃任意手牌）');
+            if ((state.justUnlockedCards ?? []).includes(action.cardId)) {
+                throw new Error('刚由进化入手的牌本次不能弃置');
             }
             hand.splice(idx, 1);
             state.killerDiscard.push(action.cardId);
@@ -10441,6 +10964,22 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (state.pendingKillerDiscards === 0) {
                 state.pendingUnlockDiscard = false;
                 state.justUnlockedCards = [];
+                /**
+                 * ⚠ **先把"进化欠下的洗牌 + 摸牌"补上，再决定收尾**
+                 * （用户报的「雕像 3 级进化后没有洗牌」，以及之前那句
+                 * 「为什么进化到 4 级时摸了 5 张」—— 同一个根因）。
+                 *
+                 * 进化结算时如果还欠着弃牌，`settleConfirmedEvolution` 会在
+                 * `if (state.pendingKillerDiscards > 0) return;` **提前返回**，
+                 * 那句 `resumeDeferredDeckRecycle` 根本没跑到；而这里原来按
+                 * `phase === 'upkeep'` 走的是 `maybeCloseKillerUpkeep`
+                 * —— **它不补洗牌**，于是回合就这么结束了：
+                 * 摸牌堆空着、欠的摸牌一直挂到**下一次**进化才被一起摸出来。
+                 *
+                 * `resumeDeferredDeckRecycle` 自带两个闸门（没欠东西 / 进化还没确认
+                 * 就直接返回），所以这里可以无条件调。
+                 */
+                resumeDeferredDeckRecycle(state);
                 if (state.phase === 'upkeep')
                     maybeCloseKillerUpkeep(state);
                 /**
@@ -10464,7 +11003,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 }
             }
             else {
-                const allowed = socketId === state.hostId ||
+                /**
+                 * ⚠ `socketId === state.hostId` 这个豁免**只在单人热座里成立**。
+                 *
+                 * 1对1 / 1对2 里房主很可能就是**杀手** —— 那样杀手能替幸存者翻发现牌。
+                 * （同一处豁免在 `acknowledgeDiscovery` 上实测确认被接受。）
+                 */
+                const allowed = (state.mode === 'solo' && socketId === state.hostId) ||
                     p.faction === 'survivor' ||
                     (isSharedSurvivorMode(state) && isSurvivorOperator(state, socketId));
                 if (!allowed)
@@ -10480,9 +11025,10 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('请先选择翻牌的幸存者');
             if (state.discoveryOptions.length > 0)
                 throw new Error('请先选留一张发现牌');
+            /** ⚠ 同 `chooseDiscovery`：`hostId` 豁免只在单人热座里成立 */
             const allowed = state.mode === 'multi' || state.mode === '2v3'
                 ? p.faction === 'survivor'
-                : socketId === state.hostId ||
+                : (state.mode === 'solo' && socketId === state.hostId) ||
                     playerId === firstAliveSurvivorId(state) ||
                     (isSharedSurvivorMode(state) && isSurvivorOperator(state, socketId));
             if (!allowed)
@@ -10604,7 +11150,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                  * 幸存者地图右边要能看到这张卡的卡面（用户要求）。
                  */
                 state.currentKillerCardId = action.cardId;
-                enc.step = 'defend';
                 log(state, bonus > 0
                     ? `${p.name} 打出「${card.name}」，本次攻击 +${bonus}。`
                     : `${p.name} 打出「${card.name}」。`);
@@ -10619,9 +11164,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                  * 除了加攻数值，还要执行这张牌**攻击时机**的其它效果 ——
                  * 例如荊棘纏繞的「本次攻击中目标不能使用任何物品」、
                  * 毒液之觸的〔中毒〕、戰鬥適應的永久 +1 力量。
-                 * 这里同步执行（不走队列），因为紧接着就是防御步骤，不能被打断。
+                 * 戰鬥適應要先选移除的牌：选完之前停在攻击步骤，不进入防御。
                  */
                 runAttackTimingExtras(state, card);
+                if (!state.pendingDiscardRemove)
+                    enc.step = 'defend';
                 break;
             }
             enc.attackBoost = false;
@@ -10869,7 +11416,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!state.pendingSenseColor)
                 throw new Error('当前不是选择感知颜色');
             state.pendingSenseColorPick = action.color;
-            log(state, `已选${action.color === 'R' ? '红色' : action.color === 'B' ? '蓝色' : '绿色'}区域，请确认感知。`);
+            log(state, `已选${action.color === 'R' ? '红色' : action.color === 'B' ? '蓝色' : '绿色'}区域，请确认感知。`, 'killer');
             break;
         }
         case 'confirmSense': {
@@ -10971,34 +11518,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             break;
         }
         /**
-         * 迪伦·温「坚毅」：决定要不要用坚毅标记挡掉这次伤害。
-         * 用掉标记 → 这次伤害完全免除；不用 → 照常受伤。
+         * ⚠ **迪伦·温「坚毅」没有"询问"这一步**（用户口径：「坚毅标记自动使用」）——
+         * 它由 `effects.applyDamage` **自动生效**：第一次即将受伤时直接免伤
+         * （任何伤害都算，包括遭遇里的），战报是
+         * 「X 的坚毅标记自动生效，防止了这次伤害。」
+         *
+         * 这里原来有一整套 `confirmResilience`（"要不要用坚毅标记"）的询问流程，
+         * 但**全项目没有任何地方会挂出 `pendingResilience`** —— 是死代码，
+         * 而且和"自动使用"的口径相反（万一被挂出来就会变成"问一句"）。
+         * 所以连同状态字段、动作、快照字段、界面面板一起删掉了。
          */
-        case 'confirmResilience': {            if (!state.pendingResilience || state.pendingResilience.playerId !== playerId) {
-                throw new Error('当前不是你选择坚毅标记');
-            }
-            const pend = state.pendingResilience;
-            state.pendingResilience = null;
-            const target = state.players[pend.playerId];
-            if (!target) {
-                throw new Error('目标不在场');
-            }
-            if (action.use) {
-                if (!target.resilienceToken) {
-                    throw new Error('没有坚毅标记可用了');
-                }
-                target.resilienceToken = false;
-                log(state, `${target.name} 移除了坚毅标记，防止了这次伤害。`, 'all', true);
-            }
-            else {
-                /** 不用标记：把这笔伤害照常结算（跳过两种询问，避免死循环） */
-                applyDamage(state, pend.playerId, pend.amount, pend.sourceId, {
-                    skipAmulet: true,
-                    skipResilience: true,
-                });
-            }
-            break;
-        }
         /**
          * 欧菲莉亚「第六感」：选 1 张留下，另 1 张放回搜索牌库顶。
          * 放回的那张不会触发警报。
@@ -11017,7 +11546,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              */
             const searcher = state.players[searcherId];
             if (searcher?.alive && state.phase === 'survivorMain') {
-                advanceAfterSurvivor(state, searcher.id);
+                /**
+                 * ⚠ **洞察之球那一路**：一次特殊行动要搜两次，第一次挂了第六感 ——
+                 * 选完这里把**剩下的搜索**接着跑完（跑完它自己会推进小回合）。
+                 */
+                if ((state.pendingInsightSearches ?? 0) > 0)
+                    runInsightOrbSearch(state, searcherId);
+                else
+                    advanceAfterSurvivor(state, searcher.id);
             }
             break;
         }
@@ -11264,6 +11800,17 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 `${actor.name} 停滞了雕像 ${target.statueIndex}。`,
                 `雕像 ${target.statueIndex}（在「${roomName(state, target.roomId)}」）被停滞了。`,
             );
+            /**
+             * ⚠ **这里必须收尾**（用户报的「停滞雕像后直接卡住了」）。
+             *
+             * 停滞是"一般行动第 4 项：使用一个特殊行动"—— 它把
+             * `mainActionUsed` 置上了，但**以前只 `break`**，没有把小回合推进：
+             * 于是这名幸存者"已经行动过、又因为 `haltedThisRound` 做不了任何额外行动"，
+             * 阶段永远停在他身上（界面显示"一般行动完成后该小回合已结束"，
+             * 可什么也点不了）。其他特殊行动（言语鼓励 / 移除核心标记 / 洞察之球…）
+             * 收尾时都调 `advanceAfterSurvivor`，这里以前漏了。
+             */
+            advanceAfterSurvivor(state, actor.id);
             break;
         }
         case 'guessMainStatue': {
@@ -11340,7 +11887,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('没有这个选项');
             state.pendingEffectChoice = null;
             const label = action.optionIndex === 0 ? '第一种' : `第 ${action.optionIndex + 1} 种`;
-            log(state, `已选择${label}用法。`);
+            log(state, `已选择${label}用法。`, 'killer');
             // 把选中的效果插到队首，继续结算
             state.pendingEffectQueue.unshift(...picked);
             continueKillerQueue(state);
@@ -11378,16 +11925,10 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             /** 【变体1】感知命中 → 挂出可发动的特性卡（10/15/16） */
             offerSenseTraits(state, witnessed);
             /**
-             * **只有女王的【君臨天下】才把目击位置记下来**（`pendingSenseMoveAfter`）。
-             *
-             * 这里的 `witnessedAt` 代表"杀手地图上**幸存者立绘摆在哪**"，
-             * 而规则上**只有君臨天下会移动立绘** —— 其他〔感知〕类效果只是"看"，
-             * 不会让立绘跟着挪过去。所以必须按 `pendingSenseMoveAfter` 分流，
-             * 不能像以前那样无条件记录。
+             * 只感知一个地点时，立绘已在 `confirmSenseRoom` 里挪到该地点。
+             * 君臨天下目击到人之后，还要接着选一名按路径移动。
              */
             if (state.pendingSenseMoveAfter && witnessed.length) {
-                for (const w of witnessed)
-                    state.witnessedAt[w.id] = sensedRoom;
                 state.pendingSenseMoveAfter = false;
                 /** 目击到人 → 接着让杀手**选一名目击者移动**（0–2 步，路径由杀手选） */
                 state.pendingMoveSurvivorPick = witnessed.map((w) => w.id);
@@ -11443,6 +11984,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!state.pendingTrackerPick)
                 throw new Error('追蹤：现在没有要展示的距离');
             resolveTrackerDistance(state, action.targetPlayerId);
+            /**
+             * **女猎手进化 4 级**：「**使用『追蹤』后**〔移動〕×0-1」（用户口径）。
+             *
+             * 触发卡是「追蹤」（`huntress_track_*`），不是「追逐」——
+             * 而 `pickTrackerTarget` 只可能来自追蹤的 `searchTrackerDistance`，
+             * 所以挂在这里正好。
+             *
+             * ⚠ 必须在下面那串 `continueKillerQueue` **之前**建草稿：队列要等它确认完。
+             */
+            huntressTrackerFollowupMove(state);
             continueKillerQueue(state);
             if (!hasPendingKillerChoice(state)) {
                 flushDeferredPlayedCard(state);
@@ -11566,7 +12117,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 state.pendingUnlockDiscard = true;
                 state.pendingKillerDiscards = state.killerHand.length - max2;
                 state.justUnlockedCards = [action.cardId];
-                log(state, `进化入手牌后手牌超过 ${max2}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
+                log(state, `进化入手牌后手牌超过 ${max2}，请自选弃置 ${state.pendingKillerDiscards} 张。`, 'killer');
             }
             /** 这一项选完了 → 问下一项，或做实际结算 */
             advanceEvolutionAfterChoice(state);
@@ -11605,13 +12156,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             const target = state.players[action.statueId];
             if (!target || target.statueIndex == null)
                 throw new Error('请选择一尊雕像');
-            if (target.id === state.killerId) {
-                log(state, '雕像 1 级：这一尊就是当前主雕像，视为不切换。', 'killer');
-                state.pendingStatueEvoTarget = null;
-                state.pendingStatueEvoSwitch = false;
-                advanceEvolutionAfterChoice(state);
-                break;
-            }
+            /**
+             * ⚠ **当前主雕像不能选**（用户口径：
+             * 「雕像的进化切换主雕像不能选当前的主雕像转换」）。
+             *
+             * 和另外两处（开局准备 `pickMainStatue` / 重整旗鼓）同一条口径：
+             * 切换必须换成**另一尊**。以前这里把它当成"视为不切换"悄悄放过去，
+             * 玩家点了却没反应、也看不出发生了什么。
+             */
+            if (target.id === state.killerId)
+                throw new Error('它已经是主雕像 —— 切换要选另一尊（不想换就按「不转换」）');
             state.pendingStatueEvoTarget = target.id;
             /** 选择已经做出了 → 关掉"还没决定"的闸门（真正的切换等结算） */
             state.pendingStatueEvoSwitch = false;
@@ -11638,11 +12192,30 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             const actor = state.players[action.actorPlayerId ?? playerId];
             if (!actor || actor.faction !== 'survivor')
                 throw new Error('仅幸存者可开宝箱');
+            if (!controlsPiece(state, socketId, actor))
+                throw new Error('无权操作该幸存者');
+            /**
+             * ⚠ **开宝箱是「额外行动」**（用户口径：
+             * 「开宝箱算作额外行动」）。
+             *
+             * 所以：
+             *  - **不查** `assertActive` / `mainActionUsed` —— 额外行动"不受小回合限制"，
+             *    做完一般行动、甚至小回合结束了也能开（和 `placeLeverGate` 同口径）；
+             *  - 但**停滞过就不能开**（停滞吃掉本大回合的全部额外行动）；
+             *  - 开了要记 `extraActionUsedThisTurn` —— 「停滞雕像」那一步会看这个标记
+             *     （它要求"本大回合还没做过任何行动，含额外行动"）。
+             *
+             * 界面上它现在只出现在左上角那颗「额外行动」弹窗里，
+             * **不再**在行动区单独放一颗按钮。
+             */
+            if (actor.haltedThisRound)
+                throw new Error('本大回合已经执行过停滞，不能再做额外行动');
             const roomId = state.treasureChests[action.chestId];
             if (!roomId)
                 throw new Error('这个宝箱已经开过了');
             if (actor.roomId !== roomId)
                 throw new Error('必须在自己所在地点开宝箱');
+            actor.extraActionUsedThisTurn = true;
             const cardId = openChest(state, action.chestId);
             if (cardId) {
                 // 宝藏牌算物品、占背包格：走正常的牌面效果结算（gainItem）
@@ -11653,7 +12226,10 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             break;
         }
         case 'removeBoardBlockade': {
-            if (p.faction !== 'killer' && !(isSharedSurvivorMode(state) && state.killerId)) {
+            /** ⚠ 同 `discardKillerCard`：豁免要认清"这根网线是否真的在操作杀手" */
+            if (p.faction !== 'killer' &&
+                !(isSharedSurvivorMode(state) && state.killerId &&
+                    controlsPiece(state, socketId, state.players[state.killerId]))) {
                 throw new Error('仅杀手可移除场上封堵');
             }
             removeBoardBlockade(state, action.doorId);
@@ -11676,6 +12252,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 ? EVOLUTION_TEXT[kind].slice(ack.fromLevel, ack.toLevel).map((t, i) => `${ack.fromLevel + i + 1} 级：${t}`)
                 : [];
             log(state, `已确认进化效果：${texts.join('；') || `等级 ${ack.toLevel}`}。`);
+            /**
+             * ⚠ **记下"已经确认过了"**：④ 步里如果还挂着选择（转主雕像 / 女王点地点…），
+             * `pendingEvolutionAck` 会一直留到 `settleConfirmedEvolution` 末尾 ——
+             * 界面靠这个字段把那颗「确认新效果」按钮**收起来**
+             * （否则玩家再点一次 = 这一级结算两遍：力量 +2 会加两次）。
+             */
+            ack.acked = true;
             /**
              * ⚠ **2对3：确认之后由 `settleConfirmedEvolution` 统一收尾**
              * （先结算完**自己**这一份，再切给另一名杀手确认）。
@@ -11857,7 +12440,10 @@ export function toPublicPlayer(state: GameState, p: PlayerState, viewerFaction: 
         fear: p.fear,
         exposed: p.exposed,
         overFear: p.overFear,
-        handCount: p.hand.length,
+        handCount:
+            viewerFaction === 'survivor' && state.mode !== 'solo' && p.faction === 'killer'
+                ? 0
+                : p.hand.length,
         items: viewerFaction === 'killer' && p.faction === 'survivor' ? {} : { ...p.items },
         inventorySlots: inventorySlotsFor(state, p.id),
         alive: p.alive,
@@ -12198,8 +12784,9 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             legalMoves = [...(state.pendingZombieHordeFrom ?? [])];
         }
         else if (state.pendingZombieHordeTo) {
-            /** 第二步：目的地（走不到时服务端只记一条战报，不拦） */
-            legalMoves = state.map.rooms.map((r) => r.id);
+            /** 第二步：只能选距离 1（僵尸相邻，含杀手密道） */
+            const from = (state.pendingZombieHordeTo as unknown as { from: string }).from;
+            legalMoves = hordeStepRooms(state, from);
         }
         else if (state.pendingBlockadeJob && state.pendingBlockadeJob.removeLeft > 0) {
             legalMoves = roomsForBlockadeRemove(state);
@@ -12343,6 +12930,14 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             (state.phase === 'killerMain' ||
                 state.phase === 'upkeep' ||
                 state.phase === 'noiseReport' ||
+                /**
+                 * ⚠ **杀手欠着弃牌时，单人热座也得看得到他的手牌** ——
+                 * 这笔账可能出现在**幸存者大回合**里（幸存者的「長劍」+
+                 * 【变体1】03「狡猾诡计」摸牌超额）：那时 `phase` 是 `survivorMain`，
+                 * 不带上这一条的话弃牌面板列不出牌、账永远结不掉。
+                 * （只在单人分支里加，多人局该谁看还是谁看。）
+                 */
+                state.pendingKillerDiscards > 0 ||
                 Boolean(state.pendingOverFearWound || state.pendingWhizSearch || state.pendingEvolutionAck) ||
                 (state.phase === 'encounter' && state.encounter?.step === 'attack')));
     const killerFogPhase = viewerFaction === 'killer' && (state.phase === 'survivorMain' || state.phase === 'discovery');
@@ -12415,6 +13010,18 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         : null;
     /** 早期演示牌，不是当前这名杀手的行动牌 */
     const junkKillerInfoNames = new Set(['疾冲', '潜伏', '封堵', '猎杀', '巡逻', '重击', '挥砍']);
+    /**
+     * 杀手这名角色的**全部行动牌**（杀手信息面板按 `locked` 分两组画卡面）。
+     *
+     * `locked`：卡面自带的"开局是锁着的"标记（`content/cards/killers.json`）。
+     * `obtained`：**这张锁定牌杀手已经拿到手了**（用户口径：
+     *   「查看杀手信息中杀手选择的锁定牌也要高光」）——
+     *   判定是"不在 `killerLocked`（还锁着的那份）里、也没被二选一作废"。
+     *   二选一没选中的那张会被移出 `killerLocked` 并记进 `abandonedLockedCards`，
+     *   所以**不会**被误标成已获得。
+     *
+     * ⚠ 这两项都是**公开信息**（牌子就摊在桌面上），双方都下发。
+     */
     const allKillerCards = Object.values(state.cardById)
         .filter((c) => {
         if (c.type !== 'killerAction')
@@ -12425,7 +13032,14 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             return false;
         return c.owner === killerPiece?.characterId || c.owner === killerOwner?.id || c.owner === killerOwner?.name;
     })
-        .map((c) => ({ id: c.id, name: c.name, locked: Boolean(c.locked) }));
+        .map((c) => ({
+        id: c.id,
+        name: c.name,
+        locked: Boolean(c.locked),
+        obtained: Boolean(c.locked) &&
+            !state.killerLocked.includes(c.id) &&
+            !(state.abandonedLockedCards ?? []).includes(c.id),
+    }));
     return {
         roomCode: state.roomCode,
         /** 这一局的标识（客户端用它区分"重新开始后的新一局"） */
@@ -12640,7 +13254,9 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingEvolutionAck: state.pendingEvolutionAck ? { ...state.pendingEvolutionAck } : null,
         pendingWhizSearch: state.pendingWhizSearch,
         pendingOverFearWound: state.pendingOverFearWound ? { ...state.pendingOverFearWound } : null,
-        pendingBlockadeJob: state.pendingBlockadeJob ? { ...state.pendingBlockadeJob } : null,
+        pendingBlockadeJob: viewerFaction === 'killer' && state.pendingBlockadeJob
+            ? { ...state.pendingBlockadeJob }
+            : null,
         georgeNotes: viewerFaction === 'survivor'
             ? state.notesDeck.map((id) => ({ id, name: state.cardById[id]?.name ?? id }))
             : [],
@@ -12722,21 +13338,31 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingKillerDiscards: state.pendingKillerDiscards,
         /** 刚由进化入手、本次超员弃牌里不能弃的牌 */
         justUnlockedCards: [...(state.justUnlockedCards ?? [])],
-        pendingBlockade: state.pendingBlockade,
-        pendingBlockadePlace: state.pendingBlockadePlace,
+        pendingBlockade: viewerFaction === 'killer' && state.pendingBlockade,
+        pendingBlockadePlace: viewerFaction === 'killer' ? state.pendingBlockadePlace : null,
         relocatableBlockades: removableBlockades(state).map((id) => {
             const pair = parseDoor(id);
             return { id, from: pair?.[0] ?? id, to: pair?.[1] ?? id };
         }),
-        pendingSensePair: state.pendingSensePair
+        pendingSensePair: viewerFaction === 'killer' && state.pendingSensePair
             ? {
                 firstRoomId: state.pendingSensePair.firstRoomId,
                 secondRoomId: state.pendingSensePair.secondRoomId,
             }
             : null,
-        pendingSenseColor: state.pendingSenseColor,
-        pendingSenseColorPick: state.pendingSenseColorPick,
-        pendingPathDraft: state.pendingPathDraft ? { ...state.pendingPathDraft, rooms: [...state.pendingPathDraft.rooms] } : null,
+        pendingSenseColor: viewerFaction === 'killer' && state.pendingSenseColor,
+        pendingSenseColorPick: viewerFaction === 'killer' ? state.pendingSenseColorPick : null,
+        /**
+         * 杀手还在点路径时，幸存者看不到这条草稿（选到哪、往哪潜行都不公开）。
+         * 幸存者自己的草稿（幸运币）照常只给幸存者。
+         */
+        pendingPathDraft: (() => {
+            const draft = state.pendingPathDraft;
+            if (!draft) return null;
+            if (draft.owner === 'survivor')
+                return viewerFaction === 'killer' ? null : { ...draft, rooms: [...draft.rooms] };
+            return viewerFaction === 'killer' ? { ...draft, rooms: [...draft.rooms] } : null;
+        })(),
         killerRepairGuess: state.killerRepairGuess,
         rematchReady: [...new Set(state.rematchReady.map((id) => {
                 const pl = Object.values(state.players).find((p) => p.controllerId === id);
@@ -12749,16 +13375,33 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         survivorActionsDone: !killerFogPhase &&
             state.phase === 'survivorMain' &&
             unactedAliveSurvivorIds(state).length === 0,
-        senseHighlight: state.senseHighlight,
-        pendingMoveRange: state.pendingMoveRange,
-        pendingMoveMin: state.pendingMoveMin,
-        pendingMoveTaken: state.pendingMoveRange != null ? Math.max(0, state.lastMovePath.length - 1) : 0,
-        pendingLurkPick: state.pendingLurkPick,
+        senseHighlight: viewerFaction === 'killer' ? state.senseHighlight : null,
+        /**
+         * 杀手牌的移动步数是选择过程。幸存者自己的草稿（幸运币）仍只给幸存者。
+         */
+        pendingMoveRange: (() => {
+            const survivorDraft = state.pendingPathDraft?.owner === 'survivor';
+            if (survivorDraft) return viewerFaction === 'killer' ? null : state.pendingMoveRange;
+            return viewerFaction === 'killer' ? state.pendingMoveRange : null;
+        })(),
+        pendingMoveMin: (() => {
+            const survivorDraft = state.pendingPathDraft?.owner === 'survivor';
+            if (survivorDraft) return viewerFaction === 'killer' ? 0 : state.pendingMoveMin;
+            return viewerFaction === 'killer' ? state.pendingMoveMin : 0;
+        })(),
+        pendingMoveTaken: (() => {
+            const survivorDraft = state.pendingPathDraft?.owner === 'survivor';
+            const taken = state.pendingMoveRange != null ? Math.max(0, state.lastMovePath.length - 1) : 0;
+            if (survivorDraft) return viewerFaction === 'killer' ? 0 : taken;
+            return viewerFaction === 'killer' ? taken : 0;
+        })(),
+        pendingLurkPick: viewerFaction === 'killer' && state.pendingLurkPick,
         pendingAmulet: state.pendingAmulet ? { ...state.pendingAmulet } : null,
-        /** 迪伦·温「坚毅」：等玩家决定是否用坚毅标记 */
-        pendingResilience: state.pendingResilience
-            ? { playerId: state.pendingResilience.playerId, amount: state.pendingResilience.amount }
-            : null,
+        /**
+         * ⚠ 这里原来有个 `pendingResilience`（"要不要用坚毅标记"的询问）——
+         * 已经删掉：坚毅标记是**自动使用**的（`applyDamage` 里直接生效），
+         * 全项目没有任何地方会挂出那个待办，留着只会让人以为"会问一句"。
+         */
         /**
          * 欧菲莉亚「第六感」：待选的 2 张牌（只给出发动搜索的那个人看）。
          */
@@ -12878,8 +13521,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             ? canUseFirstAidKitAt(state, viewPiece)
             : false,
         /** 【雕像・召唤石碑】选门状态（只有杀手需要，客户端据此把地图点击路由过去） */
-        pendingStatueSeal: Boolean(state.pendingStatueSeal),
-        pendingStatueSealFrom: state.pendingStatueSealFrom ?? null,
+        pendingStatueSeal: viewerFaction === 'killer' && Boolean(state.pendingStatueSeal),
+        pendingStatueSealFrom: viewerFaction === 'killer' ? state.pendingStatueSealFrom ?? null : null,
         /**
          * **遭遇防御阶段能选的防御物品**（服务端算，客户端不再自己维护一份表）。
          * 以前两边各有一份清单、不同步，导致狼人宝箱的银质匕首/银质子弹选不出来。
@@ -13026,8 +13669,12 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             /** 【墓穴】遗物牌堆（双方都知道剩几张） */
             relic: (state.relicDeck ?? []).length,
             discard: state.survivorDiscard.length,
-            killerDraw: state.killerDeck.length,
-            killerDiscard: state.killerDiscard.length,
+            /**
+             * 杀手牌堆 / 弃牌堆张数只给杀手。
+             * 单人热座同一个人要切到杀手界面，所以仍下发真实张数。
+             */
+            killerDraw: viewerFaction === 'survivor' && state.mode !== 'solo' ? 0 : state.killerDeck.length,
+            killerDiscard: viewerFaction === 'survivor' && state.mode !== 'solo' ? 0 : state.killerDiscard.length,
         },
         pileCards: {
             search: viewerFaction === 'survivor' ? namedCardsSorted(state, state.searchDeck) : [],
@@ -13142,8 +13789,8 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
                     : {},
             }
             : null,
-        killerHandCount: state.killerHand.length,
-        killerDeckCount: state.killerDeck.length,
+        killerHandCount: viewerFaction === 'survivor' && state.mode !== 'solo' ? 0 : state.killerHand.length,
+        killerDeckCount: viewerFaction === 'survivor' && state.mode !== 'solo' ? 0 : state.killerDeck.length,
         yourKillerHand: showKillerHand ? [...state.killerHand] : null,
         yourKillerLocked: showKillerHand ? [...state.killerLocked] : null,
         winner: state.winner,
@@ -13168,6 +13815,9 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
          * 实际却满地图都能点）。只有杀手视角需要。
          */
         passageStealthAnywhere: viewerFaction === 'killer' && state.passageStealthAnywhere === true,
+        /** 这次潜行落点是不是"任意地点" + 来源名（界面提示用，只给杀手） */
+        pendingPassageAnywhere: viewerFaction === 'killer' && state.pendingPassageAnywhere === true,
+        pendingPassageLabel: viewerFaction === 'killer' ? state.pendingPassageLabel ?? null : null,
         pendingSenseRoom: viewerFaction === 'killer' ? state.pendingSenseRoom : null,
         /**
          * **杀手打牌后拿到的信息区**（感知/追蹤/红外探测…）：
@@ -13198,6 +13848,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
          * **只给杀手** —— 那是杀手的记忆；幸存者本来就知道自己在哪。
          */
         witnessedAt: viewerFaction === 'killer' ? { ...(state.witnessedAt ?? {}) } : {},
+        witnessedRev: viewerFaction === 'killer' ? { ...(state.witnessedRev ?? {}) } : {},
         /** 雕像进化 1 级：等杀手决定要不要转换主雕像 */
         pendingStatueEvoSwitch: viewerFaction === 'killer' ? state.pendingStatueEvoSwitch : false,
         /** 已经点了、但还没确认的那尊（客户端把它的按钮画成"已选"） */
@@ -13262,13 +13913,19 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
                 evolutionEffects: activeEvolutionLines(state, otherId),
             };
         })(),
-        /** 未命名：已选 / 待选的进化卡牌（杀手信息里高亮 + 列效果） */
-        chosenEvolutionCards: viewerFaction === 'killer'
-            ? (state.chosenEvolutionCards ?? []).map((id) => {
-                const c = state.cardById[id];
-                return { id, name: c?.name ?? id, text: c?.text ?? '' };
-            })
-            : [],
+        /**
+         * 未命名：**已经选过的**进化卡牌（杀手信息里列效果 + 卡面金色高亮）。
+         *
+         * ⚠ **双方都下发**（用户口径：「未命名游戏中幸存者应该能看到杀手信息中
+         * 选的进化卡牌和锁定牌」）——「杀手信息」那块面板本来就是双方共用的，
+         * 摊在桌面上的进化卡牌对幸存者也是公开信息。
+         * （⚠ 只公开**已选**的；`pendingEvolutionCardPick` 那个"正在挑"的候选
+         *   仍然只给杀手 —— 那是还没落到桌面上的东西。）
+         */
+        chosenEvolutionCards: (state.chosenEvolutionCards ?? []).map((id) => {
+            const c = state.cardById[id];
+            return { id, name: c?.name ?? id, text: c?.text ?? '' };
+        }),
         pendingEvolutionCardPick: viewerFaction === 'killer' && state.pendingEvolutionCardPick
             ? state.pendingEvolutionCardPick.map((id) => {
                 const c = state.cardById[id];
@@ -13284,7 +13941,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             : null,
         /** 等玩家点门封堵：地点 + 还差几扇（扼杀者的牌、粘液腺体都用这套） */
         pendingBlockadeRoom: viewerFaction === 'killer' ? state.pendingBlockadeRoom : null,
-        pendingBlockadeRemaining: state.pendingBlockadeRemaining ?? 0,
+        pendingBlockadeRemaining: viewerFaction === 'killer' ? (state.pendingBlockadeRemaining ?? 0) : 0,
         /** 核心标记满 5 个时：正准备放到哪个地点（等玩家选移除哪个） */
         pendingCoreOverflowPlaceAt:
             viewerFaction === 'killer' ? state.pendingCoreOverflowPlaceAt : null,
@@ -13362,6 +14019,12 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         pendingCorePick: viewerFaction === 'killer' ? state.pendingCorePick : null,
         pendingCoreRooms: viewerFaction === 'killer' ? [...(state.pendingCoreRooms ?? [])] : [],
         pendingCoreNeighbors: viewerFaction === 'killer' ? [...(state.pendingCoreNeighbors ?? [])] : [],
+        /**
+         * 移动核心标记第一步：已经点过的「从哪一格移走」。
+         * ⚠ 以前**没下发** → 杀手点完第一格，地图上那一格没有任何标记，
+         * 看不出自己点了哪（候选格只剩一个的时候尤其像"点了没反应"）。
+         */
+        pendingCoreFrom: viewerFaction === 'killer' ? state.pendingCoreFrom : null,
         pendingTeleportPick: viewerFaction === 'killer' ? [...(state.pendingTeleportPick ?? [])] : [],
         pendingPassagePick: viewerFaction === 'killer' ? [...(state.pendingPassagePick ?? [])] : [],
         /** 恐詭管道：已选中、等确认的落点（客户端画「确认潜入」按钮用） */

@@ -15,6 +15,7 @@ import {
   applyDamage,
   isKeyCard,
   log,
+  logSplit,
   pushNoise,
   roomName,
   shuffle,
@@ -331,7 +332,11 @@ export function resolveCollapseMove(state: GameState, playerId: string, toRoomId
     if (n) {
       state.killerDiscard = [...state.killerDiscard, ...state.killerHand];
       state.killerHand = [];
-      log(state, `杀手弃掉了**全部手牌**（共 ${n} 张，内容不公开）。`, 'all', true);
+      logSplit(
+        state,
+        '杀手弃掉了**全部手牌**。',
+        `杀手弃掉了**全部手牌**（共 ${n} 张，内容不公开）。`,
+      );
     }
     if (toRoomId) {
       p.roomId = toRoomId;

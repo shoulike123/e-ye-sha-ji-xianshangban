@@ -117,6 +117,7 @@ button.primary { background: #8a3b24; border-color: transparent; }
 }
 .piece.card { border-color: #e8d5a8; background: #e8d5a833; }
 .piece.fear { border-color: #c45c26; background: #c45c2666; }
+.piece.poison { border-color: #6dbe4a; background: #6dbe4a66; }
 .piece.noise { border-color: #f0c14b; background: #f0c14b66; }
 .piece.slot { border-color: #7dffb0; background: #7dffb033; }
 .piece.evolution { border-color: #e07040; background: #e0704033; }

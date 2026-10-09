@@ -4,8 +4,8 @@
   "width": 1000,
   "height": 500,
   "backgrounds": {
-    "survivor": "/Image/Maps/幸存者5.png",
-    "killer": "/Image/Maps/杀手5.png"
+    "survivor": "/Image/Maps/幸存者5.jpg",
+    "killer": "/Image/Maps/杀手5.jpg"
   },
   "rooms": [
     {

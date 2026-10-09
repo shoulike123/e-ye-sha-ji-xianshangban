@@ -199,10 +199,12 @@ export function hasGuardStone(p: PlayerState | undefined): boolean {
 
 /* --------------------------------------------- ⑤ 洞察之球 ---- */
 /**
- * 洞察之球：**特殊行动**，点了就**依次摸两张牌**（各张独立结算，和搜索规则一致）。
+ * 洞察之球：**特殊行动 = 搜索两次**（用户口径：「洞察之球的特殊行动是搜索两次！
+ * 能触发欧菲莉亚的第六感」）。
  *
- * 所以它**不占一般行动之外的东西**：`canUseInsight` 判"在可搜索的地点"，
- * 用掉由 engine 走特殊行动那套（`assertSurvivorMainAction` + `mainActionUsed`）。
+ * 所以它只是"给两次搜索"：用掉走特殊行动那套（`assertSurvivorMainAction` +
+ * `mainActionUsed`），两次搜索本身由 engine 的 `runInsightOrbSearch` 走
+ * **正常搜索流程**（响声 / 钥匙上架 / 第六感全都照常）。
  */
 export function canUseInsight(state: GameState, p: PlayerState | undefined): boolean {
   if (!p?.alive || p.faction !== 'survivor') return false;
@@ -211,7 +213,7 @@ export function canUseInsight(state: GameState, p: PlayerState | undefined): boo
   return Boolean(room?.tags?.includes('searchable'));
 }
 
-/** 用掉洞察之球：从背包移除 + 进普通弃牌堆（实际摸牌由 engine 调 `searchDrawMultiple`） */
+/** 用掉洞察之球：从背包移除 + 进普通弃牌堆（两次搜索由 engine 跑） */
 export function consumeInsight(state: GameState, p: PlayerState): void {
   removeRelic(p, RELIC_IDS.insight);
   discardRelic(state, RELIC_IDS.insight);

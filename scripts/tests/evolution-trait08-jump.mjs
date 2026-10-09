@@ -89,10 +89,19 @@ function finishCurrentLevel(st, tag) {
       continue;
     }
     if (queen) {
-      const err = tryIt({ type: 'pickQueenSpawnRoom', roomId: st.map.rooms[0].id });
-      console.log(`    [${tag}] 选丧尸地点 → ${err ?? 'OK'}`);
-      if (!st.pendingQueenSpawnRooms) continue;
-      tryIt({ type: 'pickQueenSpawnRoom', roomId: st.map.rooms[1].id });
+      /**
+       * ⚠ 女王 4 级是「**选完 2 个地点再按确认**」（用户口径）。
+       * 以前这里是"点两个地点就继续"，选满之后又回头点第一个（=取消），
+       * 一直来回横跳、永远收不了尾；少了确认那一步效果也不会生效。
+       */
+      if (queen.length < 2) {
+        const rid = st.map.rooms[queen.length].id;
+        const err = tryIt({ type: 'pickQueenSpawnRoom', roomId: rid });
+        console.log(`    [${tag}] 选丧尸地点 ${rid} → ${err ?? 'OK'}`);
+        continue;
+      }
+      const err = tryIt({ type: 'confirmEvoRooms' });
+      console.log(`    [${tag}] 确认生成丧尸 → ${err ?? 'OK'}`);
       continue;
     }
     break;

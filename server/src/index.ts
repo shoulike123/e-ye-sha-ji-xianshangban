@@ -33,7 +33,11 @@ const rooms = new RoomManager(content);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '4mb' }));
-app.use('/Image', express.static(IMAGE_ROOT));
+/**
+ * 图片（地图底图、卡面）一动都不动，给浏览器一个长缓存。
+ * ⚠ 浏览器在这段时间里**不会再问服务器**：换了图要 `Ctrl+F5` 才会立刻看到。
+ */
+app.use('/Image', express.static(IMAGE_ROOT, { maxAge: '7d' }));
 app.use('/map-debug', express.static(MAP_DEBUG_ROOT));
 app.use('/map-calibrate', express.static(MAP_CALIBRATE_ROOT));
 app.use('/ui-debug', express.static(UI_DEBUG_ROOT));
@@ -155,13 +159,49 @@ app.put('/api/ui/survivor-layout', (req, res) => {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*' },
+  /**
+   * 每次行动的"新局面"是一大坨 JSON（字段名高度重复），
+   * 压缩之后通常只剩十分之一 —— 异地联机靠这条最省。
+   * `threshold` 是"小于 1KB 就别压了"，省得为几句小消息白费 CPU。
+   */
+  perMessageDeflate: { threshold: 1024 },
 });
+
+/** 房间里每条网线已经收过哪一版"静态大块"（见 sendState） */
+const sentStatic = new Map<string, string>();
+
+/**
+ * 发一份快照给某条网线。
+ *
+ * ⚠ **为什么不能全量发**：快照里有两块**一整局都不会变**的大东西 ——
+ * `cardById`（全部卡牌定义，约 43 KB）和 `map`（地图坐标/砖块，约 11 KB），
+ * 加起来占了整份快照（约 73 KB）的四分之三。
+ * 每点一次行动、给每个人都重发一遍，异地联机（Radmin / 隧道）就会明显卡。
+ *
+ * 所以：**第一次发给这条网线时发全**，之后只发会变的那部分；
+ * 客户端发现少了这两个字段时，就沿用上一次收到的（见 `useGameSocket.ts`）。
+ *
+ * - 换地图 → `map.id` 变了 → 指纹变 → 自动重发全量 ✓
+ * - 网线重连会拿到新的 `socket.id` → 也会重发全量 ✓
+ */
+function sendState(sid: string, snapshot: unknown) {
+  const sig = String((snapshot as { map?: { id?: string } })?.map?.id ?? '');
+  if (sentStatic.get(sid) === sig) {
+    const light = { ...(snapshot as Record<string, unknown>) };
+    delete light.cardById;
+    delete light.map;
+    io.to(sid).emit('state', light);
+    return;
+  }
+  sentStatic.set(sid, sig);
+  io.to(sid).emit('state', snapshot);
+}
 
 /** 房间里每个人看到的信息不一样（杀手看不到幸存者背包），所以要挨个发快照 */
 function pushToRoom(roomCode: string) {
   for (const sid of rooms.listConnectedSockets(roomCode)) {
     const s = rooms.snapshotFor(sid);
-    if (s) io.to(sid).emit('state', s);
+    if (s) sendState(sid, s);
   }
 }
 
@@ -213,7 +253,7 @@ io.on('connection', (socket) => {
       const snap = rooms.create(socket.id, payload?.name ?? '房主', payload?.mapId);
       socket.join(snap.roomCode);
       cb?.({ ok: true, state: snap });
-      socket.emit('state', snap);
+      sendState(socket.id, snap);
     } catch (e) {
       cb?.({ ok: false, error: (e as Error).message });
     }
@@ -244,18 +284,18 @@ io.on('connection', (socket) => {
          * 再让他离开这个 socket.io 房间，后面的广播就不会再打扰他。
          */
         for (const { socketId: sid, snapshot } of result.snapshots) {
-          io.to(sid).emit('state', snapshot);
+          sendState(sid, snapshot);
           io.sockets.sockets.get(sid)?.leave(result.roomCode);
         }
         return;
       }
       for (const { socketId: sid, snapshot } of result.snapshots) {
-        io.to(sid).emit('state', snapshot);
+        sendState(sid, snapshot);
       }
     } catch (e) {
       cb?.({ ok: false, error: (e as Error).message });
       const snap = rooms.snapshotFor(socket.id);
-      if (snap) socket.emit('state', snap);
+      if (snap) sendState(socket.id, snap);
     }
   });
 
@@ -286,18 +326,20 @@ io.on('connection', (socket) => {
     if (!result) return;
     for (const sid of rooms.listConnectedSockets(result.roomCode)) {
       const snap = rooms.snapshotFor(sid);
-      if (snap) io.to(sid).emit('state', snap);
+      if (snap) sendState(sid, snap);
     }
   });
 
   socket.on('disconnect', () => {
+    // 这条网线走了：把"已经发过静态大块"的记录也清掉（重连是新 id，本来也会重发）
+    sentStatic.delete(socket.id);
     const roomCode = rooms.roomCodeOf(socket.id);
     const result = rooms.leave(socket.id);
     if (roomCode) dropCursor(socket.id, roomCode);
     if (!result) return;
     for (const sid of rooms.listConnectedSockets(result.roomCode)) {
       const snap = rooms.snapshotFor(sid);
-      if (snap) io.to(sid).emit('state', snap);
+      if (snap) sendState(sid, snap);
     }
   });
 });

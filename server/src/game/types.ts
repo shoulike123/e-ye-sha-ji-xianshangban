@@ -188,8 +188,12 @@ export interface PlayerState {
   /** 本大回合这个雕像是否被幸存者停滞（停滞则移动/搜索前取消） */
   statueHalted: boolean;
   /**
-   * 迪伦·温（survivor9）「坚毅」：开局有一个**坚毅标记**。
-   * 移除该标记可以**防止第一次伤害**（和古代护符同类的免伤机制）。
+   * 迪伦·温「坚毅」：开局有一个**坚毅标记**，
+   * 移除它可以**防止第一次伤害**（和古代护符同类的免伤机制）。
+   *
+   * ⚠ **它是自动使用的**（用户口径：「坚毅标记自动使用」）——
+   * 第一次即将受伤时由 `effects.applyDamage` 直接生效、**不问一句**，
+   * 所以这里**没有** `pendingResilience` 那种"等玩家决定"的待办。
    */
   resilienceToken?: boolean;
   /**
@@ -710,9 +714,10 @@ export interface GameState {
   pendingLurkPick: boolean;
   pendingAmulet: PendingAmulet | null;
   /**
-   * 迪伦·温「坚毅」：等玩家决定要不要用**坚毅标记**挡掉这次伤害。
+   * ⚠ 这里原来有个 `pendingResilience`（"要不要用坚毅标记挡这次伤害"）——
+   * **已删除**：坚毅标记是**自动使用**的（`effects.applyDamage` 里直接生效），
+   * 从来没有代码会挂出它。
    */
-  pendingResilience: { playerId: string; amount: number; sourceId: string } | null;
   /**
    * 欧菲莉亚「第六感」：搜索时摸 2 张，等玩家选 1 张留下，
    * 另 1 张**放回搜索牌库顶**（返回的卡牌不会触发警报）。
@@ -996,6 +1001,14 @@ export interface GameState {
   relicMarkerFaceUp: boolean;
   /** 【墓穴】R6 遗物牌堆（抽牌堆），牌背朝上 */
   relicDeck: string[];
+  /**
+   * 【墓穴遗物】洞察之球：**还剩几次搜索没跑完**（特殊行动 = 搜索两次）。
+   *
+   * 用户口径：「洞察之球的特殊行动是**搜索两次**！能触发欧菲莉亚的第六感」。
+   * 第六感会挂出"摸 2 选 1"、把流程停住，所以第二次搜索要等选完再接着跑
+   * （见 `engine.ts` 的 `runInsightOrbSearch` / `resolveSixthSense`）。
+   */
+  pendingInsightSearches: number;
 
   // —— 女猎手 / 狼人专用 ——
   /** 猎手本能：杀手已选、等待在行动区确认的感知地点 */
@@ -1016,6 +1029,11 @@ export interface GameState {
    * 只用于**杀手视角**把立绘摆到那个位置，不改变幸存者真实位置。
    */
   witnessedAt: Record<string, string>;
+  /**
+   * 和 `witnessedAt` 配对：每记一次位置就 +1。
+   * 客户端用它判断「这是新暴露的位置」，避免把杀手后来手动移开的立绘拽回去。
+   */
+  witnessedRev: Record<string, number>;
   /**
    * 君臨天下「目击者移动」结算完的收尾回调。
    * 由 engine 注入 —— killerCards 不能反向 import engine（会成环）。
@@ -1084,6 +1102,13 @@ export interface GameState {
   passagePowerBonus: number;
   /** 保護色：「恐詭管道」可以潜行到任何地点（`stealthToPassage` 里读） */
   passageStealthAnywhere: boolean;
+  /**
+   * 这次「潜行落点」是不是**任意地点**（保護色版的恐詭管道 / 女猎手「陷阱重置」）——
+   * 界面据此换提示语（"可以潛行到任何地点" vs "请点一个有秘密通道的地点"）。
+   */
+  pendingPassageAnywhere: boolean;
+  /** 这次潜行的来源名（「恐詭管道」/「陷阱重置」），只用于战报与界面提示 */
+  pendingPassageLabel: string | null;
   /** 音波感知：回合开始时按响声揭示 */
   sonarRevealActive: boolean;
   /** 粘液腺體：回合结束封堵 */
@@ -1290,8 +1315,7 @@ export interface GameState {
   /** 等杀手为「抓住他們！」选一个僵尸去搜索 */
   pendingZombieSearch: string[] | null;
   /** 等杀手为「屍群來了」选出发地点 */
-  pendingZombieHordeFrom: string[] | null;
-  /** 等杀手为「屍群來了」选目的地（记下出发地） */
+  pendingZombieHordeFrom: string[] | null;  /** 等杀手为「屍群來了」选目的地（记下出发地） */
   pendingZombieHordeTo: { from: string } | null;
   /** 等杀手为「屍體爆炸」选要献祭的僵尸 */
   pendingZombieSacrifice: string[] | null;
@@ -1319,10 +1343,15 @@ export interface GameState {
    */
   queenEncounteredThisTurn?: boolean;
   /**
-   * 女猎手进化 4 级：这次路径草稿是「追逐」造成的，
-   * 走完之后要再追加一次〔移動〕×0-1。
+   * **摸牌堆见底、又赶上进化时"先不洗牌"的标记**（用户口径：
+   * 「杀手先执行进化效果再洗牌」）。
+   * 进化结算完由 `resumeDeferredDeckRecycle` 补洗 + 把欠的摸牌/弃牌补上。
    */
-  chaseFollowupPending?: boolean;
+  pendingDeckRecycle?: boolean;
+  /** 那次"欠"的摸牌张数（牌堆见底时还没摸完的） */
+  pendingDeckDrawsLeft?: number;
+  /** 那次"欠"的弃牌张数（`discardFromKillerDeck` 中途见底） */
+  pendingDeckDiscardsLeft?: number;
   /**
    * 女王等级 4：等杀手在**任意 2 个不同地点**各生成 1 个僵尸。
    * 存已选的地点（最多 2 个）。
@@ -1402,6 +1431,17 @@ export interface GameState {
      * 与"从先手开始"不一致。
      */
     startKillerId?: string | null;
+    /**
+     * **杀手已经点过「确认新效果」**（这一级正在走"执行效果"那一步）。
+     *
+     * ④ 步里还挂着"要你选的东西"（转主雕像 / 女王点地点 / 扼杀者放核心…）时
+     * `pendingEvolutionAck` **还没清**（清在 `settleConfirmedEvolution` 末尾），
+     * 界面要靠这个字段区分：
+     *  - `false/undefined` = 还等你按「确认新效果」；
+     *  - `true` = 已经确认过了，现在只是在做效果里的选择 ——
+     *    这时**不能再画「确认新效果」那颗按钮**（再点一次会把这一级结算两遍）。
+     */
+    acked?: boolean;
   } | null;
   /** 幽魂 2 级：呼啸而过结算完，可选弃 2 张搜索当前格 */
   pendingWhizSearch: boolean;
@@ -1625,8 +1665,14 @@ export type ClientAction =
    * "当前行动者"头上 → 然后因为那人不在 R6 而报错。
    */
   | { type: 'drawRelic'; actorPlayerId?: string }
-  /** 【墓穴遗物】鏡之門戶：额外行动，传送到 🌀 螺旋地点 */
-  | { type: 'useMirrorPortal'; toRoomId?: string }
+  /**
+   * 【墓穴遗物】鏡之門戶：**额外行动**，传送到 🌀 螺旋地点。
+   *
+   * `actorPlayerId` = 是**哪名幸存者**在传送（和 `drawRelic` / `openChest` 同一套写法）：
+   * 额外行动是按每名幸存者列按钮的，不带它就会被算到"当前行动者"头上 ——
+   * 于是"做完小回合的另一个人想传送"会被判成"这个人没有鏡之門戶"。
+   */
+  | { type: 'useMirrorPortal'; toRoomId?: string; actorPlayerId?: string }
   /** 【墓穴遗物】洞察之球：在搜索地点花特殊行动，本回合再搜一次 */
   | { type: 'useInsightOrb' }
   /**
@@ -1663,6 +1709,8 @@ export type ClientAction =
   | { type: 'pickNoteBlockade'; doorId: string }
   /** 乔治「拆封堵」笔记：确认拆除已选的封堵 */
   | { type: 'confirmNoteBlockade' }
+  /** 乔治「拆封堵」笔记：取消这次选择（笔记不消耗） */
+  | { type: 'cancelNoteBlockade' }
   /** 思维敏捷：挑一张笔记（noteId 为空 = 放弃） */
   | { type: 'chooseGeorgeNote'; noteId: string | null }
   /** 遭遇防御：用「鸿运当骰」重掷选中的骰子，或接受当前结果 */
@@ -1736,14 +1784,19 @@ export type ClientAction =
   | { type: 'useCrossbow'; actorPlayerId?: string }
   /** 十字弩：确认消灭选中的僵尸 */
   | { type: 'confirmCrossbow'; zombieIds: string[]; actorPlayerId?: string }
+  /** 十字弩：取消这次选择（不消耗一般行动） */
+  | { type: 'cancelCrossbow'; actorPlayerId?: string }
   /** 女王等级 4：点 2 个不同地点各生成 1 个僵尸 */
   | { type: 'pickQueenSpawnRoom'; roomId: string }
   /** 扼杀者进化 4 级：点 2 个不同地点各放一个核心标记 */
   | { type: 'pickStranglerCoreRoom'; roomId: string }
+  /**
+   * 【进化 4 级】**确认**已经在地图上选好的那 2 个地点。
+   * 用户口径：「选择要确认」—— 女王生成丧尸 / 扼杀者放核心标记共用这一个动作。
+   */
+  | { type: 'confirmEvoRooms' }
   /** 女王对局：进入游戏后指定十字弩持有者 */
   | { type: 'pickCrossbowHolder'; holderId: string }
-  /** 迪伦·温「坚毅」：用坚毅标记挡掉这次伤害（或不用） */
-  | { type: 'confirmResilience'; use: boolean }
   /** 欧菲莉亚「言语鼓励」：移除目标全部恐惧 + 放鼓励标记 */
   | { type: 'useEncourage'; targetPlayerId?: string; actorPlayerId?: string }
   /** 凯莱布「幸运币」：弃搜索牌库顶 1 张（钥匙→治疗，否则→移动 0-2） */
@@ -1757,7 +1810,15 @@ export type ClientAction =
   /** 可选效果（牌面写了「可以」）：执行还是跳过 */
   | { type: 'resolveOptionalEffect'; use: boolean }
   | { type: 'clearFear' }
-  | { type: 'removeBlockade' }
+  /**
+   * 幸存者**一般行动：拆封堵**。
+   *
+   * ⚠ `doorId` = 拆**哪一扇门**上的封堵（用户口径：「幸存者移除封堵应该是
+   * **他自己选择移除**，不是自动」）—— 以前只传房间号，
+   * 服务端在那间屋子上的几块封堵里**随便挑一块**拆掉。
+   * 只传房间号也行：那样只有在**该地点正好一块封堵**时才成立，多块会要求选。
+   */
+  | { type: 'removeBlockade'; doorId?: string }
   | { type: 'tradeItem'; targetPlayerId: string; itemId: string; amount?: number; receiveItemId?: string; fromPlayerId?: string }
   /**
    * 【分头行动】**给钥匙**（额外行动）：同一地点的幸存者之间给任意把
@@ -1780,7 +1841,8 @@ export type ClientAction =
       itemId?: string;
       actorPlayerId?: string;
     }
-  | { type: 'useItem'; itemId: string; targetPlayerId?: string; toRoomId?: string; useToolbox?: boolean; actorPlayerId?: string }
+  /** `doorId`：手斧拆的是**哪一扇门**上的封堵（多块时由玩家自己选，用户口径见 `removeBlockade`） */
+  | { type: 'useItem'; itemId: string; targetPlayerId?: string; toRoomId?: string; doorId?: string; useToolbox?: boolean; actorPlayerId?: string }
   | { type: 'useSuitcase'; actorPlayerId?: string }
   | { type: 'playKillerCard'; cardId: string; toRoomId?: string; payCardIds?: string[] }
   | { type: 'finishPendingMove' }
@@ -1904,8 +1966,6 @@ export interface PublicSnapshot {
   } | null;
   /** 观看者能不能点【重新开始】（观众不行） */
   canRequestRestart?: boolean;
-  /** 迪伦·温「坚毅」：等玩家决定是否用坚毅标记 */
-  pendingResilience?: { playerId: string; amount: number } | null;
   /** 鼓励标记持有者（**只给幸存者**，杀手看不到） */
   encouragedIds?: string[];
   /** 凯莱布幸运币：本回合是否已用 */
@@ -2011,7 +2071,7 @@ export interface PublicSnapshot {
   killerTurnPowerBonus?: number;
   killerPowerLabel?: string;
   evolutionEffects?: Array<{ level: number; text: string }>;
-  pendingEvolutionAck?: { fromLevel: number; toLevel: number } | null;
+  pendingEvolutionAck?: { fromLevel: number; toLevel: number; acked?: boolean } | null;
   pendingWhizSearch?: boolean;
   pendingOverFearWound?: { targetId: string } | null;
   pendingBlockadeJob?: BlockadeJob | null;
@@ -2119,6 +2179,9 @@ export interface PublicSnapshot {
    * （不再是"带秘密通道的地点"）。客户端用它把「或」选项的按钮文案写准。
    */
   passageStealthAnywhere?: boolean;
+  /** 见 `GameState.pendingPassageAnywhere` / `pendingPassageLabel`（落点面板的提示语） */
+  pendingPassageAnywhere?: boolean;
+  pendingPassageLabel?: string | null;
   pendingSenseRoom?: string | null;
   /**
    * **杀手打牌后拿到的信息区**（地图右边那块，类似战报）——
@@ -2145,6 +2208,8 @@ export interface PublicSnapshot {
   pendingMoveSurvivorPick?: string[];
   /** 杀手地图上的「目击立绘」位置（只有杀手视角） */
   witnessedAt?: Record<string, string>;
+  /** 目击立绘的版本号（只有杀手视角）。变了才自动挪一次立绘。 */
+  witnessedRev?: Record<string, number>;
   /** 「或」牌：等杀手选一组效果 */
   pendingEffectChoice?: {
     options: import('../content/schema.js').EffectDef[][];
@@ -2257,6 +2322,8 @@ export interface PublicSnapshot {
   pendingCorePick?: string | null;
   pendingCoreRooms?: string[];
   pendingCoreNeighbors?: string[];
+  /** 移动核心标记第一步：已点过的「从哪一格移走」（只给杀手，客户端画金圈） */
+  pendingCoreFrom?: string | null;
   pendingTeleportPick?: string[];
   pendingPassagePick?: string[];
   /** 恐詭管道：已选中、等确认的落点（只给杀手） */

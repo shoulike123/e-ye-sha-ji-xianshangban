@@ -432,7 +432,7 @@ export interface PublicSnapshot {
   killerTurnPowerBonus?: number;
   killerPowerLabel?: string;
   evolutionEffects?: Array<{ level: number; text: string }>;
-  pendingEvolutionAck?: { fromLevel: number; toLevel: number } | null;
+  pendingEvolutionAck?: { fromLevel: number; toLevel: number; acked?: boolean } | null;
   pendingWhizSearch?: boolean;
   pendingOverFearWound?: { targetId: string } | null;
   pendingBlockadeJob?: {
@@ -714,6 +714,13 @@ export interface PublicSnapshot {
    * （不再是"带秘密通道的地点"）。用来把「或」选项的按钮文案写准。
    */
   passageStealthAnywhere?: boolean;
+  /**
+   * **这次**潜行落点是不是"任意地点"（保護色版的恐詭管道 / 女猎手「陷阱重置」），
+   * 以及来源名。落点面板的提示语按它写 —— 不能用 `passageStealthAnywhere`：
+   * 那是"保護色常驻被动"，陷阱重置用一次也会是"任意地点"，但来源不同。
+   */
+  pendingPassageAnywhere?: boolean;
+  pendingPassageLabel?: string | null;
   pendingSenseRoom?: string | null;
   /**
    * **杀手打牌后拿到的信息**（感知看到了谁、追蹤距离、红外探测结果…）。
@@ -741,6 +748,8 @@ export interface PublicSnapshot {
   pendingMoveSurvivorPick?: string[];
   /** 杀手地图上的「目击立绘」位置（只有杀手视角有值） */
   witnessedAt?: Record<string, string>;
+  /** 目击立绘的版本号（只有杀手视角）。变了才自动挪一次立绘。 */
+  witnessedRev?: Record<string, number>;
   /** 「或」牌：等杀手选一组效果 */
   pendingEffectChoice?: {
     options: Array<Array<{ op: string; value?: unknown; min?: number }>>;
@@ -861,8 +870,6 @@ export interface PublicSnapshot {
   } | null;
   /** 观看者不能点【重新开始】；大厅/选人阶段也不显示 */
   canRequestRestart?: boolean;
-  /** 迪伦·温「坚毅」：等玩家决定是否用坚毅标记 */
-  pendingResilience?: { playerId: string; amount: number } | null;
   /** 鼓励标记持有者（**只给幸存者**） */
   encouragedIds?: string[];
   /** 凯莱布幸运币：本回合是否已用 */
@@ -889,6 +896,8 @@ export interface PublicSnapshot {
   /** 等杀手点地点（放/移核心标记、传送、酸液、恐詭管道） */
   pendingCorePick?: string | null;
   pendingCoreRooms?: string[];
+  /** 移动核心标记第一步：**从哪一格移走**（已选中的那一格 → 地图上画金圈） */
+  pendingCoreFrom?: string | null;
   pendingCoreNeighbors?: string[];
   pendingTeleportPick?: string[];
   pendingPassagePick?: string[];
@@ -918,7 +927,12 @@ export interface PublicSnapshot {
   trapPartRooms?: string[];
   /** 遭遇防御掷完骰、等决定是否用「鸿运当骰」重掷 */
   pendingDice?: { playerId: string; values: number[]; attack: number; extra: number } | null;
-  allKillerCards?: Array<{ id: string; name: string; locked: boolean }>;
+  /**
+   * 杀手的全部行动牌（杀手信息面板用）。
+   * `locked` = 卡面自带的"开局是锁着的"；`obtained` = **这张锁定牌已经拿到手了**
+   * （面板里给它加金色轮廓高亮 —— 用户口径「杀手选择的锁定牌也要高光」）。
+   */
+  allKillerCards?: Array<{ id: string; name: string; locked: boolean; obtained?: boolean }>;
   survivorActionsDone?: boolean;
   activePlayerId: string | null;
   legalMoves: string[];
@@ -1016,8 +1030,12 @@ export type ClientAction =
    * 弹窗是按每个人列按钮的，不带就会记到"当前行动者"头上。
    */
   | { type: 'drawRelic'; actorPlayerId?: string }
-  /** 【墓穴遗物】鏡之門戶：额外行动传送到 🌀 螺旋地点 */
-  | { type: 'useMirrorPortal'; toRoomId?: string }
+  /**
+   * 【墓穴遗物】鏡之門戶：**额外行动**传送到 🌀 螺旋地点。
+   *
+   * `actorPlayerId` = 是哪名幸存者在传送（额外行动弹窗按每个人列按钮）。
+   */
+  | { type: 'useMirrorPortal'; toRoomId?: string; actorPlayerId?: string }
   /** 【墓穴遗物】洞察之球：特殊行动，本回合再搜一次 */
   | { type: 'useInsightOrb' }
   /** 【雕像・召唤石碑】点一个地点选门（两段式） */
@@ -1059,6 +1077,8 @@ export type ClientAction =
   | { type: 'pickNoteBlockade'; doorId: string }
   /** 乔治「拆封堵」笔记：确认拆除已选的封堵 */
   | { type: 'confirmNoteBlockade' }
+  /** 乔治「拆封堵」笔记：取消这次选择（笔记不消耗） */
+  | { type: 'cancelNoteBlockade' }
   /** 思维敏捷：挑一张笔记（null = 放弃） */
   | { type: 'chooseGeorgeNote'; noteId: string | null }
   /** 遭遇防御：用「鸿运当骰」重掷选中的骰子 / 接受当前结果 */
@@ -1110,13 +1130,18 @@ export type ClientAction =
   | { type: 'pickZombieSacrifice'; zombieId: string }
   | { type: 'useCrossbow' }
   | { type: 'confirmCrossbow'; zombieIds: string[] }
+  /** 十字弩：取消这次选择（不消耗一般行动） */
+  | { type: 'cancelCrossbow' }
   | { type: 'pickQueenSpawnRoom'; roomId: string }
   /** 扼杀者进化 4 级：点 2 个不同地点各放一个核心标记 */
   | { type: 'pickStranglerCoreRoom'; roomId: string }
+  /**
+   * 【进化 4 级】**确认**已经在地图上选好的那 2 个地点。
+   * 用户口径：「选择要确认」—— 女王生成丧尸 / 扼杀者放核心标记共用这一个动作。
+   */
+  | { type: 'confirmEvoRooms' }
   /** 女王对局：进入游戏后指定十字弩持有者 */
   | { type: 'pickCrossbowHolder'; holderId: string }
-  /** 迪伦·温「坚毅」：用坚毅标记挡掉这次伤害（或不用） */
-  | { type: 'confirmResilience'; use: boolean }
   /** 欧菲莉亚「言语鼓励」 */
   | { type: 'useEncourage'; targetPlayerId?: string; actorPlayerId?: string }
   /** 凯莱布「幸运币」 */
@@ -1136,7 +1161,8 @@ export type ClientAction =
   /** 开局准备：雕像选定主雕像（选定后本局锁定） */
   | { type: 'chooseMainStatue'; statueId: string }
   | { type: 'clearFear' }
-  | { type: 'removeBlockade' }
+  /** `doorId`：拆**哪一扇门**上的封堵（多块时自己选，见服务端同一口径） */
+  | { type: 'removeBlockade'; doorId?: string }
   | { type: 'tradeItem'; targetPlayerId: string; itemId: string; amount?: number; receiveItemId?: string; fromPlayerId?: string }
   | { type: 'respondTrade'; accept: boolean }
   /** 【分头行动】给钥匙（额外行动；同一地点，对方确认） */
@@ -1160,7 +1186,7 @@ export type ClientAction =
       itemId?: string;
       actorPlayerId?: string;
     }
-  | { type: 'useItem'; itemId: string; targetPlayerId?: string; toRoomId?: string; actorPlayerId?: string }
+  | { type: 'useItem'; itemId: string; targetPlayerId?: string; toRoomId?: string; doorId?: string; actorPlayerId?: string }
   | { type: 'useSuitcase'; actorPlayerId?: string }
   | { type: 'playKillerCard'; cardId: string; toRoomId?: string; payCardIds?: string[] }
   | { type: 'finishPendingMove' }

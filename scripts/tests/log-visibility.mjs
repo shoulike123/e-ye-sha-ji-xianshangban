@@ -157,7 +157,8 @@ console.log('=== ② 幸存者的行为不进杀手战报 ===');
   st.searchDeck = ['sk_key_1', ...st.searchDeck.filter((id) => id !== 'sk_key_1')];
   handleAction(st, s.id, { type: 'search' }, content);
   if (st.logs.some((l) => l.text.includes('钥匙放入钥匙架'))) {
-    ok(!killerLogText(st).includes('钥匙放入钥匙架'), '杀手看不到「钥匙放入钥匙架」');
+    /** ⚠ 口径改了：钥匙的发现属于「整轮中立即向杀手报告」的那几项（作者明确列举） */
+    ok(killerLogText(st).includes('钥匙放入钥匙架'), '杀手立即看得到「钥匙放入钥匙架」');
   } else {
     ok(true, '（没摸到钥匙，跳过）');
   }
@@ -187,7 +188,8 @@ console.log('=== ③ 3 类事件立即向双方报告 ===');
    * 陷阱现在是两条：幸存者版（带名字）+ 杀手版（「哪里的哪种陷阱被触发」）。
    */
   ok(killerLogText(st).includes('被触发'), '杀手立即看到"哪里踩了陷阱"（现象版）');
-  ok(!killerLogText(st).includes(s.name), '杀手那份**不写是谁踩的**', s.name);
+  /** ⚠ 口径改了：「受到伤害就明确说如何受到伤害」+「捕熊陷阱没错，不用改」→ 人名该出现 */
+  ok(killerLogText(st).includes(s.name), '杀手那份**写明是谁受了伤**', s.name);
 }
 {
   /** ③ 拆除封堵 */

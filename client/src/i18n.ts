@@ -65,6 +65,19 @@ export const ITEM_LABEL: Record<string, string> = {
   /** 狼人宝藏（开宝箱抽到的物品） */
   silver_dagger: '银质匕首',
   silver_bullet: '银质子弹',
+  /**
+   * 【墓穴・遺物室】的 5 张遗物。
+   *
+   * ⚠ 它们是**背包物品**（物品 id = 卡牌 id），所以会出现在"请弃置装备"这类
+   * 列表里 —— 以前这里没有对应项，界面就直接显示 `relic_shield` 这种英文 id
+   * （用户报的「弃牌时遗物的显示是英文」）。名字和 `server/src/game/effects.ts`
+   * 的 `itemName()` 保持一致。
+   */
+  relic_key: '鑰匙',
+  relic_mirror: '鏡之門戶',
+  relic_shield: '剛毅之盾',
+  relic_guard: '守護之石',
+  relic_insight: '洞察之球',
 };
 
 /** 房间显示名。杀手有时看到另一套地名；没有就显示“编号+中文名” */

@@ -28,6 +28,7 @@ import {
   addFear,
   addKillerTurnPower,
   applyDamage,
+  cappedKillerPower,
   canonicalDoorId,
   clearTrapAfterEncounter,
   doorId,
@@ -35,6 +36,7 @@ import {
   isDoorBlocked,
   isDoorEdge,
   log,
+  logSplit,
   parseDoor,
   removableBlockades,
   roomName,
@@ -128,7 +130,7 @@ export const EVOLUTION_TEXT: Record<KillerKind, string[]> = {
     '/',
     '解锁「陷阱重置」',
     '所有卡牌费用 -1（最少为 0）',
-    '使用「追逐」后〔移动〕×0-1',
+    '使用「追蹤」后〔移動〕×0-1',
     '发生遭遇时，在攻击前伤害所有目标',
   ],
   /** 狼人：等级 2 解锁「超听觉」 */
@@ -210,15 +212,17 @@ export function activeEvolutionLines(
   return EVOLUTION_TEXT[kind].slice(0, lv).map((text, i) => ({ level: i + 1, text }));
 }
 
-/** 永久力量 + 本回合临时力量，不超过上限 10 */
+/**
+ * 杀手当前力量。永久、本回合、持续到下回合、下一次攻击、永久加攻
+ * 全部算进去，**任何时候不超过上限**（默认 10）。
+ * 次雕像和僵尸没有另一套力量，用的就是这个数。
+ */
 export function effectiveKillerPower(state: GameState): number {
-  const cap = state.rules.killerPowerMax ?? 10;
-  return Math.min(cap, Math.max(0, state.killerPower + (state.killerTurnPowerBonus ?? 0)));
+  return cappedKillerPower(state);
 }
 
 export function formatKillerPowerLabel(state: GameState): string {
-  const bonus = state.killerTurnPowerBonus ?? 0;
-  return bonus > 0 ? `${state.killerPower}+${bonus}` : `${String(state.killerPower)}`;
+  return String(cappedKillerPower(state));
 }
 
 /**
@@ -234,20 +238,26 @@ export function huntressCostDiscount(state: GameState): number {
 }
 
 /**
- * **女猎手进化 4 级**：「使用『追逐』后〔移動〕×0-1」。
+ * **女猎手进化 4 级**：「使用『**追蹤**』后〔移動〕×0-1」。
  *
- * 打出追逐并**走完它自己的那 1 步之后**，追加一次 0-1 步的移动草稿
- * （可以不移动 = 0 步，点确认即可）。
- * 直接建草稿（和 `pickMoveSurvivor` 同一套结构），不经过"潜行"那套。
+ * ⚠ **触发卡是「追蹤」（`huntress_track_*`），不是「追逐」**（用户口径）。
+ * 以前这里挂在 `huntress_chase_`（追逐）上，而且规则文本也写成了「追逐」——
+ * 所以那张牌打出来根本没给这次追加移动。
+ *
+ * 时机：追蹤的**〔搜索〕＋展示距离**整条结算完之后，追加一次 0-1 步的移动草稿
+ * （可以不移动 = 0 步，点确认即可）。直接建草稿（和 `pickMoveSurvivor` 同一套结构），
+ * 不经过"潜行"那套。
+ *
+ * ⚠ 必须在 `continueKillerQueue` **之前**建草稿 —— 队列要等它确认完才继续。
  */
-export function huntressChaseFollowupMove(state: GameState): boolean {
+export function huntressTrackerFollowupMove(state: GameState): boolean {
   if (killerKindOf(state) !== 'huntress') return false;
   if (state.killerLevel < 4) return false;
   const k = killerActorOrNull(state);
   if (!k?.roomId) return false;
   if (state.pendingPathDraft) return false;
   state.pendingPathDraft = { min: 0, max: 1, rooms: [k.roomId] };
-  log(state, '女猎手进化 4 级：追逐之后可以再〔移動〕×0-1（不想动就直接确认）。', 'killer');
+  log(state, '女猎手进化 4 级：追蹤之后可以再〔移動〕×0-1（不想动就直接确认）。', 'killer');
   return true;
 }
 
@@ -638,10 +648,26 @@ function settleEvolutionForCurrentKiller(
   if (state.killerHand.length > max) {
     state.pendingUnlockDiscard = true;
     state.pendingKillerDiscards = state.killerHand.length - max;
-    /** 刚入手的锁定牌本次不能弃（满手牌时摸进来的牌不在此列，那些就该弃） */
-    state.justUnlockedCards = [...unlocked];
-    log(state, `进化入手牌后手牌超过 ${max}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
-  } else {
+    /**
+     * ⚠ **合并、不要覆盖**（用户口径：「锁定牌加入手牌时手牌满应该不能弃置锁定牌。
+     * **所有杀手都应该这样**」）。
+     *
+     * 这一级"刚入手的牌"可能有**三批**：
+     *  - 二选一那张（`pickUnlockChoice` 已经先记进去了）；
+     *  - 雕像 4 级从弃牌堆取回的「圍困」（`applyNewEvolutionLevel` 里记的）；
+     *  - 这里按 `unlockLevel` 到手的锁定牌（`unlocked`）。
+     *
+     * 以前这里直接 `= [...unlocked]`，把前两批**冲掉了** ——
+     * 于是未命名二选一入手的那张照样能被弃掉
+     * （`locked-card-not-discardable.mjs` ① 抓到的；扼杀者那类"按等级入手"的
+     * 因为正好在 `unlocked` 里，所以看起来是好的）。
+     */
+    state.justUnlockedCards = [
+      ...new Set([...(state.justUnlockedCards ?? []), ...unlocked]),
+    ];
+    log(state, `进化入手牌后手牌超过 ${max}，请自选弃置 ${state.pendingKillerDiscards} 张。`, 'killer');
+  } else if (state.pendingKillerDiscards <= 0) {
+    /** 手上没超限、也没有别的待弃 → 清空这批标记（还有待弃时别清，那是别人的账） */
     state.justUnlockedCards = [];
   }
   /**
@@ -675,25 +701,53 @@ export function applyNewEvolutionLevel(state: GameState, newLevel: number): void
    * 「不在弃牌堆就直接跳过拿围困的流程，力量仍然加」。
    * 「圍困」的 `unlockLevel` 是 3，正常打出去之后就在弃牌堆里；
    * 它还在锁定区 / 还在手牌里时**不兜底**，跳过取回、只加力量。
+   *
+   * ⚠ **手牌满不再跳过**（用户口径，2026-02 更正）：
+   * 「雕像4级应该是：**弃牌堆没有【围困】时才跳过**。
+   *   若雕像手牌满，则**选择一张弃置，再加入围困**。」
+   *
+   * 以前是"满手就不拿"；现在照拿 —— 拿到手之后由
+   * `settleEvolutionForCurrentKiller` 里那段超限流程挂出"请自选弃置 1 张"，
+   * 弃完手里就是 5 张（其中一张是「圍困」）。
    */
   if (kind === 'statue' && newLevel === 4) {
     addPermanentPower(state, 2);
     const SIEGE = 'statue_siege';
+    const maxSiege = state.rules.killerHandMax ?? 5;
     const i = state.killerDiscard.indexOf(SIEGE);
-    if (i >= 0) {
+    if (i < 0) {
+      log(state, '雕像进化 4 级：力量 +2。弃牌堆里没有「圍困」，跳过取回。');
+    } else if (state.killerHand.includes(SIEGE)) {
+      /**
+       * ⚠ **手上已经有了就不拿**：正常时序里「圍困」在 3 级就从锁定区入手了，
+       * 这张牌是**一份**的 —— 跳级（特性 08 / 手动摆状态）时两条路都可能命中，
+       * 不兜这一道就会出现"手里两张圍困"。
+       */
+      log(state, '雕像进化 4 级：力量 +2。「圍困」已经在手牌里，跳过取回。');
+    } else if ((state.killerLocked ?? []).includes(SIEGE)) {
+      /**
+       * ⚠ **还在锁定区**时也跳过：`settleEvolutionForCurrentKiller` 紧接着那段
+       * "按 `unlockLevel` 解锁锁定牌"就会把它加入手牌 —— 这里再拿一次会变成两张。
+       * （真实时序里 3 级那次解锁已经把它移出锁定区了，所以正常情况下走不到这一支。）
+       */
+      log(state, '雕像进化 4 级：力量 +2。「圍困」还在锁定区（本次解锁会入手），跳过取回。');
+    } else {
       state.killerDiscard.splice(i, 1);
       state.killerHand.push(SIEGE);
-      log(state, '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。');
-    } else {
-      log(state, '雕像进化 4 级：力量 +2。弃牌堆里没有「圍困」，跳过取回。');
-    }
-    /** 取回了才可能超上限（没取回就不会因为这一步超） */
-    const maxSiege = state.rules.killerHandMax ?? 5;
-    if (i >= 0 && state.killerHand.length > maxSiege) {
-      state.pendingUnlockDiscard = true;
-      state.pendingKillerDiscards = state.killerHand.length - maxSiege;
-      state.justUnlockedCards = [SIEGE];
-      log(state, `雕像进化 4 级取回「圍困」后手牌超过 ${maxSiege}，请自选弃置 ${state.pendingKillerDiscards} 张。`);
+      /**
+       * ⚠ **记进 `justUnlockedCards`**：这张是"刚入手的"，本次超额弃牌
+       * **不能把它弃掉**（老口径：「锁定牌加入手牌时手牌满应该不能弃置锁定牌。
+       * 所有杀手都应该这样」）—— 不然"弃一张再拿围困"就等于白拿。
+       */
+      state.justUnlockedCards = [...new Set([...(state.justUnlockedCards ?? []), SIEGE])];
+      logSplit(
+        state,
+        '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。',
+        state.killerHand.length > maxSiege
+          ? `雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌（手牌 ` +
+            `${state.killerHand.length}/${maxSiege}，接着要自选弃置 1 张）。`
+          : '雕像进化 4 级：力量 +2，把「圍困」从弃牌堆加入手牌。',
+      );
     }
   }
   /**
@@ -815,6 +869,10 @@ export function finishEncounterOpen(state: GameState): void {
   if (!enc || !state.encounterOpenHold) return;
   if (state.pendingOverFearWound || state.pendingAmulet) return;
   state.encounterOpenHold = false;
+  /**
+   * 5 级对**每一次**遭遇生效，包括次雕像搜索、僵尸搜索开出来的遭遇。
+   * 那些路径最后都进 `startEncounter` → 这里。
+   */
   if (state.killerLevel >= 5 && state.killerId) {
     const targets = survivorsInRoom(state, enc.roomId);
     log(
@@ -915,7 +973,7 @@ export function startOneDoorBlockade(state: GameState, roomId: string): boolean 
   }
   if (blockadeSlots(state) >= 1) {
     state.pendingBlockade = true;
-    log(state, `请点与「${roomName(state, roomId)}」相邻的一扇门封堵。再点同一格可取消，行动区确认后才落下。`);
+    log(state, `请点与「${roomName(state, roomId)}」相邻的一扇门封堵。再点同一格可取消，行动区确认后才落下。`, 'killer');
     return true;
   }
   if (removableBlockades(state).length === 0) {
@@ -985,6 +1043,7 @@ export function continueSealAllBlockade(state: GameState): boolean {
   log(
     state,
     `「留下」要封 ${job.need} 扇门，可放置槽位不够。请先移除 ${job.removeLeft} 个场上封堵（不能拆「${roomName(state, roomId)}」的门）。每次移除都确认。`,
+    'killer',
   );
   return true;
 }
@@ -1008,9 +1067,9 @@ export function startAnyDoorsBlockade(state: GameState, want: number): boolean {
     secondRoomId: null,
   };
   if (removeLeft > 0) {
-    log(state, `进化 4 级要封 ${need} 扇门。请先依次移除 ${removeLeft} 个场上封堵，再选新门。`);
+    log(state, `进化 4 级要封 ${need} 扇门。请先依次移除 ${removeLeft} 个场上封堵，再选新门。`, 'killer');
   } else {
-    log(state, `进化 4 级：请在整张地图选 ${need} 扇未封堵的门（每扇点两个相邻地点，行动区确认）。`);
+    log(state, `进化 4 级：请在整张地图选 ${need} 扇未封堵的门（每扇点两个相邻地点，行动区确认）。`, 'killer');
   }
   return true;
 }
@@ -1042,11 +1101,11 @@ export function removeBoardBlockade(state: GameState, doorIdStr: string): void {
   }
   if (job.kind === 'oneDoor' && job.roomId) {
     state.pendingBlockade = true;
-    log(state, `请点与「${roomName(state, job.roomId)}」相邻的一扇门封堵。`);
+    log(state, `请点与「${roomName(state, job.roomId)}」相邻的一扇门封堵。`, 'killer');
     return;
   }
   if (job.kind === 'anyDoors') {
-    log(state, `请再选 ${job.need - job.placed} 扇未封堵的门（每扇点两个相邻地点后确认）。`);
+    log(state, `请再选 ${job.need - job.placed} 扇未封堵的门（每扇点两个相邻地点后确认）。`, 'killer');
   }
 }
 
@@ -1057,18 +1116,18 @@ export function pickAnyDoorRoom(state: GameState, roomId: string): void {
   }
   if (job.secondRoomId && roomId === job.secondRoomId) {
     job.secondRoomId = null;
-    log(state, `已取消「${roomName(state, roomId)}」。`);
+    log(state, `已取消「${roomName(state, roomId)}」。`, 'killer');
     return;
   }
   if (job.firstRoomId && roomId === job.firstRoomId) {
     job.firstRoomId = job.secondRoomId ?? null;
     job.secondRoomId = null;
-    log(state, job.firstRoomId ? `已取消该地点。仍选「${roomName(state, job.firstRoomId)}」。` : '已取消地点选择。');
+    log(state, job.firstRoomId ? `已取消该地点。仍选「${roomName(state, job.firstRoomId)}」。` : '已取消地点选择。', 'killer');
     return;
   }
   if (!job.firstRoomId) {
     job.firstRoomId = roomId;
-    log(state, `已选「${roomName(state, roomId)}」，请再点一个与它以门相连的地点。再点同一格可取消。`);
+    log(state, `已选「${roomName(state, roomId)}」，请再点一个与它以门相连的地点。再点同一格可取消。`, 'killer');
     return;
   }
   if (job.secondRoomId) throw new Error('已经选好一扇门，请确认或再点已选地点取消');
@@ -1087,7 +1146,7 @@ export function pickAnyDoorRoom(state: GameState, roomId: string): void {
     );
   }
   job.secondRoomId = roomId;
-  log(state, `已选「${roomName(state, job.firstRoomId)}」与「${roomName(state, roomId)}」，请在行动区确认封堵。`);
+  log(state, `已选「${roomName(state, job.firstRoomId)}」与「${roomName(state, roomId)}」，请在行动区确认封堵。`, 'killer');
 }
 
 export function confirmAnyDoor(state: GameState): void {

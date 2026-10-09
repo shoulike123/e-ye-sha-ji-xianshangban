@@ -15,7 +15,7 @@
  */
 import type { EffectDef } from '../content/schema.js';
 import type { GameState, PlayerState } from './types.js';
-import { addFear, applyDamage, drawKillerCards, log, roomName } from './effects.js';
+import { addFear, applyDamage, cappedKillerPower, drawKillerCards, log, roomName } from './effects.js';
 import { isStatueKiller, mainStatue, statuePieces, switchMainStatue } from './engine.js';
 
 export { isStatueKiller, mainStatue, statuePieces, switchMainStatue };
@@ -180,7 +180,22 @@ export function pickStatueStep(state: GameState, statueId: string): string | nul
     startStatueStep(state, st, pick.max, pick.min);
     return null;
   }
-  return statueSearchOne(state, st);
+  const room = statueSearchOne(state, st);
+  if (room) return room;
+  /**
+   * ⚠ **搜索段"没搜到人"也要把这一段收尾。**
+   *
+   * `statueSearchOne` 只在**搜到人**时才清 `pendingStatuePick`（那场遭遇接管流程）；
+   * 没搜到就一直挂着 —— 而"选下一尊"没人重新露出来、四尊全选完之后待选也不会
+   * 自己被收掉。上层（`engine` 的 `pickStatueStep`）看到 `pendingStatuePick`
+   * 还挂着就直接 `break`，于是**整张牌卡死在这里**
+   * （用户报的「雕像：围困在执行完后卡住了」）。
+   *
+   * `statueStepsRemain` 会：还有没选过的 → 重新提示选下一尊；全选完 → 把待选收掉
+   * （返回 false），上层就能接着 `continueKillerQueue` 把这张牌落定。
+   */
+  statueStepsRemain(state);
+  return null;
 }
 
 /**
@@ -295,7 +310,8 @@ export function resolveExecute(state: GameState): void {
     log(state, '處決：目标已不在场。', 'killer');
     return;
   }
-  const atk = state.killerPower + (state.killerTurnPowerBonus ?? 0);
+  /** 次雕像和主雕像共用这一份力量，同样不能超过上限 */
+  const atk = cappedKillerPower(state);
   /**
    * 目标的「防御」是遭遇防御阶段掷骰 + 物品得出的。
    * 本牌在遭遇中打出，此时还没掷防御骰 —— 所以这里按「目标当前防御加成 0」判定，

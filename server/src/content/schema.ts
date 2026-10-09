@@ -106,6 +106,8 @@ export const EffectSchema = z.lazy(() =>
       'returnToDeckTop',
       /** 潜行到任意一个带有秘密通道的地点（恐詭管道） */
       'stealthToPassage',
+      /** 〔潜行〕到**任意地点**（保護色版的恐詭管道 / 女猎手「陷阱重置」）：点选 + 确认，不规划路径 */
+      'stealthToAnywhere',
       // 扼杀者（killer8）专用
       /** 放置核心标记 */
       'placeCore',
@@ -552,6 +554,18 @@ export const SurvivorLayoutSchema = z.object({
     cards: z.array(LayoutBoxSchema).min(1),
     fear: z.array(LayoutBoxSchema.extend({ card: z.number().int(), index: z.number().int() })),
     noise: z.array(LayoutBoxSchema.extend({ card: z.number().int() })),
+    /**
+     * 女王〔中毒〕标记，一格对应一张状态卡。
+     * **必须声明**，否则校准页保存时会被 zod 剥掉（zod 默认丢未知键），
+     * 拖完点保存等于没存。
+     */
+    poison: z
+      .array(LayoutBoxSchema.extend({ card: z.number().int() }))
+      .default([
+        { x: 26, y: 38, w: 7, h: 22, card: 0 },
+        { x: 58, y: 38, w: 7, h: 22, card: 1 },
+        { x: 90, y: 38, w: 7, h: 22, card: 2 },
+      ]),
   }),
   hudRow: z
     .object({

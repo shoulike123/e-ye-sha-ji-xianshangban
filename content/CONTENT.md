@@ -42,7 +42,9 @@ content/
 - `edges[]`：`from`、`to`、`bidirectional`（默认 true）、`pathType`（`door` / `dash` / `killer`）
 - `pathType: "killer"`：杀手专用通道，常规移动消耗 1 行动力；幸存者不能走
 - `passages[]`：特殊通道，仅标注，**不计入移动**
-- `backgrounds`：`survivor` / `killer` 底图路径（图一 `幸存者1.png` / `杀手1.png`，图二 `幸存者2.jpg` / `杀手2.jpg`）
+- `backgrounds`：`survivor` / `killer` 底图路径（如 `幸存者1.jpg` / `杀手1.jpg`）
+  - **底图请用 JPEG，别用 PNG**：同一张 6662×3332 的图，PNG 要 21–31 MB，JPEG 只要 3.7–5.4 MB。
+    分辨率完全一样（不会模糊），但同学联机时要下载的量差 6 倍。原 PNG 仍留在 `Image/Maps/` 里备用。
 - `zones[]`：外围 UI 高亮；`side` 为 `killer` 时只在杀手视角显示
 - `tokens[]`：叠在地图上的道具（潜行/修理/封堵等），含位置、宽高、旋转
 - `survivorStartRoomId` / `killerStartRoomId`

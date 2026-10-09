@@ -5,8 +5,10 @@
  * 煤油灯在遭遇中是否能用」。
  *
  * 卡面（`content/cards/official.json`）：
- *  - 煤油灯   `+1 防御值；或额外行动：移动通过一条秘密通道。可反复使用。`
- *    → **两半都要能用**：遭遇防御里是防御物品（+1 / 不消耗）；幸存者大回合里是额外行动。
+ *  - 煤油灯   `+1 防御值；或额外行动：移动通过一条秘密通道。一次性。`
+ *    → **两半都要能用**：遭遇防御里是防御物品（+1 **一次性**）；幸存者大回合里是额外行动。
+ *    ⚠ 2026-02 用户口径改成**一次性**（原卡面写的是"可反复使用"）：
+ *      两半**共用同一个道具** —— 任一次用掉就进弃牌堆。
  *  - 神秘包裹 `额外行动：从发现牌堆抽取一张卡牌，并在你的地点发出响声。`
  *  - 鸿运当骰 `（本卡牌不算作防御物品）在遭遇期间，你可以重掷任意数量的骰子。`
  *
@@ -65,7 +67,7 @@ function mkDuo(mapId = 'crypt') {
   return { st, p: first };
 }
 
-console.log('=== ① 煤油灯（防御那一半）：遭遇里能用，而且是"可反复" ===');
+console.log('=== ① 煤油灯（防御那一半）：遭遇里能用，而且是"一次性" ===');
 {
   const { st, p } = mkDuo();
   ok(!usableDefenseItemIds(p).includes('lamp'), '（前提）没有煤油灯时防御选项里没有它');
@@ -74,19 +76,20 @@ console.log('=== ① 煤油灯（防御那一半）：遭遇里能用，而且�
   console.log(`  defenseItemInfo('lamp') = ${JSON.stringify(info)}`);
   console.log(`  提示语 = ${defenseItemHint('lamp')}`);
   ok(usableDefenseItemIds(p).includes('lamp'), '**有煤油灯就能在遭遇防御里选它**');
-  ok(info?.bonus === 1 && info?.consume === false, '**+1 防御、不消耗**',
+  ok(info?.bonus === 1 && info?.consume === true, '**+1 防御、一次性（用掉就没了）**',
     JSON.stringify(info));
-  ok(/可反复使用/.test(defenseItemHint('lamp')), '提示语写明"可反复使用"',
+  ok(/一次性/.test(defenseItemHint('lamp')), '提示语写明"一次性"',
     defenseItemHint('lamp'));
 
-  /** 真用一次：加成拿到、道具还在（可反复） */
+  /** 真用一次：加成拿到、道具进弃牌堆（一次性） */
   const bonus = applyDefenseItem(st, p.id, 'lamp');
   console.log(`  用一次：防御 +${bonus}，背包里 lamp=${p.items.lamp}`);
   ok(bonus === 1, '**+1 防御**', String(bonus));
-  ok((p.items.lamp ?? 0) === 1, '**煤油灯没被消耗**（可反复用）', String(p.items.lamp));
-  ok(applyDefenseItem(st, p.id, 'lamp') === 1, '第二次还能用');
+  ok((p.items.lamp ?? 0) === 0, '**煤油灯被消耗**（一次性）', String(p.items.lamp));
+  ok(applyDefenseItem(st, p.id, 'lamp') === 0, '**第二次用不了**（已经没有这盏灯了）');
 
-  /** 快照里也要列出来（客户端就靠这个画防御选项） */
+  /** 快照里要列出来（客户端就靠这个画防御选项）—— 所以这里先补一盏 */
+  p.items = { ...p.items, lamp: 1 };
   st.phase = 'encounter';
   const snap = buildSnapshot(st, 's');
   const ids = (snap.defenseItemChoices ?? []).map((x) => x.id);
@@ -94,7 +97,7 @@ console.log('=== ① 煤油灯（防御那一半）：遭遇里能用，而且�
   ok(ids.includes('lamp'), '**快照把煤油灯列进了防御选项**', JSON.stringify(ids));
 }
 
-console.log('=== ② 煤油灯（额外行动那一半）：穿过秘密通道 ===');
+console.log('=== ② 煤油灯（额外行动那一半）：穿过秘密通道（也是一次性）===');
 {
   const { st, p } = mkDuo();
   /** 墓穴的秘密通道：R3 ↔ B3、G2 ↔ B3 */
@@ -109,7 +112,7 @@ console.log('=== ② 煤油灯（额外行动那一半）：穿过秘密通道 =
   const err = tryIt(st, 's', { type: 'useItem', itemId: 'lamp', toRoomId: to });
   console.log(`  用煤油灯穿通道 → ${err ?? 'OK'}（现在在 ${p.roomId}）`);
   ok(!err && p.roomId === to, '**穿过去了**', String(err ?? ''));
-  ok((p.items.lamp ?? 0) === 1, '**煤油灯还在**（可反复使用）', String(p.items.lamp));
+  ok((p.items.lamp ?? 0) === 0, '**煤油灯用掉了**（一次性，进弃牌堆）', String(p.items.lamp));
 
   /** 不在通道口不能用 */
   const { st: st2, p: p2 } = mkDuo();
