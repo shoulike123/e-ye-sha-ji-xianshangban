@@ -1,7 +1,7 @@
 {
   "name": "night-hunt-web",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.8.2",
   "description": "Data-driven asymmetric horror board-game web engine (content-filled by you)",
   "workspaces": [
     "server",
