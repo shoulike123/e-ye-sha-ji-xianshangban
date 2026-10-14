@@ -423,6 +423,12 @@ export interface GameState {
   splitOrderBase: string[];
   soloKillerCharacterId: string | null;
   soloSurvivorCharacterIds: string[];
+  /**
+   * 单人热座 / 观众手动在看哪一边。
+   * 单人只在记下的那个阶段里生效，阶段一变就交还给自动推断。
+   * 观众一直生效，直到再切一次。
+   */
+  watchSide?: Record<string, { side: 'killer' | 'survivor'; phase: string }>;
   /** 1对1 / 1对2：哪些真人在操控幸存者棋子 */
   survivorOperators: Array<{ id: string; name: string; connected: boolean }>;
   /**
@@ -628,6 +634,17 @@ export interface GameState {
    */
   pendingPreyOffer: boolean;
   /**
+   * 【变体1】回合开始 / 回合结束的杀手特性：停在这里等持有者发动或跳过。
+   *
+   * 2对3 里 `killerId` 是**这一名**正在进行大回合的杀手，不是队友。
+   * `options` 是现在可以发动的特性 id；发动一张就从里面拿掉，空了才继续。
+   */
+  pendingKillerTraitOffer: {
+    when: 'start' | 'end';
+    killerId: string;
+    options: string[];
+  } | null;
+  /**
    * 【变体1】特性 12「英勇阻截」：
    * 「当你和任意幸存者共同遭遇杀手时，你可以让所有其他幸存者【移动】X1 来逃离这次攻击
    *  （在告知杀手找到的是哪些幸存者之后再使用本卡牌）。**跑掉的人脱离这次遭遇**。」
@@ -766,6 +783,11 @@ export interface GameState {
     owner?: 'killer' | 'survivor';
     /** owner=survivor 时：**这条草稿属于哪个幸存者**（幸运币的〔移動〕） */
     actorId?: string;
+    /** 現場研究这类计划移动：确认后才记「本局已用过」 */
+    planId?: string;
+    planIndex?: number;
+    /** 行动区标题。缺省是幸运币。 */
+    label?: string;
   } | null;
   /** 感知已选颜色，等确认 */
   pendingSenseColorPick: 'R' | 'B' | 'G' | null;
@@ -904,6 +926,16 @@ export interface GameState {
    */
   pendingTurnEndSwitch: boolean;
   /**
+   * 本回合结束时的常规摸牌已经做过。
+   * 摸牌带来的弃牌或进化确认完，才判「回合结束时」的效果，不会摸第二次。
+   */
+  turnEndDrawStarted?: boolean;
+  /**
+   * 「你的回合结束时」的判定已经开始（女王 / 狼人 / 粘液 / 特性）。
+   * 摸牌和它带来的进化都已经结算完。再进来只交接，不再重跑那些效果。
+   */
+  endOfTurnEffectsDone?: boolean;
+  /**
    * 【城堡】**是谁操作的控制杆**（放置当前这道机关大门的幸存者 id）。
    *
    * 用户要求：「机关大门给杀手的报告和战报都只有大门的位置，
@@ -1015,6 +1047,12 @@ export interface GameState {
   pendingSenseRoom: string | null;
   /** 猎手本能：是否正处于「选一个地点来感知」的状态 */
   killerSenseRoomActive: boolean;
+  /**
+   * 敏锐听觉：这次选点只能选带响声的地点。
+   * 猎手本能也用 `killerSenseRoomActive`，但不设这个标记，所以仍是任选一格。
+   * 爆竹回合全场都在响，不按这个名单限制。
+   */
+  senseNoiseOnly?: boolean;
   /**
    * 君臨天下：这次感知用的是「感知后移动一名目击者」——
    * 确认感知后如果目击到人，就要接着让杀手选一名目击者移动。
@@ -1342,6 +1380,13 @@ export interface GameState {
    * 回合结束时若「本回合没遭遇任何人 且 不在潜行」→ 在女王地点生成 1 个僵尸。
    */
   queenEncounteredThisTurn?: boolean;
+  /** 本回合已经做过狼人 4 级的回合结束惊吓，避免摸牌前后各吓一次 */
+  werewolfEndFearDone?: boolean;
+  /**
+   * 遭遇中被挡住后弃牌进化：先把进化效果做完（谋杀者 4 级先封 4 扇门），
+   * 再让幸存者撤离。
+   */
+  deferEncounterFlee?: boolean;
   /**
    * **摸牌堆见底、又赶上进化时"先不洗牌"的标记**（用户口径：
    * 「杀手先执行进化效果再洗牌」）。
@@ -1481,6 +1526,8 @@ export interface BlockadeJob {
   placed: number;
   firstRoomId: string | null;
   secondRoomId?: string | null;
+  /** 这次封堵是谁的：进化 4 级 / 阴险圈套 / 狡诈猎手。缺省按进化 4 级写战报。 */
+  title?: string;
 }
 
 export type ClientAction =
@@ -1510,6 +1557,8 @@ export type ClientAction =
       actorPlayerId?: string;
       /** 【变体3】要选目的地的能力（通道調查 ②）：秘密通道出口 */
       toRoomId?: string | null;
+      /** 現場研究：还没确认的 1–2 格移动可以取消，不消耗这次能力 */
+      cancel?: boolean;
       /** 【变体3】要选人的能力（情報分享）：目标幸存者 */
       targetPlayerId?: string | null;
     }
@@ -1549,7 +1598,9 @@ export type ClientAction =
       toRoomId?: string;
       steps?: number;
       targetPlayerId?: string;
-      moves?: Array<{ playerId: string; toRoomId: string; steps?: number }>;
+      moves?: Array<{ playerId: string; toRoomId: string; steps?: number; path?: string[] }>;
+      /** 一步一步点出来的路径（含起点）。速度爆发、调度人员用这个走，不按直线跳。 */
+      path?: string[];
       choice?: 'removeBlockade' | 'clearFear' | 'noise';
       doorId?: string;
       /**
@@ -1595,6 +1646,8 @@ export type ClientAction =
   | { type: 'setSoloKiller'; characterId: string }
   | { type: 'setSoloSurvivor'; characterId: string }
   | { type: 'setFaction'; faction: 'killer' | 'survivor' | 'spectator' }
+  /** 单人热座 / 观众：改看杀手或幸存者那一边（快照按这一边过滤） */
+  | { type: 'setWatchSide'; side: 'killer' | 'survivor' }
   /**
    * 【解散房间】除观众外谁都能点。点了之后进入"等所有人确认"状态，
    * 除观众以外**还连着的**玩家都确认之后房间解散、大家退回主界面。
@@ -1849,7 +1902,7 @@ export type ClientAction =
   | { type: 'chooseSenseColor'; color: 'R' | 'B' | 'G' }
   | { type: 'chooseLurkTarget'; targetPlayerId: string }
   | { type: 'confirmAmulet'; use: boolean }
-  | { type: 'discardKillerCard'; cardId: string }
+  | { type: 'discardKillerCard'; cardId: string; cardIds?: string[] }
   | { type: 'advanceKillerStep' }
   | { type: 'chooseKillerMain'; choice: 'actions' }
   | { type: 'endTurn' }
@@ -1882,9 +1935,10 @@ export type ClientAction =
       type: 'encounterFlee';
       moveToRoomId: string | null;
       /**
-       * 【变体1】特性 09「生存本能」：撤离时可以走 **2 格**而不是 1 格
-       * （走 2 格之后清空自己的全部恐惧标记）。不传 = 正常 1 格。
+       * 【变体1】特性 09「生存本能」：撤离路径（含起点），最多 2 步。
+       * 走完后无论几步都清恐惧。不传则按 `moveToRoomId` 走 1 步。
        */
+      path?: string[];
       fleeSteps?: 1 | 2;
     }
   | { type: 'pickEncounterTarget'; targetPlayerId: string }
@@ -1990,6 +2044,11 @@ export interface PublicSnapshot {
   isHost: boolean;
   you: PublicPlayerView & { hand: string[]; skillUsedThisTurn: string[] };
   controllingActive: boolean;
+  /**
+   * 单人热座 / 观众当前手动在看的那一边。
+   * null = 没手动切（单人按阶段自动推断，观众默认幸存者）。
+   */
+  watchSide?: 'killer' | 'survivor' | null;
   players: PublicPlayerView[];
   map: MapDef;
   /** 大厅里可选的地图（只列画好底图、能真正开打的） */
@@ -2057,6 +2116,12 @@ export interface PublicSnapshot {
    */
   /** 【变体1】02 玩弄猎物：遭遇爆发时先问杀手要不要取消这次遭遇（只发杀手） */
   pendingPreyOffer?: boolean;
+  /** 【变体1】回合开始/结束特性：等这名杀手发动或跳过（只发给持有者） */
+  pendingKillerTraitOffer?: {
+    when: 'start' | 'end';
+    killerId: string;
+    options: string[];
+  } | null;
   pendingHeroicBlock?: {
     holderId: string;
     started: boolean;

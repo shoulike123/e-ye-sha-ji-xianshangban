@@ -54,6 +54,8 @@ function killerActor(state: GameState): PlayerState | null {
 export function beginSenseRoom(state: GameState): boolean {
   state.pendingSenseRoom = null;
   state.killerSenseRoomActive = true;
+  /** 猎手本能是任选一格，不要沿用敏锐听觉的「只能点响声」 */
+  state.senseNoiseOnly = false;
   log(state, '猎手本能：请点地图任选一个地点，然后在行动区确认。', 'killer');
   return true;
 }
@@ -70,8 +72,11 @@ export function beginSenseRoom(state: GameState): boolean {
 export function confirmSenseRoom(state: GameState): { roomId: string; witnessed: PlayerState[] } {
   const roomId = state.pendingSenseRoom;
   if (!roomId) throw new Error('还没有选择要感知的地点');
+  if (state.senseNoiseOnly && !state.firecrackerThisRound && !state.noises.includes(roomId))
+    throw new Error('只能感知带响声的地点');
   state.pendingSenseRoom = null;
   state.killerSenseRoomActive = false;
+  state.senseNoiseOnly = false;
   const here = Object.values(state.players).filter(
     (s) => s.faction === 'survivor' && s.alive && s.roomId === roomId && !isLowProfile(state, s),
   );
@@ -84,7 +89,7 @@ export function confirmSenseRoom(state: GameState): { roomId: string; witnessed:
   const whoLine = here.length
     ? `看到 ${here.length} 名幸存者：${here.map((s) => s.name).join('、')}`
     : '没有看到人。';
-  log(state, `${placeLine}；${whoLine}`, 'killer');
+  log(state, `${placeLine}；${whoLine}`, 'all', true);
   /** **每一次〔感知〕都要有一次信息确认**（用户要求：「所有的感知都要信息确认」） */
   setKillerInfo(state, '感知（猎手本能 / 君臨天下）', [placeLine, whoLine]);
   /** 只感知了一个地点：看到的人就在这里，杀手地图立绘挪过去 */
@@ -168,13 +173,13 @@ export function resetHunterTraps(state: GameState): void {
  * 只看地图本身标注的搜索位置。豪宅 = R2 陈列室 / B4 储藏室 / G4 温室；
  * 小屋 = R3 娱乐室 / G4 小屋 / B2 湖景小屋。
  */
-export function senseAllNoise(state: GameState): void {
+export function senseAllNoise(state: GameState): PlayerState[] {
   const searchRooms = state.map.rooms
     .filter((r) => (r.tags ?? []).includes('searchable'))
     .map((r) => r.id);
   if (!searchRooms.length) {
     log(state, '领地意识：这张地图没有可搜索的位置。');
-    return;
+    return [];
   }
   /**
    * 〔感知〕**所有可搜索的位置**。
@@ -187,17 +192,21 @@ export function senseAllNoise(state: GameState): void {
    * 所以这里把名单**合并成一条**：不按地点分组、不点名到房间。
    */
   const found: string[] = [];
+  const seen: PlayerState[] = [];
   for (const id of searchRooms) {
     for (const s of Object.values(state.players)) {
       if (s.faction !== 'survivor' || !s.alive || s.roomId !== id || isLowProfile(state, s)) continue;
-      if (!found.includes(s.name)) found.push(s.name);
+      if (!found.includes(s.name)) {
+        found.push(s.name);
+        seen.push(s);
+      }
     }
   }
   const placeLine = `地点：${searchRooms.map((id) => roomName(state, id)).join('、')}`;
   const whoLine = found.length
     ? `看到 ${found.length} 名幸存者：${found.join('、')}`
     : '这些地点上都没有人。';
-  log(state, `领地意识 —— ${placeLine}；${whoLine}`, 'killer');
+  log(state, `领地意识 —— ${placeLine}；${whoLine}`, 'all', true);
   /** 行动区把结果摆出来（**不把人对应到地点**，规则要求只说"一共有谁"） */
   setKillerInfo(state, '领地意识：可搜索的位置', [placeLine, whoLine]);
   /** 可搜索位置只有一处时，看到的人就在那里 */
@@ -208,6 +217,7 @@ export function senseAllNoise(state: GameState): void {
     );
     noteSingleRoomSense(state, [only], here);
   }
+  return seen;
 }
 
 
@@ -231,7 +241,7 @@ export function moveNearestNoiseSearch(state: GameState): boolean {
   /** 待选的移动方案（每个 = 一条路径） */
   const options: Array<{ path: string[]; label: string }> = [];
 
-  if (state.firecrackerThisRound) {
+  if (state.firecrackerThisRound || state.firecrackerRoomId) {
     // 全场都有响声 → 自己这格就是「最近的响声」
     log(state, `超听觉：最近的响声在「${roomName(state, k.roomId)}」，到达并搜索。`);
     state.pendingMoveChoices = null;
@@ -239,11 +249,10 @@ export function moveNearestNoiseSearch(state: GameState): boolean {
     return false;
   }
 
-  const noises = (state.noises ?? []).filter((id) => id !== k.roomId);
+  const noises = [...new Set(state.noises ?? [])];
   if (!noises.length) {
-    log(state, `超听觉：场上没有响声标记「${roomName(state, k.roomId)}」。`);
+    log(state, '超听觉：场上没有响声，不能移动搜索。', 'killer');
     state.pendingMoveChoices = null;
-    searchHere(state, k.roomId);
     return false;
   }
 
@@ -330,7 +339,7 @@ export function applyAutoMove(state: GameState, k: PlayerState, path: string[]):
  *              （`tryMove` 里读 `passagePowerBonus`）
  *  - 爬蟲爬行 ：把牌库里所有「爬行」的移動从 ×1 改成 ×1-3
  *  - 音波感知 ：回合开始时按响声情况强制幸存者揭示地点
- *  - 粘液腺體 ：回合结束时（**摸牌之前**）若不在潜行则封堵×1；
+ *  - 粘液腺體 ：回合结束摸牌之后、交接之前，若不在潜行则封堵×1；
  *              用「變形」后抽1张并封堵×2
  */
 export function applyEvolutionCard(state: GameState, cardId: string): void {
@@ -400,24 +409,24 @@ export function applySonarReveal(state: GameState): void {
       if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
       targets.push(p);
     }
-    log(state, '音波感知（爆竹：全场都在响）：**所有**幸存者必须揭示地点。', 'killer');
+    log(state, '音波感知（爆竹：全场都在响）：所有幸存者必须揭示地点。', 'all', true);
   } else if (!noises.length) {
     for (const p of Object.values(state.players)) {
       if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
       const d = mapDist(state, k.roomId, p.roomId, false);
       if (d >= 0 && d <= 1) targets.push(p);
     }
-    log(state, '音波感知（无响声）：距离 1 内的幸存者必须揭示地点。', 'killer');
+    log(state, '音波感知（无响声）：距离 1 内的幸存者必须揭示地点。', 'all', true);
   } else {
     const set = new Set(noises);
     for (const p of Object.values(state.players)) {
       if (p.faction !== 'survivor' || !p.alive || !p.roomId) continue;
       if (set.has(p.roomId)) targets.push(p);
     }
-    log(state, '音波感知（有响声）：位于带响声地点的幸存者必须揭示地点。', 'killer');
+    log(state, '音波感知（有响声）：位于带响声地点的幸存者必须揭示地点。', 'all', true);
   }
   if (!targets.length) {
-    log(state, '音波感知：没有符合条件的幸存者。', 'killer');
+    log(state, '音波感知：没有符合条件的幸存者。', 'all', true);
     return;
   }
   /** 揭示 = 双方战报写明谁在哪里，并把杀手地图上的立绘钉到该地点 */
@@ -436,11 +445,11 @@ export function applySonarReveal(state: GameState): void {
  * 粘液腺體（进化卡牌）：「你的回合结束时，如果你不在〔潜行〕，
  * 在你的地点〔封堵〕×1」。
  *
- * ⚠ **位置在回合结束后**（`engine.closeKillerTurn`，和女王 1 级、狼人 4 级同一处）。
+ * ⚠ **位置在回合结束摸牌之后、交接之前**（和女王 1 级、狼人 4 级同一处）。
  * ⚠ **封哪扇门由杀手自己点**（用户要求：「杀手该回合结束处理的让杀手处理完，
  *   处理完才给到幸存者」）—— 这里挂起"请点一扇门"的请求，
- *   调用方（`closeKillerTurn`）会**停在这一步、先不切给幸存者**，
- *   点完由 `case 'move'` 接着走 `finishKillerTurn`。
+ *   调用方会**停在这一步、先不切给幸存者**，
+ *   点完由 `case 'move'` 接着走特性，再交接。
  *
  * @returns true = 已挂起，调用方要停下等玩家点门
  */
@@ -838,11 +847,11 @@ export function addPermanentPower(state: GameState, n: number): void {
 
 
 /** 〔感知〕距离 N 内的所有地点（红外探測） */
-export function senseRange(state: GameState, range: number): void {
+export function senseRange(state: GameState, range: number): PlayerState[] {
   const k = killerActor(state);
   if (!k?.roomId) {
     log(state, '红外探測：你不在图上。');
-    return;
+    return [];
   }
   const rooms = [...state.map.rooms]
     .filter((r) => {
@@ -867,13 +876,14 @@ export function senseRange(state: GameState, range: number): void {
   const whoLine = names.length
     ? `看到 ${names.length} 名幸存者：${names.join('、')}`
     : `距离 ${range} 内没有看到人。`;
-  log(state, `红外探測 —— ${placeLine}；${whoLine}`, 'killer');
+  log(state, `红外探測 —— ${placeLine}；${whoLine}`, 'all', true);
   /** 行动区把结果摆出来，等杀手确认 */
   setKillerInfo(state, `红外探測（距离 ${range} 内）`, [placeLine, whoLine]);
   /** 距离内只有一个地点时，看到的人就在那里 */
   if (rooms.length === 1) {
     noteSingleRoomSense(state, rooms, seenHere);
   }
+  return seenHere;
 }
 
 /**

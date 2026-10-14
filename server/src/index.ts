@@ -160,12 +160,33 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*' },
   /**
+   * 打开 Cursor、电脑卡一下时，默认 20 秒心跳很容易把所有人一起判掉线。
+   * 放宽到 60 秒，短暂卡住还留在原来的房间里。
+   */
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
+  /**
    * 每次行动的"新局面"是一大坨 JSON（字段名高度重复），
    * 压缩之后通常只剩十分之一 —— 异地联机靠这条最省。
    * `threshold` 是"小于 1KB 就别压了"，省得为几句小消息白费 CPU。
    */
   perMessageDeflate: { threshold: 1024 },
 });
+rooms.startHousekeeping();
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    rooms.flushAll();
+  } catch (e) {
+    console.error(e);
+  }
+  console.log(`房间已存盘（${signal}）`);
+  process.exit(0);
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 /** 房间里每条网线已经收过哪一版"静态大块"（见 sendState） */
 const sentStatic = new Map<string, string>();

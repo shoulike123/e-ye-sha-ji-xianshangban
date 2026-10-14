@@ -21,6 +21,7 @@ import {
   logSplit,
   pushNoise,
   roomName,
+  wipeFear,
 } from './effects.js';
 /** 中毒标记在 zombies.ts（只有〔治愈〕或死亡能移除它） */
 import { clearPoisonOnHeal } from './zombies.js';
@@ -108,11 +109,12 @@ export function useFirstAidKit(state: GameState, healer: PlayerState, target: Pl
   state.firstAidKit = false;
   applyHeal(state, target.id, 1);
   clearPoisonOnHeal(state, target.id);
-  target.fear = 0;
-  target.overFear = false;
+  const cleared = wipeFear(target);
   log(
     state,
-    `${healer.name} 使用「${roomName(state, firstAidKitRoomId(state))}」的急救箱，治疗了 ${target.name} 并消除其恐惧。急救箱标记已移除。`,
+    cleared
+      ? `${healer.name} 使用「${roomName(state, firstAidKitRoomId(state))}」的急救箱，治疗了 ${target.name} 并消除其恐惧。急救箱标记已移除。`
+      : `${healer.name} 使用「${roomName(state, firstAidKitRoomId(state))}」的急救箱，治疗了 ${target.name}。急救箱标记已移除。`,
     'survivor',
   );
 }

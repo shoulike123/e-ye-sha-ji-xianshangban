@@ -120,7 +120,7 @@ function statueSearchOne(state: GameState, piece: PlayerState): string | null {
     );
     return piece.roomId;
   }
-  log(state, `雕像 ${piece.statueIndex} 搜索「${roomName(state, piece.roomId)}」：没有人。`, 'killer');
+  log(state, `雕像 ${piece.statueIndex} 搜索「${roomName(state, piece.roomId)}」：没有人。`, 'all', true);
   return null;
 }
 

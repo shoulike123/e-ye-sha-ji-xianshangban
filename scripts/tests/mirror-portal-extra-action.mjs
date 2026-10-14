@@ -1,14 +1,9 @@
 /**
- * **鏡之門戶是"额外行动 + 行动区二次确认"**（用户口径）：
+ * **鏡之門戶是额外行动，只确认一次是否传送到螺旋地点**：
  *
- * > 镜之门户的传送是额外行动啊，在行动区做二次确认，你写到特殊行动去了，改
- *
- * 改之前：
- *  - 入口虽然在「额外行动」弹窗里，但**目标按钮**被塞进了行动区的 `extras`，
- *    还被 `EXTRA_KEEP` 放行 → 整排 🌀 目标挂在**「特殊行动」**那一栏下面；
- *  - 点一下目标**直接传送**（没有二次确认）；
- *  - 动作里不带 `actorPlayerId` → 算到"当前行动者"头上（额外行动是按每个人
- *    列按钮的，做完小回合的另一个人想传送就会报"没有這件遗物"）。
+ *  - 入口在「额外行动」弹窗里，不挂到「特殊行动」；
+ *  - 每张地图只有一个 🌀 地点，点下去只弹出一次「确定要传送到这里？」；
+ *  - 动作带 `actorPlayerId`，按点的那名幸存者传送。
  *
  * 跑法：node scripts/tests/mirror-portal-extra-action.mjs
  * （界面部分是源码断言；服务端行为在 `encounter-defense.mjs` ⑥/⑥-b）
@@ -36,29 +31,23 @@ console.log('=== ① 不再挂到「特殊行动」那一栏 ===');
     '行动区那个"額外行動：鏡之門戶"入口按钮也删了（额外行动只从弹窗进）');
 }
 
-console.log('\n=== ② 行动区：选中 → 「确认传送」（二次确认）===');
+console.log('\n=== ② 只确认一次：是否传送到螺旋地点 ===');
 {
-  /** 用唯一锚点定位那块面板（`額外行動：` 有好几处，不能拿它当锚） */
-  const anchor = views.indexOf('actorPlayerId: mirrorActor.id');
-  const panel = anchor >= 0 ? views.slice(anchor - 2200, anchor + 600) : '';
-  ok(anchor > 0, '（前提）找得到那块面板');
-  ok(/确认传送/.test(panel), '**有「确认传送」这颗按钮**');
-  ok(/setMirrorPickRoom/.test(panel), '目标按钮只"选中"（写进 `mirrorPickRoom`）');
-  ok(!/onClick=\{\(\) =>\s*void onAction\(\{ type: 'useMirrorPortal'/.test(panel),
-    '**目标按钮不再"点一下就传走"**');
-  ok(/disabled=\{!mirrorPickRoom\}/.test(panel), '没选地点时「确认传送」是灰的');
-  ok(/useMirrorPortal/.test(panel) && /toRoomId: rid/.test(panel), '确认之后才发 `useMirrorPortal`');
-  ok(/actorPlayerId: mirrorActor\.id/.test(panel),
+  const anchor = views.indexOf('使用鏡之門戶传送到');
+  const panel = anchor >= 0 ? views.slice(Math.max(0, anchor - 900), anchor + 500) : '';
+  ok(anchor > 0, '（前提）找得到鏡之門戶按钮');
+  ok(!/确认传送/.test(views), '没有单独的「确认传送」面板（那是多出来的一道）');
+  ok(!/setMirrorPickRoom|mirrorPicking/.test(views), '不再先选地点再确认');
+  ok(/runSurvivor\(/.test(panel), '点下去走行动区那一次确认（runSurvivor）');
+  ok(/useMirrorPortal/.test(panel) && /toRoomId: rid/.test(panel), '确认的就是传到这个螺旋地点');
+  ok(/actorPlayerId: p\.id/.test(panel),
     '**带上 `actorPlayerId`**（额外行动按每个人列按钮，要认人）');
 }
 
-console.log('\n=== ③ 「要传送的那名幸存者」按人判，不看 `state.canUseMirrorPortal` ===');
+console.log('\n=== ③ 入口按这名幸存者自己的遗物判 ===');
 {
-  ok(/const mirrorActor = mirrorActorId/.test(views), '有 `mirrorActor` 这个派生值');
-  const at = views.indexOf('mirrorPicking &&');
-  const cond = at >= 0 ? views.slice(at, at + 400) : '';
-  ok(/mirrorActor/.test(cond), '面板条件用的是 `mirrorActor`', cond.split('\n')[0] ?? '');
-  ok(!/isSurvivorView && mirrorPicking && state\.canUseMirrorPortal/.test(views),
+  ok(/relic_mirror/.test(views), '看的是这名幸存者背包里的鏡之門戶');
+  ok(!/mirrorPicking && state\.canUseMirrorPortal/.test(views),
     '不再用 `state.canUseMirrorPortal`（那个是"针对 state.you"的，会点了没反应）');
 }
 
@@ -104,5 +93,5 @@ console.log('\n=== ⑤ 真打一局：传送本身照旧（额外行动、不占
   ok(s.mainActionUsed === false, '**不占一般行动**');
 }
 
-console.log(`\n鏡之門戶（额外行动 + 二次确认）：${pass} 通过 / ${fail} 失败`);
+console.log(`\n鏡之門戶（额外行动，只确认一次）：${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

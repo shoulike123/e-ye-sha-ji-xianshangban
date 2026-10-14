@@ -387,6 +387,12 @@ export interface PublicSnapshot {
   /** 【变体1】12 英勇阻截：问持有人要不要发动 / 逐个给其他幸存者选 1 格方向（只发持有人） */
   /** 【变体1】02 玩弄猎物：遭遇爆发时先问杀手要不要取消这次遭遇（只发杀手） */
   pendingPreyOffer?: boolean;
+  /** 【变体1】回合开始/结束特性：等这名杀手发动或跳过 */
+  pendingKillerTraitOffer?: {
+    when: 'start' | 'end';
+    killerId: string;
+    options: string[];
+  } | null;
   pendingHeroicBlock?: {
     holderId: string;
     started: boolean;
@@ -400,6 +406,8 @@ export interface PublicSnapshot {
   isHost: boolean;
   you: PublicPlayerView & { hand: string[]; skillUsedThisTurn: string[] };
   controllingActive: boolean;
+  /** 单人热座 / 观众手动在看的那一边；null 表示没手动切 */
+  watchSide?: 'killer' | 'survivor' | null;
   players: PublicPlayerView[];
   map: MapDef;
   playableMaps?: Array<{ id: string; name: string; backgrounds?: { survivor?: string; killer?: string } }>;
@@ -655,6 +663,10 @@ export interface PublicSnapshot {
     owner?: 'killer' | 'survivor';
     /** owner=survivor 时：这条草稿属于哪个幸存者 */
     actorId?: string;
+    planId?: string;
+    planIndex?: number;
+    /** 行动区标题。缺省是幸运币。 */
+    label?: string;
   } | null;
   killerRepairGuess?: number;
   rematchReady?: string[];
@@ -964,6 +976,8 @@ export type ClientAction =
       actorPlayerId?: string;
       /** 通道調查 ②：要穿过的秘密通道出口 */
       toRoomId?: string | null;
+      /** 現場研究：取消还没确认的移动 */
+      cancel?: boolean;
       /** 情報分享：选中的幸存者 */
       targetPlayerId?: string | null;
     }
@@ -982,7 +996,8 @@ export type ClientAction =
       toRoomId?: string;
       steps?: number;
       targetPlayerId?: string;
-      moves?: Array<{ playerId: string; toRoomId: string; steps?: number }>;
+      moves?: Array<{ playerId: string; toRoomId: string; steps?: number; path?: string[] }>;
+      path?: string[];
       choice?: 'removeBlockade' | 'clearFear' | 'noise';
       doorId?: string;
       /** 【变体1】杀手特性"弃 N 张卡牌来…"的代价（弃哪几张由杀手自己点手牌选） */
@@ -1000,6 +1015,8 @@ export type ClientAction =
   | { type: 'setSoloKiller'; characterId: string }
   | { type: 'setSoloSurvivor'; characterId: string }
   | { type: 'setFaction'; faction: 'killer' | 'survivor' | 'spectator' }
+  /** 单人热座 / 观众：改看杀手或幸存者那一边 */
+  | { type: 'setWatchSide'; side: 'killer' | 'survivor' }
   /** 【解散房间】除观众外谁都能点；其他人确认后房间解散、大家回主界面 */
   | { type: 'requestDisband' }
   | { type: 'confirmDisband' }
@@ -1193,7 +1210,7 @@ export type ClientAction =
   | { type: 'chooseSenseColor'; color: 'R' | 'B' | 'G' }
   | { type: 'chooseLurkTarget'; targetPlayerId: string }
   | { type: 'confirmAmulet'; use: boolean }
-  | { type: 'discardKillerCard'; cardId: string }
+  | { type: 'discardKillerCard'; cardId: string; cardIds?: string[] }
   | { type: 'advanceKillerStep' }
   | { type: 'chooseKillerMain'; choice: 'actions' }
   | { type: 'endTurn' }
@@ -1213,7 +1230,8 @@ export type ClientAction =
   | {
       type: 'encounterFlee';
       moveToRoomId: string | null;
-      /** 【变体1】特性 09「生存本能」：撤离走 2 格（走完清空自己的恐惧） */
+      /** 【变体1】特性 09「生存本能」：一步一步点出的撤离路径（含起点），最多 2 步 */
+      path?: string[];
       fleeSteps?: 1 | 2;
     }
   | { type: 'pickEncounterTarget'; targetPlayerId: string }

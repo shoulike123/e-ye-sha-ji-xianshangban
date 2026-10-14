@@ -27,6 +27,7 @@ import {
 } from './effects.js';
 /** 守護之石出示后要**从背包移除并进普通弃牌堆**（它不是 ∞） */
 import { discardRelic, removeRelic } from './relic.js';
+import { offerSenseTraits } from './traits.js';
 import {
   hasEvolutionPending,
   maybeOfferWhizSearch,
@@ -490,9 +491,12 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
     // —— 狼人（killer5）——
     case 'moveNearestNoiseSearch':
       return moveNearestNoiseSearch(state);
-    case 'senseAllNoise':
-      senseAllNoise(state);
+    case 'senseAllNoise': {
+      const seen = senseAllNoise(state);
+      queenSenseFear(state, seen);
+      offerSenseTraits(state, seen);
       return false;
+    }
     // —— 未命名（killer7）——
     case 'removeFromDiscardPermanent': {
       /**
@@ -541,9 +545,12 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
         }
       }
       return true;
-    case 'senseRange':
-      senseRange(state, typeof fx.value === 'number' ? fx.value : 1);
+    case 'senseRange': {
+      const seen = senseRange(state, typeof fx.value === 'number' ? fx.value : 1);
+      queenSenseFear(state, seen);
+      offerSenseTraits(state, seen);
       return false;
+    }
     /**
      * ⚠ **进化卡牌的那 6 个 op 原来在这里各有一个 `case`，已经删掉**：
      * `passageBecomesAnyStealth` / `crawlBecomesOneToThree` / `nextAttackPower` /
@@ -892,7 +899,7 @@ export function resolveSenseColor(state: GameState, color: 'R' | 'B' | 'G'): voi
   const whoLine = found.length
     ? `看到 ${found.length} 名幸存者：${found.map((s) => s.name).join('、')}`
     : '没有看到人。';
-  log(state, `感知${label}区域 —— ${placeLine}；${whoLine}`, 'killer');
+  log(state, `感知${label}区域 —— ${placeLine}；${whoLine}`, 'all', true);
   /** 这个颜色区只有一个地点时，看到的人就在那里 */
   noteSingleRoomSense(state, rooms, found);
   /**
@@ -902,6 +909,8 @@ export function resolveSenseColor(state: GameState, color: 'R' | 'B' | 'G'): voi
   setKillerInfo(state, `感知${label}区域`, [placeLine, whoLine]);
   /** 女王等级 2：感知目击 → 惊吓 */
   queenSenseFear(state, found);
+  /** 发现了人之后，10 / 15 / 16 由杀手自己决定发不发动 */
+  offerSenseTraits(state, found);
   continueKillerQueue(state);
 }
 

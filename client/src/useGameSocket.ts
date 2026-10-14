@@ -74,11 +74,14 @@ export function useGameSocket() {
     let cancelled = false;
     const s = io(SOCKET_URL || undefined, { transports: ['websocket', 'polling'] });
     setSocket(s);
-    s.on('connect', () => {
-      if (cancelled) return;
-      setConnected(true);
+    let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
+    /**
+     * 服务器重启的那几秒里，第一次加入会失败。
+     * 先多试一会儿，别一失败就把房间码忘掉 —— 进度在服务器上还留着。
+     */
+    const tryRejoin = (attempt: number) => {
       const sess = readRoomSession();
-      if (!sess) return;
+      if (!sess || cancelled) return;
       s.emit(
         'joinRoom',
         { roomCode: sess.roomCode, name: sess.name },
@@ -89,22 +92,33 @@ export function useGameSocket() {
             setError(null);
             return;
           }
+          if (attempt < 8) {
+            setError(`正在回到房间 ${sess.roomCode}……服务器重启时会自动接上这一局。`);
+            rejoinTimer = setTimeout(() => tryRejoin(attempt + 1), 1500);
+            return;
+          }
           /**
-           * ⚠ **重连之后回不到原来那桌**（服务器重启过 / 房间被解散 / 座位没了）。
-           *
-           * 以前这里**什么都不做**：界面继续显示那份过期快照，
-           * 点任何按钮服务端都回「你不在任何房间中」，看起来就是
-           * 「挂久了啥都点不了」。现在直接退回主界面 + 说清原因。
+           * 重试完仍回不去（房间被解散，或空置超过 5 分钟）。
+           * 这时才清掉本地记忆，退回主界面。
            */
           clearRoomSession();
           setState(null);
           setCursors([]);
           setError(
             `原来的房间（${sess.roomCode}）已经不在了` +
-              `${res?.error ? `：${res.error}` : '（服务器可能重启过）'} —— 请重新建房或加入。`,
+              `${res?.error ? `：${res.error}` : ''} —— 全员离开超过 5 分钟就会解散。请重新建房或加入。`,
           );
         },
       );
+    };
+    s.on('connect', () => {
+      if (cancelled) return;
+      setConnected(true);
+      if (rejoinTimer) {
+        clearTimeout(rejoinTimer);
+        rejoinTimer = null;
+      }
+      tryRejoin(0);
     });
     s.on('disconnect', () => {
       if (cancelled) return;
@@ -148,6 +162,7 @@ export function useGameSocket() {
     });
     return () => {
       cancelled = true;
+      if (rejoinTimer) clearTimeout(rejoinTimer);
       s.disconnect();
     };
   }, []);

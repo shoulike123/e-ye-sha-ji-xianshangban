@@ -111,6 +111,13 @@ export function killerCardPlayBlockReason(
     return null;
   }
   /**
+   * 【超听觉】场上没有响声就不能打。爆竹标记算全场都有响声。
+   */
+  if (ops.has('moveNearestNoiseSearch')) {
+    const noisy = Boolean(state.firecrackerThisRound) || (state.noises ?? []).length > 0;
+    if (!noisy) return '场上没有响声，现在不能使用';
+  }
+  /**
    * **效果自带的 `requires` 前置条件**（对齐服务端 `cardRequirementBlockReason`）。
    * 以前引擎压根不检查，牌面写着「只有场上有受伤的幸存者时才能使用」的
    * 「鲜血追猎」在没人受伤时也能打出去。

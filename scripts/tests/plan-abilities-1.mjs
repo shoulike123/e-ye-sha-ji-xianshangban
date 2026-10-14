@@ -200,6 +200,7 @@ console.log('=== ⑥ 行动入口 usePlanAbility ===');
   ok((st.planMarkers ?? []).includes(actor.roomId),
     '计划标记放在了他所在地点', JSON.stringify(st.planMarkers));
   ok((actor.items.toolbox ?? 0) === 0, '工具箱被扣掉');
+  ok(actor.mainActionUsed === true, '特殊行动占掉一般行动');
   /** 再来一次：每场一次 → 被拒 */
   actor.items.toolbox = 1;
   const err2 = (() => {

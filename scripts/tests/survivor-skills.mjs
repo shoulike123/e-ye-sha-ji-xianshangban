@@ -207,6 +207,40 @@ console.log('=== ③ 乔治笔记的判定时机 ===');
   enterNoiseReport(st2);
   ok(!st2.pendingGeorgeNote, '距离超过 1 时不给笔记', `乔治B1 / 杀手B5`);
   ok(st2.phase === 'noiseReport', '不满足条件时照常收尾', st2.phase);
+
+  /** 背包已满：先留在幸存者阶段弃装，弃完才进响声（单人热座才不会切到杀手界面） */
+  const stFull = mk('survivor6');
+  const sFull = giveTurn(stFull, 'B1');
+  killer(stFull).roomId = 'B1';
+  killer(stFull).stealth = false;
+  stFull.notesDeck = content.cards.note.map((c) => c.id);
+  /** 真实对局里笔记是发现阶段收尾时给的，phase 还停在 discovery */
+  stFull.phase = 'discovery';
+  stFull.discoveryOptions = [];
+  sFull.items = { toolbox: 3 };
+  enterNoiseReport(stFull);
+  ok(stFull.pendingGeorgeNote === true, '背包满了仍能挑笔记');
+  const fullNote = stFull.notesDeck[0];
+  handleAction(stFull, sFull.controllerId, { type: 'chooseGeorgeNote', noteId: fullNote }, content);
+  ok(Boolean(stFull.pendingItemDiscard), '笔记让背包溢出，挂起弃装', JSON.stringify(stFull.pendingItemDiscard));
+  ok(stFull.phase === 'discovery', '弃装完成前留在发现阶段（幸存者界面）', stFull.phase);
+  handleAction(stFull, sFull.controllerId, { type: 'discardItem', itemId: 'toolbox' }, content);
+  ok(!stFull.pendingItemDiscard, '弃完一件后背包不再溢出');
+  ok(stFull.phase === 'noiseReport', '弃完才进入响声阶段', stFull.phase);
+
+  /** 没开发现阶段时，大回合结束 phase 还在 survivorMain，弃完同样要进响声 */
+  const stMain = mk('survivor6');
+  const sMain = giveTurn(stMain, 'B1');
+  killer(stMain).roomId = 'B1';
+  killer(stMain).stealth = false;
+  stMain.notesDeck = content.cards.note.map((c) => c.id);
+  stMain.phase = 'survivorMain';
+  sMain.items = { toolbox: 3 };
+  enterNoiseReport(stMain);
+  handleAction(stMain, sMain.controllerId, { type: 'chooseGeorgeNote', noteId: stMain.notesDeck[0] }, content);
+  ok(stMain.phase === 'survivorMain', '没开发现时弃装前仍停在幸存者回合', stMain.phase);
+  handleAction(stMain, sMain.controllerId, { type: 'discardItem', itemId: 'toolbox' }, content);
+  ok(stMain.phase === 'noiseReport', '没开发现时弃完也进入响声阶段', stMain.phase);
 }
 
 /* ═══════════ ④ 警车规则 ═══════════ */

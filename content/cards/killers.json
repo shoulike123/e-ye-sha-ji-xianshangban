@@ -7,7 +7,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer1",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -20,7 +20,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer1",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -78,7 +78,7 @@
         "type": "killerAction",
         "speed": "slow",
         "owner": "killer1",
-        "text": "慢速：在你地点的一扇门上封堵。",
+        "text": "慢速：在你的地点【封堵】 1。",
         "effects": [
           {
             "op": "placeBlockade"
@@ -91,7 +91,7 @@
         "type": "killerAction",
         "speed": "slow",
         "owner": "killer1",
-        "text": "慢速：在你地点的一扇门上封堵。",
+        "text": "慢速：在你的地点【封堵】 1。",
         "effects": [
           {
             "op": "placeBlockade"
@@ -104,7 +104,7 @@
         "type": "killerAction",
         "speed": "slow",
         "owner": "killer1",
-        "text": "慢速：在你地点的一扇门上封堵。",
+        "text": "慢速：在你的地点【封堵】 1。",
         "effects": [
           {
             "op": "placeBlockade"
@@ -118,7 +118,7 @@
         "speed": "special",
         "owner": "killer1",
         "handCost": 2,
-        "text": "特殊（费用 2）：惊吓距离 1 内所有幸存者，移动 0–1，伤害你地点的幸存者。",
+        "text": "特殊（费用 2）：惊吓距离 1 内的所有幸存者，移动 0–1，伤害所有位于你地点的幸存者。",
         "effects": [
           {
             "op": "addFearRange",
@@ -198,7 +198,7 @@
         "locked": true,
         "unlockLevel": 3,
         "handCost": 1,
-        "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 并搜索房间。若没找到人且拆掉了封堵，则重复。",
+        "text": "锁定。等级 3 入手。特殊（费用 1）：移动 1–2 ，搜索。如果没有找到幸存者且移除了封堵标记，则重复。",
         "effects": [
           {
             "op": "move",
@@ -216,7 +216,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer2",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -229,7 +229,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer2",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -242,7 +242,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer2",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -428,7 +428,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer3",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -690,7 +690,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer6",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"
@@ -703,7 +703,7 @@
         "type": "killerAction",
         "speed": "fast",
         "owner": "killer6",
-        "text": "快速：感知一个颜色区域。",
+        "text": "快速：【感知】一个颜色区域。",
         "effects": [
           {
             "op": "senseColor"

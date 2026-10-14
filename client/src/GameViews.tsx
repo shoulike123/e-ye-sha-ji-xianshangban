@@ -243,7 +243,7 @@ const ACTION_SCALE_STEP = 0.05;
  * 卡面原文太长，塞进按钮里会把行动区撑爆；认不出来的就用原文。
  */
 const PLAN_EXTRA_LABEL: Record<string, string> = {
-  extraMove12: '本小回合额外移动 +2 格',
+  extraMove12: '额外移动 1–2 格',
   healClearFear: '治疗自己并移除所有恐惧',
   noiseOnPlanMarker: '在带计划标记的地点发出响声',
 };
@@ -346,6 +346,22 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
    * （用户要求：加一个【更多设置】按钮把它们收进去）。
    */
   const [moreSettingsOpen, setMoreSettingsOpen] = useState(initialMoreSettingsOpen);
+  /** 单人模式默认不放出来，在大厅连按 10 次 T 后才出现这颗按钮 */
+  const [soloUnlocked, setSoloUnlocked] = useState(false);
+  useEffect(() => {
+    if (soloUnlocked) return;
+    let presses = 0;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.key !== 't' && e.key !== 'T') return;
+      presses += 1;
+      if (presses >= 10) setSoloUnlocked(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [soloUnlocked]);
   const killers = state.characters
     .filter((c) => c.faction === 'killer')
     .sort((a, b) => characterOrder(a.id) - characterOrder(b.id));
@@ -462,13 +478,15 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
         )}
         {isHost && (
           <div className="row">
-            <button
-              type="button"
-              className={solo ? 'primary' : undefined}
-              onClick={() => onAction({ type: 'setMode', mode: 'solo' })}
-            >
-              单人模式
-            </button>
+            {(soloUnlocked || solo) && (
+              <button
+                type="button"
+                className={solo ? 'primary' : undefined}
+                onClick={() => onAction({ type: 'setMode', mode: 'solo' })}
+              >
+                单人模式
+              </button>
+            )}
             <button
               type="button"
               className={duo ? 'primary' : undefined}
@@ -1080,6 +1098,11 @@ export function viewerFactionOf(state: PublicSnapshot): Faction | null {
     ) {
       return 'killer';
     }
+    /**
+     * 【变体1】「安静搜查」还没答完：留在幸存者界面。
+     * 快进会把发现阶段一路推进到响声报告；答完之前不能切到杀手。
+     */
+    if (state.pendingQuietSearch) return 'survivor';
     // 装备溢出弃装不整页切阵营：杀手回合里仍留在杀手界面，弃装用行动区面板
     if (state.pendingAmulet) return 'survivor';
     if (
@@ -1113,13 +1136,9 @@ export function viewerFactionOf(state: PublicSnapshot): Faction | null {
 /**
  * 【观众】的界面：
  *  - **一开始默认幸存者界面**（不管现在是谁的回合）
- *  - 行动区只有一个按钮：切到另一边
+ *  - 行动区只有一个按钮：切到另一边（服务端按这一边重发手牌和迷雾）
  *  - 观众**不做任何操作**（`controllingActive` 为 false，所以不会出现行动按钮）
  */
-const SPECTATOR_TOGGLE: Record<'survivor' | 'killer', 'killer' | 'survivor'> = {
-  survivor: 'killer',
-  killer: 'survivor',
-};
 
 /**
  * 【一般行动的确认】—— 现在挂在**行动区**里，不再用浏览器弹窗。
@@ -1347,12 +1366,17 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    */
   const [traitDispatch, setTraitDispatch] = useState<{
     actorId: string;
+    /** 空字符串 = 还在选下一个人 */
     current: string;
     queue: string[];
-    moves: Array<{ playerId: string; toRoomId: string; steps: number }>;
+    moves: Array<{ playerId: string; toRoomId: string; steps: number; path: string[] }>;
   } | null>(null);
+  /** 生存本能撤离：一步一步点出的落点（不含起点），最多 2 步 */
+  const [fleePath, setFleePath] = useState<string[]>([]);
   /** 【变体1】杀手特性 14「嘲讽战术」：杀手点选手牌来弃（要弃几张由快照给） */
   const [traitDiscardPick, setTraitDiscardPick] = useState<string[]>([]);
+  /** 手牌超上限：先点选要弃的牌，张数够了再确认，点一下不会立刻弃掉 */
+  const [killerDiscardPick, setKillerDiscardPick] = useState<number[]>([]);
   /**
    * 【变体1】**杀手特性"弃 N 张卡牌来发动"的选牌过程**。
    *
@@ -1365,7 +1389,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     traitName: string;
     need: number;
   } | null>(null);
-  const [traitPayIds, setTraitPayIds] = useState<string[]>([]);
+  /** 按手牌下标选，同名牌可以各弃一份 */
+  const [traitPayIdx, setTraitPayIdx] = useState<number[]>([]);
   const [evoPayIds, setEvoPayIds] = useState<string[]>([]);
   const [extraPick, setExtraPick] = useState<{
     kind: 'whiskey' | 'adrenaline' | 'sprint' | 'noteNoise' | 'traitRoom';
@@ -1381,6 +1406,10 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
      */
     traitId?: string;
     traitChoice?: 'removeBlockade' | 'clearFear' | 'noise';
+    /** 一步一步点的路径（含起点）。有这个字段就不再一格跳到终点。 */
+    pathMin?: number;
+    pathMax?: number;
+    pathDraft?: string[];
   } | null>(null);
   /** 乔治的笔记图鉴 / 挑笔记弹窗 */
   const [georgePanelOpen, setGeorgePanelOpen] = useState(false);
@@ -1435,34 +1464,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const [gateActorId, setGateActorId] = useState<string | null>(null);
   /** 【城堡】杀手过门要弃的 3 张牌（客户端先点、确认后一次发出去） */
   const [gatePayIds, setGatePayIds] = useState<string[]>([]);
-  /**
-   * 【墓穴遗物】鏡之門戶：正在选要传送到哪个 🌀 地点。
-   * （遗物**就是背包物品**，没有单独的遗物栏，所以不需要额外的查看状态。）
-   */
-  const [mirrorPicking, setMirrorPicking] = useState(false);
-  /**
-   * 【墓穴遗物】鏡之門戶：**已经点中、还没按「确认传送」**的那个 🌀 地点。
-   *
-   * 用户口径：「镜之门户的传送是额外行动，**在行动区做二次确认**」——
-   * 以前是点一下目标就直接传走（而且那排目标按钮还挂在「特殊行动」那一栏里）。
-   * 现在和"停滞雕像 / 陷阱重置"一个套路：先选中 → 行动区按「确认传送」。
-   */
-  const [mirrorPickRoom, setMirrorPickRoom] = useState<string | null>(null);
-  /**
-   * 【墓穴遗物】鏡之門戶：**是哪名幸存者要传送**。
-   *
-   * ⚠ 额外行动弹窗是**按每个幸存者**列按钮的（单人热座一个人管三名），
-   * 所以要把人记下来、动作里带上 `actorPlayerId` ——
-   * 不然会算到"当前行动者"头上（那人可能根本没这件遗物）。
-   */
-  const [mirrorActorId, setMirrorActorId] = useState<string | null>(null);
-  /** 这些"选择中"的临时状态在条件消失时要收掉，免得下次进来还亮着 */
-  useEffect(() => {
-    if (!state.canUseMirrorPortal) {
-      setMirrorPicking(false);
-      setMirrorPickRoom(null);
-    }
-  }, [state.canUseMirrorPortal]);
   useEffect(() => {
     if (!state.canUseFirstAidKit) setFirstAidPicking(null);
   }, [state.canUseFirstAidKit]);
@@ -1477,6 +1478,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const gateActor = gateActorId ? state.players.find((x) => x.id === gateActorId) : null;
   const gateUsable =
     gatePicking && state.map.id === 'castle' && gateActor?.roomId === 'R1';
+  useEffect(() => {
+    setKillerDiscardPick([]);
+  }, [state.pendingKillerDiscards]);
   useEffect(() => {
     if (gatePicking && !gateUsable) {
       setGatePicking(false);
@@ -1536,11 +1540,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const placeKey = `nh_place_${state.roomCode}_${state.matchId ?? 'legacy'}_killer`;
   const [placed, setPlaced] = useState<Record<string, string>>(() => readPlacedStandee(placeKey));
   const isActive = state.controllingActive;
-  /**
-   * 【观众】看哪一边的界面：**默认幸存者**，点按钮切换。
-   * 只影响"用哪边的眼睛看"，不影响对局（观众不能操作）。
-   */
-  const [spectatorView, setSpectatorView] = useState<'survivor' | 'killer'>('survivor');
   const isSpectator = state.you.faction === 'spectator';
   /**
    * 2对3：【查看另一名杀手界面】。
@@ -1557,27 +1556,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const ch = state.characters.find((c) => c.id === state.you.characterId);
   const enc = state.encounter;
   /**
-   * 【单人热座】**手动切换"现在看哪一边"**（用户要求：行动区加一个按钮）。
-   *
-   * 单人模式一个人管杀手 + 三名幸存者，界面本来靠阶段自动推断；
-   * 但自动推断偶尔会和玩家的预期不一致（例如坍塌砸到幸存者时没切过去），
-   * 所以给一个随时能自己切的按钮。
-   *
-   * ⚠ **手动选择只在本阶段内有效**（用户报的「女王4级选完后没有正常切回幸存者界面」）：
-   * 以前只存 `Faction`、一旦点过就**永久粘住** —— 为了处理某个待办切过去之后，
-   * 待办做完了界面还留在那一边，得再手动切回来。
-   * 现在把"切的时候是哪个阶段"一起记下来，**阶段一变就自动交还给推断**
-   * （女王 4 级那一下：`upkeep` 里选完 → 收尾 → `survivorMain`，界面自己就回幸存者了）。
+   * 单人热座 / 观众：服务端按 `watchSide` 重发这一边的手牌、迷雾和战报。
+   * 单人没手动切、或阶段已经变了，就交回按阶段的自动推断。
+   * 观众没切过时默认幸存者。
    */
-  const [manualPick, setManualPick] = useState<{ faction: Faction; phase: string } | null>(null);
-  const manualFaction = manualPick && manualPick.phase === state.phase ? manualPick.faction : null;
-  useEffect(() => {
-    /** 换模式 / 离开单人局时把手动选择清掉，免得残留到别的模式 */
-    if (state.mode !== 'solo') setManualPick(null);
-  }, [state.mode]);
+  const watchedSide = state.watchSide === 'killer' || state.watchSide === 'survivor' ? state.watchSide : null;
   const viewerFaction = isSpectator
-    ? spectatorView
-    : (state.mode === 'solo' ? (manualFaction ?? viewerFactionOf(state)) : viewerFactionOf(state));
+    ? (watchedSide ?? 'survivor')
+    : state.mode === 'solo' && watchedSide
+      ? watchedSide
+      : viewerFactionOf(state);
 
   useEffect(() => {
     setDefenseItemId(null);
@@ -1591,6 +1579,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
      */
     setFleePick(enc?.step === 'flee' && enc?.fleeTargetId === state.you.id);
     setFleeDest(null);
+    setFleePath([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enc?.targetId, enc?.step, enc?.fleeTargetId, state.you.id]);
   useEffect(() => {
@@ -2205,6 +2194,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     gateUsable,
     gateDoorFrom,
   ]);
+  /**
+   * 生存本能的第 2 步：服务端只下发相邻 1 格，第 2 步从路径末端再亮。
+   * 没有这张特性时保持 null，地图继续用服务端的 `legalMoves`。
+   */
+  const fleeInstinctRooms = (() => {
+    if (!fleePick || state.phase !== 'encounter') return null;
+    const fleer = state.players.find((pl) => pl.id === state.encounter?.fleeTargetId);
+    if (!fleer?.roomId || !(fleer.traits ?? []).includes('trait_s09')) return null;
+    const last = fleePath.length ? fleePath[fleePath.length - 1]! : fleer.roomId;
+    if (fleePath.length >= 2) return [last];
+    const next = neighbors(state.map, last, pathOpts);
+    return [...new Set(fleePath.length ? [last, ...next] : next)];
+  })();
   const previewPath = pathDraftRooms.length
     ? pathDraftRooms
     : senseFirst
@@ -2218,7 +2220,14 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
          */
         extraPick?.kind === 'sprint' && sprintDraftRooms.length
         ? sprintDraftRooms
-        : extraDest && extraPick
+        : extraPick?.pathDraft && extraPick.pathDraft.length > 1
+          ? extraPick.pathDraft
+          : fleePath.length
+            ? (() => {
+                const fleer = state.players.find((pl) => pl.id === state.encounter?.fleeTargetId);
+                return fleer?.roomId ? [fleer.roomId, ...fleePath] : fleePath;
+              })()
+            : extraDest && extraPick
           ? extraPick.kind === 'whiskey' ||
             extraPick.kind === 'noteNoise' ||
             extraPick.kind === 'traitRoom'
@@ -2497,7 +2506,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    * 六种一般行动（移动 / 搜索 / 修理 / 拆封堵 / 消恐惧 / 特殊）里，
    * 一种还没确认时不能改做别的。确认之前都可以取消。
    */
-  const generalPickLock: string | null = state.pendingCrossbow
+  const pickLockReason: string | null = state.pendingCrossbow
     ? '十字弩还没确认'
     : state.pendingGeorgeBlockade
       ? '乔治的笔记还没确认'
@@ -2507,15 +2516,41 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
           ? '拆除封堵还没确认'
           : traitTargetPick
             ? '特殊行动还没确认'
-            : extraPick
-            ? '当前行动还没确认'
-            : mirrorPicking
-              ? '鏡之門戶还没确认'
+            : traitDispatch
+              ? '调度人员还没确认'
+              : extraPick
+              ? '当前行动还没确认'
               : pendingAct
-                ? '请先确认或取消当前行动'
-                : activeMoveDest
-                  ? '移动还没确认'
-                  : null;
+                  ? '请先确认或取消当前行动'
+                  : activeMoveDest
+                    ? '移动还没确认'
+                    : null;
+  /**
+   * 正在做某件事的幸存者。只有他们不能再开别的行动，其他人照常。
+   */
+  const busySurvivorIds = new Set<string>();
+  const claimBusy = (id: string | null | undefined) => {
+    if (id) busySurvivorIds.add(id);
+  };
+  if (extraPick) claimBusy(extraPick.actorPlayerId ?? state.you.id);
+  if (traitDispatch) {
+    claimBusy(traitDispatch.actorId);
+    claimBusy(traitDispatch.current || null);
+  }
+  if (traitTargetPick) claimBusy(state.you.id);
+  if (unblockPick) claimBusy(unblockPick.actorId);
+  if (gatePicking) claimBusy(gateActorId ?? state.you.id);
+  if (coinPathDraft) claimBusy(state.pendingPathDraft?.actorId ?? state.you.id);
+  if (state.pendingCrossbow) claimBusy(state.crossbowHolderId ?? state.you.id);
+  if (state.pendingGeorgeBlockade) {
+    const g = state.players.find((pl) => isGeorgePiece(pl));
+    claimBusy(g?.id ?? state.you.id);
+  }
+  if (activeMoveDest || moveDraftRooms.length > 1) claimBusy(state.activePlayerId ?? state.you.id);
+  if (pendingAct) claimBusy(state.you.id);
+  /** 行动区这排按钮属于正在行动的人：锁只在锁到他本人时才灰掉 */
+  const generalPickLock =
+    pickLockReason && busySurvivorIds.has(state.you.id) ? pickLockReason : null;
   const mustDoGeneral =
     isActive &&
     isSurvivorView &&
@@ -2781,13 +2816,53 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       setSprintDraftRooms([...draft, roomId]);
       return;
     }
+    if (extraPick?.pathDraft && extraPick.pathMax) {
+      const draft = extraPick.pathDraft;
+      const last = draft[draft.length - 1];
+      if (!last) return;
+      if (draft.length > 1 && roomId === last) {
+        const next = draft.slice(0, -1);
+        const tip = next[next.length - 1]!;
+        setExtraPick({
+          ...extraPick,
+          pathDraft: next,
+          rooms: neighbors(state.map, tip, pathOpts),
+        });
+        return;
+      }
+      if (draft.length - 1 >= extraPick.pathMax) return;
+      if (!neighbors(state.map, last, pathOpts).includes(roomId)) return;
+      const next = [...draft, roomId];
+      setExtraPick({
+        ...extraPick,
+        pathDraft: next,
+        rooms: next.length - 1 >= extraPick.pathMax ? [roomId] : neighbors(state.map, roomId, pathOpts),
+      });
+      return;
+    }
     if (extraPick) {
       if (!extraPick.rooms.includes(roomId)) return;
       setExtraDest(toggle);
       return;
     }
     if (fleePick && state.phase === 'encounter') {
-      if (state.legalMoves.includes(roomId) || roomId === fleeDest) setFleeDest(toggle);
+      const fleer = state.players.find((pl) => pl.id === state.encounter?.fleeTargetId);
+      const instinct = (fleer?.traits ?? []).includes('trait_s09');
+      if (!instinct) {
+        if (state.legalMoves.includes(roomId) || roomId === fleeDest) setFleeDest(toggle);
+        return;
+      }
+      const start = fleer?.roomId;
+      if (!start) return;
+      const draft = fleePath.length ? [start, ...fleePath] : [start];
+      const last = draft[draft.length - 1]!;
+      if (fleePath.length && roomId === last) {
+        setFleePath(fleePath.slice(0, -1));
+        return;
+      }
+      if (draft.length - 1 >= 2) return;
+      if (!neighbors(state.map, last, pathOpts).includes(roomId)) return;
+      setFleePath([...fleePath, roomId]);
       return;
     }
     /**
@@ -2926,7 +3001,61 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   };
 
   const confirmExtraDest = () => {
-    if (!extraPick || !extraDest) return;
+    if (!extraPick) return;
+    /**
+     * 一步一步点出来的路径（速度爆发 2–4、调度人员每人 1–2）。
+     * 不走「点一个终点再按最短路」那条。
+     */
+    if (extraPick.pathDraft && extraPick.pathMax) {
+      const path = extraPick.pathDraft;
+      const steps = path.length - 1;
+      if (steps < (extraPick.pathMin ?? 1) || steps > extraPick.pathMax) return;
+      if (extraPick.traitId === 'trait_s02' && traitDispatch) {
+        const moves = [
+          ...traitDispatch.moves,
+          {
+            playerId: traitDispatch.current,
+            toRoomId: path[path.length - 1]!,
+            steps,
+            path: [...path],
+          },
+        ];
+        if (traitDispatch.queue.length) {
+          setTraitDispatch({ ...traitDispatch, current: '', moves });
+          setExtraPick(null);
+          setExtraDest(null);
+          return;
+        }
+        const actorId = traitDispatch.actorId;
+        setTraitDispatch(null);
+        setExtraPick(null);
+        setExtraDest(null);
+        void runSurvivor('发动「调度人员」', {
+          type: 'useTrait',
+          traitId: 'trait_s02',
+          actorPlayerId: actorId,
+          moves,
+        });
+        return;
+      }
+      const dest = path[path.length - 1]!;
+      const actorId = extraPick.actorPlayerId;
+      const traitId = extraPick.traitId ?? '';
+      setExtraPick(null);
+      setExtraDest(null);
+      void runSurvivor(
+        `发动特性卡（${roomDisplayName(state.map, dest, viewerFaction)}）`,
+        {
+          type: 'useTrait',
+          traitId,
+          actorPlayerId: actorId,
+          path: [...path],
+          toRoomId: dest,
+        },
+      );
+      return;
+    }
+    if (!extraDest) return;
     if (extraPick.kind === 'sprint') {
       void runSurvivor(`短跑冲刺到${roomDisplayName(state.map, extraDest, viewerFaction)}`, {
         type: 'useSkill',
@@ -2936,56 +3065,10 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       });
     } else if (extraPick.kind === 'traitRoom') {
       /**
-       * 【变体1】特性卡点地图：目的地就是 `extraDest`。
-       *
-       * - 速度爆发（01）：步数按**实际距离**推（2–4 步，服务端要求"正好 N 步"）；
-       * - **调度人员（02）：这里是"为当前这个人选一步"** —— 记下来之后自动轮到下一个，
-       *   全部选完才一次性提交（`moves`）；
-       * - 明智之举（19）：带 `choice`（拆封堵 / 相邻响声）；
-       * - 声音诱饵（13）、迅速反应（20）：不需要额外参数。
+       * 【变体1】点一个地点就结束的特性：
+       * 明智之举（拆封堵 / 相邻响声）、声音诱饵、迅速反应、英勇阻截。
+       * 速度爆发和调度人员走上面的路径草稿，不进这里。
        */
-      const start =
-        state.players.find((pl) => pl.id === (extraPick.actorPlayerId ?? state.you.id))?.roomId ??
-        state.you.roomId;
-      const pathLen = start
-        ? (shortestPath(state.map, start, extraDest, pathOpts)?.length ?? 1) - 1
-        : 1;
-      if (extraPick.traitId === 'trait_s02' && traitDispatch) {
-        const steps = Math.max(1, Math.min(2, pathLen));
-        const moves = [
-          ...traitDispatch.moves,
-          { playerId: traitDispatch.current, toRoomId: extraDest, steps },
-        ];
-        const next = traitDispatch.queue[0];
-        const nextRoom = next
-          ? state.players.find((pl) => pl.id === next)?.roomId
-          : null;
-        if (next && nextRoom) {
-          /** 还没选完：记下这一步，接着为下一个人选 */
-          setTraitDispatch({
-            ...traitDispatch,
-            current: next,
-            queue: traitDispatch.queue.slice(1),
-            moves,
-          });
-          setExtraPick({
-            ...extraPick,
-            rooms: roomsAtDistance(state.map, nextRoom, 1, 2, { blockades: state.blockades }),
-            actorPlayerId: next,
-          });
-          setExtraDest(null);
-          return;
-        }
-        /** 全部选完 → 一次性提交 */
-        setTraitDispatch(null);
-        void runSurvivor('发动「调度人员」', {
-          type: 'useTrait',
-          traitId: 'trait_s02',
-          actorPlayerId: traitDispatch.actorId,
-          moves,
-        });
-        return;
-      }
       void runSurvivor(
         `发动特性卡（${roomDisplayName(state.map, extraDest, viewerFaction)}）`,
         {
@@ -2995,7 +3078,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
           /** 12 英勇阻截：这里点的是"轮到的那个人"走哪一格 */
           targetPlayerId: extraPick.traitId === 'trait_s12' ? extraPick.actorPlayerId : undefined,
           toRoomId: extraDest,
-          steps: extraPick.traitId === 'trait_s01' ? Math.max(2, Math.min(4, pathLen)) : undefined,
           choice: extraPick.traitChoice,
         },
       );
@@ -3026,6 +3108,20 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   };
 
   const confirmFleeDest = async () => {
+    const fleer = state.players.find((pl) => pl.id === state.encounter?.fleeTargetId);
+    const instinct = (fleer?.traits ?? []).includes('trait_s09');
+    if (instinct) {
+      if (!fleePath.length || !fleer?.roomId) return;
+      await onAction({
+        type: 'encounterFlee',
+        path: [fleer.roomId, ...fleePath],
+        moveToRoomId: fleePath[fleePath.length - 1]!,
+      });
+      setFleePath([]);
+      setFleeDest(null);
+      setFleePick(false);
+      return;
+    }
     if (!fleeDest) return;
     await onAction({ type: 'encounterFlee', moveToRoomId: fleeDest });
     setFleeDest(null);
@@ -3081,16 +3177,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       .map(([roomId, list]) => ({ roomId, list }));
   })();
   /**
-   * 【墓穴遗物】鏡之門戶：**正要传送的那名幸存者**（额外行动按人记）。
-   *
-   * ⚠ 不能用 `state.canUseMirrorPortal` 判 —— 那个字段是"针对 `state.you`"算的，
-   * 而额外行动弹窗是按每个人列按钮的：A 有遗物、当前行动的却是 B，
-   * 用那个字段就会出现"点了没反应"。
-   */
-  const mirrorActor = mirrorActorId
-    ? survivors.find((p) => p.id === mirrorActorId) ?? null
-    : null;
-  /**
    * 【变体1】**每名杀手各自的特性卡**（用户要求：放进**各自**的卡牌区）。
    *
    * ⚠ 2对3 里两名杀手各自抽各自选，所以这里**按杀手分组**、不混成一行；
@@ -3125,7 +3211,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     .filter((d): d is TraitDef => Boolean(d))
     .filter((d) => !(d.oncePerGame && (state.traitUsed ?? []).includes(d.id)));
   const mySpecialTraits = myTraits.filter((d) => d.kind === 'special');
-  const myExtraTraits = myTraits.filter((d) => d.kind === 'extra');
   const actingSurvivor =
     state.phase === 'survivorMain' || state.phase === 'discovery'
       ? state.players.find((p) => p.id === state.activePlayerId && p.faction === 'survivor')
@@ -3212,12 +3297,18 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    */
   const traitDisabledReasons: Record<string, string> = {};
   if (!isSurvivorView && state.variant1) {
+    const timed = new Set(['trait_k01', 'trait_k05', 'trait_k06', 'trait_k07', 'trait_k20']);
+    const offerIds = new Set(state.pendingKillerTraitOffer?.options ?? []);
     for (const group of killerTraitGroups) {
-      if (group.id !== state.you.id) continue;
+      if (group.id !== state.you.id && group.id !== state.pendingKillerTraitOffer?.killerId) continue;
       for (const def of group.defs) {
         const need = KILLER_TRAIT_PAY_CLIENT[def.id] ?? 0;
         if (need > 0 && killerHand.length < need)
           traitDisabledReasons[def.id] = `手牌只有 ${killerHand.length} 张，不够弃 ${need} 张`;
+        else if (timed.has(def.id) && !offerIds.has(def.id))
+          traitDisabledReasons[def.id] = state.pendingKillerTraitOffer
+            ? '现在不是这张的时机'
+            : '会在该杀手的大回合开始或结束时询问';
       }
     }
   }
@@ -3232,6 +3323,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const killerPlayable = new Set(
     !isSurvivorView &&
       isActive &&
+      !state.pendingKillerTraitOffer &&
       (state.phase === 'killerMain' ||
         (state.phase === 'encounter' && enc?.step === 'attack'))
       ? killerHand.filter((cid) => {
@@ -3307,29 +3399,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const playKillerCard = (cid: string) => {
     /**
      * 【变体1】**正在为发动杀手特性选要弃的牌** —— 点手牌就是选/取消选中，
-     * 选够张数立刻提交 `useTrait { payCardIds }`。
+     * 选够张数后要点「确认弃牌」才提交。
      *
      * ⚠ 必须排在最前面：否则点手牌会被下面"打牌 / 支付"那套吃掉，
      * 变成"以为在给特性选祭品、结果把牌打出去了"。
      */
     if (traitPay) {
-      const picked = traitPayIds.includes(cid)
-        ? traitPayIds.filter((x) => x !== cid)
-        : traitPayIds.length >= traitPay.need
-          ? traitPayIds
-          : [...traitPayIds, cid];
-      setTraitPayIds(picked);
-      if (!traitPayIds.includes(cid) && picked.length === traitPay.need) {
-        const pay = picked;
-        setTraitPay(null);
-        setTraitPayIds([]);
-        void onAction({
-          type: 'useTrait',
-          traitId: traitPay.traitId,
-          actorPlayerId: state.you.id,
-          payCardIds: pay,
-        });
-      }
+      const at = killerHand.indexOf(cid);
+      if (at < 0) return;
+      setTraitPayIdx((cur) => {
+        if (cur.includes(at)) return cur.filter((n) => n !== at);
+        if (cur.length >= traitPay.need) return cur;
+        return [...cur, at];
+      });
       return;
     }
     if (payForCard) {
@@ -3345,9 +3427,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         return;
       }
       if (payIds.length >= cost) return;
-      const next = [...payIds, cid];
-      setPayIds(next);
-      if (next.length === cost) finishKillerPlay(payForCard, next);
+      setPayIds([...payIds, cid]);
       return;
     }
     if (!killerPlayable.has(cid)) return;
@@ -3364,6 +3444,24 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     setPayForCard(cid);
     setPayPurpose('killerCard');
     setPayIds([]);
+  };
+  const cancelTraitPay = () => {
+    setTraitPay(null);
+    setTraitPayIdx([]);
+  };
+  const submitTraitPay = () => {
+    if (!traitPay || traitPayIdx.length !== traitPay.need) return;
+    const pay = traitPayIdx.map((i) => killerHand[i]).filter((id): id is string => Boolean(id));
+    const traitId = traitPay.traitId;
+    const actorPlayerId = state.pendingKillerTraitOffer?.killerId ?? state.you.id;
+    setTraitPay(null);
+    setTraitPayIdx([]);
+    void onAction({
+      type: 'useTrait',
+      traitId,
+      actorPlayerId,
+      payCardIds: pay,
+    });
   };
 
   /**
@@ -3458,9 +3556,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         <button type="button" className="ghost-btn" onClick={() => setRulesOpen(true)}>
           行动规则
         </button>
-        <a className="ghost-btn" href="/ui-layout/" target="_blank">
-          界面校准
-        </a>
         {state.mode === 'solo' && onLeave && (
           <button type="button" className="ghost-btn" onClick={onLeave}>
             退出主界面
@@ -3650,7 +3745,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     ? coinReachableRooms
                     : extraPick
                       ? extraPick.rooms
-                      : /**
+                      : fleeInstinctRooms
+                        ? fleeInstinctRooms
+                        : /**
                          * ⚠ 这里以前是一长串「哪些状态才放行 `state.legalMoves`」的**白名单**，
                          * 每加一种"点地图选点"的待选状态就会漏一个 ——
                          * 服务端把高亮算好了，客户端却不画，表现就是
@@ -3990,10 +4087,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   type="button"
                   className="ghost-btn viewer-switch-btn"
                   onClick={() =>
-                    setManualPick({
-                      faction: viewerFaction === 'killer' ? 'survivor' : 'killer',
-                      /** ⚠ 记下"切的时候是哪个阶段" —— 阶段一变就自动交还给推断 */
-                      phase: state.phase,
+                    void onAction({
+                      type: 'setWatchSide',
+                      side: viewerFaction === 'killer' ? 'survivor' : 'killer',
                     })}
                 >
                   切到{viewerFaction === 'killer' ? '幸存者' : '杀手'}界面
@@ -4048,22 +4144,25 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 <button
                   type="button"
                   className={
-                    !state.plans.currentId ||
-                    state.plans.pendingSwitch ||
-                    state.plans.pendingTarget
+                    !state.plans.completedId &&
+                    (!state.plans.currentId ||
+                      state.plans.pendingSwitch ||
+                      state.plans.pendingTarget)
                       ? 'primary'
                       : 'ghost-btn'
                   }
                   onClick={() => setPlanOpen(true)}
                 >
                   📋 计划卡
-                  {!state.plans.currentId
-                    ? '（还没确认）'
-                    : state.plans.pendingSwitch
-                      ? '（等人确认）'
-                      : state.plans.pendingTarget
-                        ? '（选人抽牌）'
-                        : ''}
+                  {state.plans.completedId
+                    ? ''
+                    : !state.plans.currentId
+                      ? '（还没确认）'
+                      : state.plans.pendingSwitch
+                        ? '（等人确认）'
+                        : state.plans.pendingTarget
+                          ? '（选人抽牌）'
+                          : ''}
                 </button>
                 <span className="muted">
                   {(() => {
@@ -4071,11 +4170,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     if (state.plans.pendingTarget) {
                       return `情報分享：请选一名幸存者从搜索牌库抽 1 张（点开计划卡）`;
                     }
+                    const done = state.plans.cards.find((c) => c.completed);
+                    if (done) return `计划「${done.name}」已完成`;
                     const cur = state.plans.cards.find((c) => c.active);
                     if (!cur) return '先确认一张计划（要所有幸存者玩家同意）';
                     const total = cur.progress.length;
-                    return `当前进行「${cur.name}」：进度 ${state.plans.step}/${total}` +
-                      (state.plans.step >= total ? '（已完成）' : '');
+                    return `当前进行「${cur.name}」：进度 ${state.plans.step}/${total}`;
                   })()}
                 </span>
               </div>
@@ -4412,19 +4512,55 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {extraPick && extraPick.kind !== 'sprint' && (
               <div className="stack">
                 <p className="muted">
-                  点地图选择地点，再点同一格可取消。选好后还要再确认一次。
-                  {extraPick.kind === 'whiskey' || extraPick.kind === 'adrenaline'
+                  {extraPick.pathDraft
+                    ? `一步一步点相邻地点（再点最后一格可退回）。当前 ${Math.max(0, extraPick.pathDraft.length - 1)} 步${
+                        extraPick.pathMin ? `，至少 ${extraPick.pathMin} 步` : ''
+                      }${extraPick.pathMax ? `，最多 ${extraPick.pathMax} 步` : ''}。确认之前可以取消。`
+                    : '点地图选择地点，再点同一格可取消。选好后还要再确认一次。'}
+                  {!extraPick.pathDraft && (extraPick.kind === 'whiskey' || extraPick.kind === 'adrenaline')
                     ? '确认之前可以取消，物品还不会用掉。'
-                    : '确认之前可以取消。'}
-                  {extraDest
+                    : !extraPick.pathDraft
+                      ? '确认之前可以取消。'
+                      : ''}
+                  {extraDest && !extraPick.pathDraft
                     ? ` 已选「${roomDisplayName(state.map, extraDest, viewerFaction)}」。`
+                    : ''}
+                  {extraPick.pathDraft && extraPick.pathDraft.length > 1
+                    ? ` 路线：${extraPick.pathDraft.map((id) => roomDisplayName(state.map, id, viewerFaction)).join(' → ')}。`
                     : ''}
                 </p>
                 <div className="row">
-                  <button type="button" onClick={() => { setExtraPick(null); setExtraDest(null); }}>
+                  <button type="button" onClick={() => { setExtraPick(null); setExtraDest(null); setTraitDispatch(null); }}>
                     取消
                   </button>
-                  {extraDest && (
+                  {extraPick.pathDraft && extraPick.pathDraft.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = extraPick.pathDraft!.slice(0, -1);
+                        const tip = next[next.length - 1];
+                        if (!tip || !extraPick.pathMax) return;
+                        setExtraPick({
+                          ...extraPick,
+                          pathDraft: next,
+                          rooms: neighbors(state.map, tip, pathOpts),
+                        });
+                      }}
+                    >
+                      退回一步
+                    </button>
+                  )}
+                  {extraPick.pathDraft && (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={extraPick.pathDraft.length - 1 < (extraPick.pathMin ?? 1)}
+                      onClick={confirmExtraDest}
+                    >
+                      确认这条路线（{Math.max(0, extraPick.pathDraft.length - 1)} 步）
+                    </button>
+                  )}
+                  {extraDest && !extraPick.pathDraft && (
                     <button type="button" className="primary" onClick={confirmExtraDest}>
                       确认
                       {extraPick.kind === 'whiskey'
@@ -4622,12 +4758,159 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
              * 【变体1】02 玩弄猎物：遭遇爆发时**先问杀手**要不要取消这次遭遇
              * （用户顺序：先杀手取不取消，再幸存者用不用 12）。
              */}
+            {!isSurvivorView && state.variant1 && state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0 && !state.pendingBlockade && !state.pendingBlockadeJob && state.pendingMoveRange == null && !state.killerSenseRoomActive && (
+              <div className="panel stack">
+                <strong>
+                  【变体1】{state.pendingKillerTraitOffer.when === 'start' ? '回合开始' : '回合结束'}
+                  ：可以发动特性
+                </strong>
+                <p className="muted">
+                  这是持有该特性的杀手的大回合。发动要先弃牌（点下面的手牌，同名牌可以各选一份），也可以都不发动。
+                </p>
+                {!traitPay && (
+                  <div className="row">
+                    {state.pendingKillerTraitOffer.options.map((id) => {
+                      const def = (state.traitDefs ?? []).find((d) => d.id === id);
+                      return (
+                        <button
+                          key={`trait-window-${id}`}
+                          type="button"
+                          className="primary"
+                          onClick={() => {
+                            const need = KILLER_TRAIT_PAY_CLIENT[id] ?? 0;
+                            if (need <= 0) {
+                              void onAction({
+                                type: 'useTrait',
+                                traitId: id,
+                                actorPlayerId: state.pendingKillerTraitOffer?.killerId ?? state.you.id,
+                              });
+                              return;
+                            }
+                            setTraitPay({ traitId: id, traitName: def?.name ?? id, need });
+                            setTraitPayIdx([]);
+                          }}
+                        >
+                          发动「{def?.name ?? id}」
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = state.pendingKillerTraitOffer?.options[0];
+                        if (!id) return;
+                        setTraitPay(null);
+                        setTraitPayIdx([]);
+                        void onAction({
+                          type: 'useTrait',
+                          traitId: id,
+                          decline: true,
+                          actorPlayerId: state.pendingKillerTraitOffer?.killerId ?? state.you.id,
+                        });
+                      }}
+                    >
+                      {state.pendingKillerTraitOffer.when === 'start' ? '都不发动，开始回合' : '都不发动，结束回合'}
+                    </button>
+                  </div>
+                )}
+                {traitPay && (
+                  <>
+                    <p className="muted">
+                      发动「{traitPay.traitName}」：点手牌选 {traitPay.need} 张弃置（已选 {traitPayIdx.length}/{traitPay.need}）。
+                    </p>
+                    <div className="row">
+                      {killerHand.map((cid, idx) => {
+                        const card = state.cardById[cid];
+                        const art = cardArtSrc(card, cid);
+                        const picked = traitPayIdx.includes(idx);
+                        return (
+                          <button
+                            key={`trait-pay-${cid}-${idx}`}
+                            type="button"
+                            className={picked ? 'card picked' : 'card'}
+                            onClick={() =>
+                              setTraitPayIdx((cur) => {
+                                if (cur.includes(idx)) return cur.filter((n) => n !== idx);
+                                if (cur.length >= traitPay.need) return cur;
+                                return [...cur, idx];
+                              })
+                            }
+                          >
+                            {art && <img className="inline-card-art" src={encodeURI(art)} alt="" />}
+                            <h4>{card?.name ?? cid}</h4>
+                            <span className="muted">{picked ? '已选中' : '点击选中'}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={traitPayIdx.length !== traitPay.need}
+                        onClick={submitTraitPay}
+                      >
+                        确认弃牌（{traitPayIdx.length}/{traitPay.need}）
+                      </button>
+                      <button type="button" onClick={cancelTraitPay}>
+                        取消
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            {!isSurvivorView && traitPay && !(state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0) && (
+              <div className="panel stack">
+                <p className="muted">
+                  发动「{traitPay.traitName}」：点手牌选 {traitPay.need} 张弃置（已选 {traitPayIdx.length}/{traitPay.need}）。同名牌可以各选一份。
+                </p>
+                <div className="row">
+                  {killerHand.map((cid, idx) => {
+                    const card = state.cardById[cid];
+                    const art = cardArtSrc(card, cid);
+                    const picked = traitPayIdx.includes(idx);
+                    return (
+                      <button
+                        key={`trait-pay-free-${cid}-${idx}`}
+                        type="button"
+                        className={picked ? 'card picked' : 'card'}
+                        onClick={() =>
+                          setTraitPayIdx((cur) => {
+                            if (cur.includes(idx)) return cur.filter((n) => n !== idx);
+                            if (cur.length >= traitPay.need) return cur;
+                            return [...cur, idx];
+                          })
+                        }
+                      >
+                        {art && <img className="inline-card-art" src={encodeURI(art)} alt="" />}
+                        <h4>{card?.name ?? cid}</h4>
+                        <span className="muted">{picked ? '已选中' : '点击选中'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={traitPayIdx.length !== traitPay.need}
+                    onClick={submitTraitPay}
+                  >
+                    确认弃牌（{traitPayIdx.length}/{traitPay.need}）
+                  </button>
+                  <button type="button" onClick={cancelTraitPay}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
             {!isSurvivorView && state.variant1 && state.pendingPreyOffer && (
               <div className="panel stack">
                 <strong>【变体1】玩弄猎物：要取消这次遭遇吗？</strong>
                 <p className="muted">
-                  取消的话：立刻结束这次遭遇、**额外抽 3 张卡牌**，然后本回合结束
-                  （回合结束的常规摸牌照常）。不取消就继续打，回头还会问幸存者的「英勇阻截」。
+                  取消的话：这次遭遇不算发生（幽魂 1 级这类开战效果不会触发），额外抽 3 张，然后本回合结束
+                  （回合结束的常规摸牌照常）。不取消才开战，回头还会问幸存者的「英勇阻截」。
                 </p>
                 <div className="row">
                   <button
@@ -4749,36 +5032,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         {x.name}
                       </button>
                     ))}
-                </div>
-              </div>
-            )}
-            {/**
-             * 【变体1】特性 11「安静搜查」的询问（用户口径：**每次发现要响时都问一句**）。
-             * 只发给本人；两个按钮决定这次响声取不取消（每局只能取消一次）。
-             */}
-            {state.variant1 && state.pendingQuietSearch && (
-              <div className="panel stack">
-                <strong>【变体1】安静搜查（每局一次）</strong>
-                <p className="muted">
-                  {state.pendingQuietSearch.from === 'suitcase'
-                    ? '手提箱翻到的发现牌带有响声标记'
-                    : '这次发现牌带有响声标记'}
-                  ——要不要用「安静搜查」取消这次响声？
-                </p>
-                <div className="row">
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => void onAction({ type: 'resolveQuietSearch', use: true })}
-                  >
-                    取消这次响声
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onAction({ type: 'resolveQuietSearch', use: false })}
-                  >
-                    让它照响
-                  </button>
                 </div>
               </div>
             )}
@@ -5273,16 +5526,20 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <div className="stack">
                 <p className="muted">
                   你在以【观众】身份观战 —— 当前是
-                  <strong>{spectatorView === 'survivor' ? '幸存者' : '杀手'}</strong>
+                  <strong>{viewerFaction === 'survivor' ? '幸存者' : '杀手'}</strong>
                   视角。观众不能操作对局。
                 </p>
                 <div className="row">
                   <button
                     type="button"
                     className="primary"
-                    onClick={() => setSpectatorView((v) => SPECTATOR_TOGGLE[v])}
+                    onClick={() =>
+                      void onAction({
+                        type: 'setWatchSide',
+                        side: viewerFaction === 'killer' ? 'survivor' : 'killer',
+                      })}
                   >
-                    切换{SPECTATOR_TOGGLE[spectatorView] === 'survivor' ? '幸存者' : '杀手'}视角
+                    切换{viewerFaction === 'killer' ? '幸存者' : '杀手'}视角
                   </button>
                 </div>
               </div>
@@ -5578,7 +5835,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           effectiveHandCost(state, state.cardById[payForCard]) - payIds.length,
                         )}
                       </strong>{' '}
-                      张手牌一同弃置（选够就会自动打出；再点已选的牌可取消）。
+                      张手牌一同弃置（选完再点确认；再点已选的牌可取消）。
                     </p>
                     <div className="row">
                       {killerHand
@@ -5610,6 +5867,17 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         })}
                     </div>
                     <div className="row">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={
+                          payIds.length !==
+                          effectiveHandCost(state, state.cardById[payForCard])
+                        }
+                        onClick={() => finishKillerPlay(payForCard, payIds)}
+                      >
+                        确认弃牌并打出
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -5884,30 +6152,54 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         </div>
                       </div>
                     )}
-                    {enc.fleeTargetId && (
+                    {enc.fleeTargetId && (() => {
+                      const fleer = state.players.find((pl) => pl.id === enc.fleeTargetId);
+                      const instinct = (fleer?.traits ?? []).includes('trait_s09');
+                      return (
                       <div className="stack">
                         <p className="muted">
-                          轮到 <strong>{state.players.find((pl) => pl.id === enc.fleeTargetId)?.name ?? '幸存者'}</strong>
-                          ：点地图选相邻 1 格，再点同一格可取消，确认后才移动。杀手看不见这次移动。
+                          轮到 <strong>{fleer?.name ?? '幸存者'}</strong>
+                          {instinct
+                            ? '：遭遇后自动可以走最多 2 步，一步一步点相邻地点，再点最后一格可退回。走完（包括留在原地）后自动消除恐惧。杀手看不见这次移动。'
+                            : '：点地图选相邻 1 格，再点同一格可取消，确认后才移动。杀手看不见这次移动。'}
                           （本场遭遇每人只移动这一次）
                         </p>
-                        {fleeDest && (
+                        {instinct && fleePath.length > 0 && (
+                          <p className="muted">
+                            路线：{(fleer?.roomId ? [fleer.roomId, ...fleePath] : fleePath)
+                              .map((id) => roomDisplayName(state.map, id, viewerFaction))
+                              .join(' → ')}
+                            （{fleePath.length}/2 步）
+                          </p>
+                        )}
+                        {instinct ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={fleePath.length < 1}
+                            onClick={() => void confirmFleeDest()}
+                          >
+                            确认移动（{fleePath.length}/2 步）
+                          </button>
+                        ) : fleeDest ? (
                           <button type="button" className="primary" onClick={() => void confirmFleeDest()}>
                             确认移动到{roomDisplayName(state.map, fleeDest, viewerFaction)}
                           </button>
-                        )}
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => {
                             void onAction({ type: 'encounterFlee', moveToRoomId: null });
                             setFleeDest(null);
+                            setFleePath([]);
                             setFleePick(false);
                           }}
                         >
                           留在原地
                         </button>
                       </div>
-                    )}
+                      );
+                    })()}
                   </>
                 )}
               </div>
@@ -5920,8 +6212,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <div className="stack">
                 <h4>正在行动：{state.you.name}</h4>
                 <p className="muted">
-                  {generalPickLock && !extraPick && !activeMoveDest
-                    ? `${generalPickLock}。确认之前可以取消，这期间不能改做别的行动。`
+                  {pickLockReason && !busySurvivorIds.has(state.you.id)
+                    ? `${pickLockReason}。地图先给那个人用，你仍可以做不需要点地图的行动。`
+                    : generalPickLock && !extraPick && !activeMoveDest && !traitDispatch
+                    ? `${generalPickLock}。确认之前可以取消，这期间这个人不能改做别的行动。`
+                    : traitDispatch && !extraPick
+                    ? '【变体1】调度人员：先选下一名要移动的人，再为他一步一步点 1–2 步。所有人都选完才一起走。'
                     : extraPick
                     ? extraPick.kind === 'whiskey'
                       ? '点地图选一个相邻地点，再点同一格可取消，确认后才发出响声。'
@@ -5930,13 +6226,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         : extraPick.kind === 'noteNoise'
                           ? '乔治的笔记：点地图选**任意一个地点**，再点同一格可取消，确认后在那个地点发出响声。'
                           : extraPick.kind === 'traitRoom'
-                            ? extraPick.traitId === 'trait_s01'
-                              ? '【变体1】速度爆发：点地图选目的地（**2–4 步**，按实际距离算），确认后先在本地发出响声再移动。'
+                            ? extraPick.pathDraft
+                              ? extraPick.traitId === 'trait_s02'
+                                ? `【变体1】调度人员：为 ${
+                                    state.players.find((pl) => pl.id === traitDispatch?.current)?.name ?? '这名幸存者'
+                                  } 一步一步点相邻地点（${Math.max(0, extraPick.pathDraft.length - 1)}/1–2 步）。再点最后一格可退回。`
+                                : `【变体1】速度爆发：一步一步点相邻地点（${Math.max(0, extraPick.pathDraft.length - 1)}/2–4 步）。再点最后一格可退回。确认后先在本地发出响声再移动。`
                               : extraPick.traitChoice === 'removeBlockade'
                                 ? '【变体1】明智之举：点地图选**有封堵标记**的地点（或门），确认后拆掉那里的一个封堵。'
                                 : extraPick.traitChoice === 'noise'
                                   ? '【变体1】明智之举：点地图选一个**相邻地点**，确认后在那个地点发出响声。'
-                                  : extraPick.traitId === 'trait_s13'
+                                  : extraPick.traitId === 'trait_s10'
+                                    ? '【变体1】鼓舞士气：点地图选一个地点，确认后移除该地点其他幸存者的所有恐惧。'
+                                    : extraPick.traitId === 'trait_s13'
                                     ? '【变体1】声音诱饵：点地图选**任意一个地点**，确认后在那个地点发出响声。'
                                     : '【变体1】迅速反应：点地图选一个**相邻地点**，确认后移动 1 步。'
                             : `短跑冲刺：一步一步点相邻地点选路线（再点路径上的格子可退回）。当前 ${Math.max(0, sprintDraftRooms.length - 1)}/3 步 —— **必须刚好 3 步**才能确认。`
@@ -5945,7 +6247,52 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     : activeMoveDest
                       ? `将按「${moveDraftRooms.map((id) => roomDisplayName(state.map, id, viewerFaction)).join(' → ')}」移动（${moveDraftRooms.length - 1} 步）· 未确认，不影响对局`
                       : '一步一步点相邻地点选路线（再点路径上的格子可退回）；选好后确认。'}
-                </p>                {extraPick && extraPick.kind === 'sprint' && (
+                </p>
+                {traitDispatch && !extraPick && (
+                  <div className="stack">
+                    <p className="muted">
+                      已排好 {traitDispatch.moves.length} 人
+                      {traitDispatch.queue.length ? `，还剩 ${traitDispatch.queue.length} 人` : ''}。
+                      点一个人，再在地图上为他一步一步选路线。
+                    </p>
+                    <div className="row">
+                      {traitDispatch.queue.map((id) => {
+                        const pl = state.players.find((s) => s.id === id);
+                        if (!pl) return null;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="primary"
+                            onClick={() => {
+                              if (!pl.roomId) return;
+                              setTraitDispatch({
+                                ...traitDispatch,
+                                current: id,
+                                queue: traitDispatch.queue.filter((x) => x !== id),
+                              });
+                              setExtraPick({
+                                kind: 'traitRoom',
+                                traitId: 'trait_s02',
+                                actorPlayerId: traitDispatch.actorId,
+                                rooms: neighbors(state.map, pl.roomId, pathOpts),
+                                pathMin: 1,
+                                pathMax: 2,
+                                pathDraft: [pl.roomId],
+                              });
+                            }}
+                          >
+                            移动 {pl.name}
+                          </button>
+                        );
+                      })}
+                      <button type="button" onClick={() => setTraitDispatch(null)}>
+                        取消调度
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {extraPick && extraPick.kind === 'sprint' && (
                   <div className="stack">
                     {sprintDraftRooms.length > 1 && (
                       <p className="muted">
@@ -5984,7 +6331,46 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     </div>
                   </div>
                 )}
-                {extraPick && extraPick.kind !== 'sprint' && (
+                {extraPick && extraPick.kind !== 'sprint' && extraPick.pathDraft && (
+                  <div className="row">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExtraPick(null);
+                        setExtraDest(null);
+                        setTraitDispatch(null);
+                      }}
+                    >
+                      取消
+                    </button>
+                    {extraPick.pathDraft.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = extraPick.pathDraft!.slice(0, -1);
+                          const tip = next[next.length - 1];
+                          if (!tip) return;
+                          setExtraPick({
+                            ...extraPick,
+                            pathDraft: next,
+                            rooms: neighbors(state.map, tip, pathOpts),
+                          });
+                        }}
+                      >
+                        退回一步
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={extraPick.pathDraft.length - 1 < (extraPick.pathMin ?? 1)}
+                      onClick={confirmExtraDest}
+                    >
+                      确认这条路线（{Math.max(0, extraPick.pathDraft.length - 1)} 步）
+                    </button>
+                  </div>
+                )}
+                {extraPick && extraPick.kind !== 'sprint' && !extraPick.pathDraft && (
                   <div className="row">
                     <button type="button" onClick={() => { setExtraPick(null); setExtraDest(null); }}>
                       取消（物品还不用掉）
@@ -6117,25 +6503,27 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         <>
                           <span className="muted">乔治·聪明绝顶（书本地点 · 同地无杀手 · 每回合 1 次）</span>
                           <div className="row">
-                            <button
-                              type="button"
-                              className="primary"
-                              disabled={!canBrilliant}
-                              title={
-                                killerHere
-                                  ? '与杀手同地不能使用'
-                                  : !brilliantLeft
-                                    ? '本回合已经用过'
-                                    : undefined
-                              }
-                              onClick={() =>
-                                void runSurvivor('聪明绝顶：弃工具箱 +1 修理', {
-                                  type: 'georgeToolboxRepair',
-                                })
-                              }
-                            >
-                              弃工具箱 +1 修理（{state.you.items.toolbox ?? 0}）
-                            </button>
+                            {(state.you.items.toolbox ?? 0) > 0 && (
+                              <button
+                                type="button"
+                                className="primary"
+                                disabled={!canBrilliant}
+                                title={
+                                  killerHere
+                                    ? '与杀手同地不能使用'
+                                    : !brilliantLeft
+                                      ? '本回合已经用过'
+                                      : undefined
+                                }
+                                onClick={() =>
+                                  void runSurvivor('聪明绝顶：弃工具箱 +1 修理', {
+                                    type: 'georgeToolboxRepair',
+                                  })
+                                }
+                              >
+                                弃工具箱 +1 修理（{state.you.items.toolbox ?? 0}）
+                              </button>
+                            )}
                             <button
                               type="button"
                               disabled={!canBrilliant}
@@ -6344,7 +6732,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {!isSpectator && viewerFaction === 'killer' && state.pendingKillerDiscards > 0 && (
               <div className="stack">
                 <p className="muted">
-                  手牌超过上限，请弃置 {state.pendingKillerDiscards} 张。
+                  手牌超过上限，请选择 {state.pendingKillerDiscards} 张再确认弃置
+                  （已选 {killerDiscardPick.length}/{state.pendingKillerDiscards}）。
                   {(state.justUnlockedCards ?? []).length > 0 && '（刚由进化入手的牌本次不能弃）'}
                 </p>
                 <div className="row">
@@ -6354,18 +6743,51 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       /** ⚠ 要选牌的地方都要有卡面（用户要求：别只写卡名） */
                       const card = state.cardById[cid];
                       const art = cardArtSrc(card, cid);
+                      const picked = killerDiscardPick.includes(idx);
                       return (
                         <button
                           key={`${cid}-d-${idx}`}
                           type="button"
-                          className="card"
-                          onClick={() => onAction({ type: 'discardKillerCard', cardId: cid })}
+                          className={`card${picked ? ' pay-pick' : ''}`}
+                          onClick={() =>
+                            setKillerDiscardPick((cur) => {
+                              if (cur.includes(idx)) return cur.filter((n) => n !== idx);
+                              if (cur.length >= state.pendingKillerDiscards) return cur;
+                              return [...cur, idx];
+                            })
+                          }
                         >
                           {art && <img className="inline-card-art" src={encodeURI(art)} alt="" />}
-                          <h4>弃置 {card?.name ?? cid}</h4>
+                          <h4>{picked ? '已选 ' : ''}{card?.name ?? cid}</h4>
                         </button>
                       );
                     })}
+                </div>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={killerDiscardPick.length !== state.pendingKillerDiscards}
+                    onClick={() => {
+                      const options = (state.yourKillerHand ?? []).filter(
+                        (cid) => !(state.justUnlockedCards ?? []).includes(cid),
+                      );
+                      const cardIds = killerDiscardPick
+                        .slice()
+                        .sort((a, b) => a - b)
+                        .map((i) => options[i])
+                        .filter((id): id is string => Boolean(id));
+                      if (cardIds.length !== state.pendingKillerDiscards) return;
+                      setKillerDiscardPick([]);
+                      void onAction({
+                        type: 'discardKillerCard',
+                        cardId: cardIds[0]!,
+                        cardIds,
+                      });
+                    }}
+                  >
+                    确认弃牌（{killerDiscardPick.length}/{state.pendingKillerDiscards}）
+                  </button>
                 </div>
               </div>
             )}
@@ -6411,7 +6833,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             {state.pendingPathDraft?.owner === 'survivor' && isSurvivorView && coinPathDraft && (
               <div className="stack">
                 <p className="muted">
-                  幸运币〔移動〕×0-{state.pendingPathDraft.max}：
+                  {state.pendingPathDraft.label ?? '幸运币'}〔移動〕×{state.pendingPathDraft.min}–
+                  {state.pendingPathDraft.max}：
                   {state.pendingPathDraft.rooms
                     .map((id) => roomDisplayName(state.map, id, viewerFaction))
                     .join(' → ')}
@@ -6419,12 +6842,30 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   · 点相邻地点追加，点末端取消那一步
                 </p>
                 <div className="row">
-                  <button
-                    type="button"
-                    onClick={() => void onAction({ type: 'finishPendingMove' })}
-                  >
-                    留在原地（不走）
-                  </button>
+                  {state.pendingPathDraft.min <= 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void onAction({ type: 'finishPendingMove' })}
+                    >
+                      留在原地（不走）
+                    </button>
+                  )}
+                  {state.pendingPathDraft.planId != null && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void onAction({
+                          type: 'usePlanAbility',
+                          planId: state.pendingPathDraft!.planId!,
+                          index: state.pendingPathDraft!.planIndex ?? 0,
+                          actorPlayerId: state.pendingPathDraft!.actorId,
+                          cancel: true,
+                        })
+                      }
+                    >
+                      取消
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="primary"
@@ -7372,21 +7813,24 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       {roomDisplayName(state.map, state.pendingQueenMove.toRoomId, viewerFaction)}」。
                     </p>
                     <div className="row">
-                      {Array.from({ length: state.pendingQueenMove.zombieCount + 1 }, (_, n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          className={n > 0 ? 'primary' : ''}
-                          onClick={() => void onAction({ type: 'confirmQueenMove', count: n })}
-                        >
-                          带 {n} 个
-                        </button>
-                      ))}
+                      {Array.from({ length: state.pendingQueenMove.zombieCount }, (_, i) => {
+                        const n = i + 1;
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            className="primary"
+                            onClick={() => void onAction({ type: 'confirmQueenMove', count: n })}
+                          >
+                            带 {n} 个
+                          </button>
+                        );
+                      })}
                       <button
                         type="button"
                         onClick={() => void onAction({ type: 'confirmQueenMove', cancel: true })}
                       >
-                        取消同行
+                        不带
                       </button>
                     </div>
                   </div>
@@ -7610,10 +8054,32 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 )}
                 <p className="muted">点击手牌放大查看。可打出时在放大界面点「打出」。</p>
                 {payForCard && (
-                  <p className="muted">
-                    打出「{state.cardById[payForCard]?.name ?? payForCard}」需再选{' '}
-                    {effectiveHandCost(state, state.cardById[payForCard]) - payIds.length} 张手牌一同弃置（用的牌最后进弃牌堆）。再点该牌可取消。
-                  </p>
+                  <div className="stack">
+                    <p className="muted">
+                      打出「{state.cardById[payForCard]?.name ?? payForCard}」需再选{' '}
+                      {Math.max(0, effectiveHandCost(state, state.cardById[payForCard]) - payIds.length)} 张手牌一同弃置（用的牌最后进弃牌堆）。选完再确认，再点已选的牌可取消。
+                    </p>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={payIds.length !== effectiveHandCost(state, state.cardById[payForCard])}
+                        onClick={() => finishKillerPlay(payForCard, payIds)}
+                      >
+                        确认弃牌并打出
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPayForCard(null);
+                          setPayPurpose(null);
+                          setPayIds([]);
+                        }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
                 )}
                 {pendingCard && (
                   <p className="muted">请点击地图上的房间完成「{state.cardById[pendingCard]?.name ?? pendingCard}」的移动。</p>
@@ -7989,9 +8455,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 /**
                  * ⚠ **【墓穴遗物】鏡之門戶不在这里** —— 它也是**额外行动**，
                  * 入口只放在「额外行动」弹窗里（用户口径：「额外行动就不要放在
-                 * 额外行动弹窗以外了」），选地点 + 二次确认在行动区那块面板
-                 * （见下面的「額外行動：鏡之門戶」）。以前这里连"目标按钮"一起塞进
-                 * `extras`、还被 `EXTRA_KEEP` 放行到「特殊行动」那一栏里，挂错了地方。
+                 * 额外行动弹窗以外了」）。点下去只在行动区确认一次是否传到螺旋地点。
+                 * 以前这里连"目标按钮"一起塞进 `extras`、还被 `EXTRA_KEEP` 放行到
+                 * 「特殊行动」那一栏里，挂错了地方。
                  */
                 /**
                  * ⚠ **额外行动一律只从「额外行动」弹窗进**（用户要求：
@@ -8008,7 +8474,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                  *
                  * ⚠ 以前 `EXTRA_KEEP` 里还放行 `mirror-*`，于是鏡之門戶的**目标按钮**
                  * 挂到了「特殊行动」这一栏下面（用户报的「你写到特殊行动去了」）。
-                 * 现在它整个搬去行动区那块面板做"选中 → 确认传送"。
+                 * 现在入口只在「额外行动」弹窗里，点下去只确认一次是否传送。
                  */
                 const EXTRA_KEEP = /^(crossbow$|remove-core$|crossbow-holder$)/;
                 const shown = extras.filter((el) => EXTRA_KEEP.test(String(el.key ?? '')));
@@ -8020,81 +8486,6 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   </div>
                 );
               })()}
-
-            {/**
-             * 【墓穴遗物】**鏡之門戶：选 🌀 地点 → 在行动区「确认传送」**（二次确认）。
-             *
-             * 用户口径：「镜之门户的传送是**额外行动**，在行动区做**二次确认**」。
-             *  - 入口：左上角「额外行动」弹窗里的那颗（额外行动只从弹窗进）；
-             *  - 这里只负责"选中 + 确认"：点一个 🌀 地点变金框，再按「确认传送」才真的走。
-             *
-             * ⚠ 以前是"点一下目标就传走"，而且那排目标按钮挂在**「特殊行动」**那栏下面
-             * （`EXTRA_KEEP` 放行了 `mirror-*`）—— 既没有二次确认、也挂错了栏。
-             */}
-            {isSurvivorView &&
-              mirrorPicking &&
-              mirrorActor &&
-              (mirrorActor.items?.relic_mirror ?? 0) > 0 &&
-              !mirrorActor.haltedThisRound &&
-              (state.mirrorTargets ?? []).length > 0 && (
-              <div className="effect-choice">
-                <p className="muted">
-                  額外行動：{mirrorActor.name} 用鏡之門戶 —— 请点一个 🌀 螺旋地点
-                  {mirrorPickRoom
-                    ? `（已选「${roomDisplayName(state.map, mirrorPickRoom, viewerFaction)}」）`
-                    : '（还没选）'}
-                  ，再按「确认传送」。
-                </p>
-                <div className="row">
-                  {(state.mirrorTargets ?? []).map((rid) => (
-                    <button
-                      key={`mirror-${rid}`}
-                      type="button"
-                      className={mirrorPickRoom === rid ? 'primary' : ''}
-                      onClick={() => setMirrorPickRoom((cur) => (cur === rid ? null : rid))}
-                    >
-                      {mirrorPickRoom === rid ? '✓ ' : ''}🌀{' '}
-                      {roomDisplayName(state.map, rid, viewerFaction)}
-                    </button>
-                  ))}
-                </div>
-                <div className="row">
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={!mirrorPickRoom}
-                    onClick={() => {
-                      const rid = mirrorPickRoom;
-                      if (!rid) return;
-                      setMirrorPickRoom(null);
-                      setMirrorPicking(false);
-                      void runSurvivor(
-                        `鏡之門戶传送到${roomDisplayName(state.map, rid, viewerFaction)}`,
-                        {
-                          type: 'useMirrorPortal',
-                          toRoomId: rid,
-                          /** ⚠ 认人：额外行动是按每个人列按钮的（见 `mirrorActor`） */
-                          actorPlayerId: mirrorActor.id,
-                        },
-                      );
-                    }}
-                  >
-                    确认传送{mirrorPickRoom
-                      ? `到${roomDisplayName(state.map, mirrorPickRoom, viewerFaction)}`
-                      : ''}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMirrorPickRoom(null);
-                      setMirrorPicking(false);
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/**
              * 幸存者「特殊行动」—— 属于**一般行动**，所以必须是当前行动者本人。
@@ -8187,31 +8578,33 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       }
                       continue;
                     }
-                    /** 01 速度爆发：点地图选 2–4 步的目的地（步数按实际距离推） */
+                    /** 01 速度爆发：从自己脚下一步一步点 2–4 步 */
                     if (t.id === 'trait_s01') {
+                      const start = state.you.roomId;
                       specials.push(
                         <button
                           key={`trait-${t.id}`}
                           type="button"
+                          disabled={Boolean(pickLockReason)}
                           onClick={() => {
-                            const start = state.you.roomId;
-                            const rooms = start
-                              ? roomsAtDistance(state.map, start, 2, 4, { blockades: state.blockades })
-                              : [];
+                            if (!start) return;
                             setExtraPick({
                               kind: 'traitRoom',
                               traitId: t.id,
-                              rooms,
+                              rooms: neighbors(state.map, start, pathOpts),
                               actorPlayerId: actorId,
+                              pathMin: 2,
+                              pathMax: 4,
+                              pathDraft: [start],
                             });
                           }}
                         >
-                          特殊行动：【变体1】{t.name}（点地图选 2–4 步）
+                          特殊行动：【变体1】{t.name}（一步一步走 2–4 步）
                         </button>,
                       );
                       continue;
                     }
-                    /** 02 调度人员：逐个为同地点其他人选目的地（`traitDispatch` 队列） */
+                    /** 02 调度人员：先选人，再为这个人一步一步点 1–2 步 */
                     if (t.id === 'trait_s02') {
                       const here = survivors.filter(
                         (s) =>
@@ -8224,47 +8617,44 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         <button
                           key={`trait-${t.id}`}
                           type="button"
-                          disabled={!here.length}
+                          disabled={!here.length || Boolean(pickLockReason)}
                           onClick={() => {
-                            const first = here[0];
-                            if (!first?.roomId) return;
                             setTraitDispatch({
                               actorId,
-                              current: first.id,
-                              queue: here.slice(1).map((s) => s.id),
+                              current: '',
+                              queue: here.map((s) => s.id),
                               moves: [],
-                            });
-                            setExtraPick({
-                              kind: 'traitRoom',
-                              traitId: t.id,
-                              rooms: roomsAtDistance(state.map, first.roomId, 1, 2, {
-                                blockades: state.blockades,
-                              }),
-                              actorPlayerId: first.id,
                             });
                           }}
                         >
-                          特殊行动：【变体1】{t.name}（让同地点其他人各移 1–2 步）
+                          特殊行动：【变体1】{t.name}（先选人，再一步一步走）
                           {here.length ? `：${here.map((s) => s.name).join('、')}` : '：这个地点没有其他人'}
                         </button>,
                       );
-                      /** 正在选的时候，把"轮到谁 / 已选好谁"摆出来 */
-                      if (traitDispatch) {
-                        specials.push(
-                          <span key="trait-02-status" className="muted">
-                            调度中：现在为{' '}
-                            {survivors.find((s) => s.id === traitDispatch.current)?.name ?? '—'}{' '}
-                            选目的地；已选好 {traitDispatch.moves.length} 人
-                            {traitDispatch.queue.length
-                              ? `，还剩 ${traitDispatch.queue.length} 人`
-                              : '，选完这次就发动'}
-                            。
-                          </span>,
-                        );
-                      }
                       continue;
                     }
-                    /** 10 鼓舞士气 / 14 嘲讽战术：不需要参数，直接发动 */
+                    /** 10 鼓舞士气：自己点一个地点，清掉那里其他幸存者的恐惧 */
+                    if (t.id === 'trait_s10') {
+                      specials.push(
+                        <button
+                          key={`trait-${t.id}`}
+                          type="button"
+                          disabled={Boolean(pickLockReason)}
+                          onClick={() => {
+                            setExtraPick({
+                              kind: 'traitRoom',
+                              traitId: t.id,
+                              rooms: state.map.rooms.map((r) => r.id),
+                              actorPlayerId: actorId,
+                            });
+                          }}
+                        >
+                          特殊行动：【变体1】{t.name}（选一个地点）
+                        </button>,
+                      );
+                      continue;
+                    }
+                    /** 14 嘲讽战术：不需要选地点，直接发动 */
                     specials.push(
                       <button
                         key={`trait-${t.id}`}
@@ -8752,7 +9142,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
            * 只有杀手视角才传这个回调 —— 幸存者那边只是"看"，点不动。
            */
           onUseTrait={
-            isSurvivorView
+            isSurvivorView || isSpectator
               ? undefined
               : (traitId) => {
                   const def = (state.traitDefs ?? []).find((d) => d.id === traitId);
@@ -8767,24 +9157,31 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     return;
                   }
                   setTraitPay({ traitId, traitName: def.name, need });
-                  setTraitPayIds([]);
+                  setTraitPayIdx([]);
                 }
           }
           activeTraitId={traitPay?.traitId ?? null}
           traitDisabledReasons={traitDisabledReasons}
           traitPayHint={
             traitPay
-              ? `发动「${traitPay.traitName}」需要弃 ${traitPay.need} 张卡牌：点手牌选（已选 ${traitPayIds.length}/${traitPay.need}）`
+              ? `发动「${traitPay.traitName}」需要弃 ${traitPay.need} 张卡牌：点手牌选（已选 ${traitPayIdx.length}/${traitPay.need}），选完再确认`
               : null
           }
-          onCancelTraitPay={
+          traitPayIndices={traitPay ? traitPayIdx : undefined}
+          onTraitPayIndex={
             traitPay
-              ? () => {
-                  setTraitPay(null);
-                  setTraitPayIds([]);
+              ? (index) => {
+                  setTraitPayIdx((cur) => {
+                    if (cur.includes(index)) return cur.filter((n) => n !== index);
+                    if (!traitPay || cur.length >= traitPay.need) return cur;
+                    return [...cur, index];
+                  });
                 }
               : undefined
           }
+          onConfirmTraitPay={traitPay ? submitTraitPay : undefined}
+          traitPayCanConfirm={Boolean(traitPay) && traitPayIdx.length === traitPay?.need}
+          onCancelTraitPay={traitPay ? cancelTraitPay : undefined}
         />
       )}
 
@@ -9132,8 +9529,10 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               <button type="button" onClick={() => setExtraOpen(false)}>关闭</button>
             </div>
             <p className="muted">
-              {generalPickLock
-                ? `${generalPickLock}。确认或取消之前，不能再开始别的行动。`
+              {busySurvivorIds.size
+                ? `${[...busySurvivorIds]
+                    .map((id) => state.players.find((pl) => pl.id === id)?.name ?? '这名幸存者')
+                    .join('、')} 正在行动，确认或取消之前，这个人不能再开始别的行动。其他人仍可以。`
                 : sharedControl
                 ? state.mode === 'vs2'
                   ? '两人都可以点。一般行动和额外行动需另一人确认后才生效。'
@@ -9145,12 +9544,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 const buttons: ReactElement[] = [];
                 /** 【变体3】计划里的**额外行动**：单独一组「计划相关能力」放最下面 */
                 const planExtras: ReactElement[] = [];
-                const add = (key: string, label: string, act: () => void) => {
+                const add = (key: string, label: string, act: () => void, needsMap = false) => {
+                  const mineBusy = busySurvivorIds.has(p.id);
                   buttons.push(
                     <button
                       key={`${p.id}-${key}`}
                       type="button"
-                      disabled={Boolean(generalPickLock)}
+                      disabled={mineBusy || (needsMap && Boolean(pickLockReason) && !mineBusy)}
                       onClick={() => { act(); setExtraOpen(false); }}
                     >
                       {p.name}：{label}
@@ -9197,13 +9597,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       rooms: state.map.rooms.map((r) => r.id),
                       actorPlayerId: p.id,
                     });
-                  });
+                  }, true);
                 }
                 if ((p.items.whiskey ?? 0) > 0) {
                   add('whiskey', '威士忌酒瓶（点相邻地点）', () => {
                     const rooms = p.roomId ? generalNeighbors(state.map, p.roomId) : [];
                     setExtraPick({ kind: 'whiskey', rooms, actorPlayerId: p.id });
-                  });
+                  }, true);
                 }
                 if ((p.items.adrenaline ?? 0) > 0) {
                   add('adren', '肾上腺素（移动 1）', () => {
@@ -9215,7 +9615,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         })
                       : [];
                     setExtraPick({ kind: 'adrenaline', rooms, actorPlayerId: p.id });
-                  });
+                  }, true);
                 }
                 if ((p.items.sedative ?? 0) > 0) {
                   add('sed', '镇静剂', () =>
@@ -9385,23 +9785,21 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   );
                 }
                 /**
-                 * 【墓穴遗物】**鏡之門戶**（额外行动）：传送到 🌀 地点。
-                 *
-                 * 点了之后**弹窗自己关掉**（`add` 的按钮点击后会 `setExtraOpen(false)`），
-                 * 然后到**行动区**那块「額外行動：鏡之門戶」面板里：
-                 * 先点一个 🌀 地点选中，再按「确认传送」（用户口径：
-                 * 「镜之门户的传送是额外行动，在行动区做二次确认」）。
+                 * 【墓穴遗物】**鏡之門戶**（额外行动）：每张地图只有一个 🌀 螺旋地点。
+                 * 点下去只在行动区确认一次「是否传送到这个螺旋地点」。
+                 * 确认之前可以取消，取消不消耗遗物。
                  */
-                if (
-                  (p.items.relic_mirror ?? 0) > 0 &&
-                  !p.haltedThisRound &&
-                  (state.mirrorTargets ?? []).length > 0
-                ) {
-                  add('mirror', '鏡之門戶（传送到 🌀 地点）', () => {
-                    setMirrorActorId(p.id);
-                    setMirrorPickRoom(null);
-                    setMirrorPicking(true);
-                  });
+                if ((p.items.relic_mirror ?? 0) > 0 && !p.haltedThisRound) {
+                  for (const rid of state.mirrorTargets ?? []) {
+                    const dest = roomDisplayName(state.map, rid, viewerFaction);
+                    add(`mirror-${rid}`, `鏡之門戶（传送到 ${dest}）`, () =>
+                      void runSurvivor(`${p.name}使用鏡之門戶传送到${dest}`, {
+                        type: 'useMirrorPortal',
+                        toRoomId: rid,
+                        actorPlayerId: p.id,
+                      }),
+                    );
+                  }
                 }
                 /**
                  * 迪伦「机械知识」：在锤子地点从弃牌堆拿回工具箱。
@@ -9450,7 +9848,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                  * 19 明智之举：三选一 —— 拆一个封堵 / 清空自己恐惧 / 相邻地点响 ⚠
                  * 20 迅速反应：移动 1 步（点地图选相邻地点）
                  */
-                for (const t of (p.id === state.you.id ? myExtraTraits : [])) {
+                const extraTraits = (p.traits ?? [])
+                  .map((id) => (state.traitDefs ?? []).find((d) => d.id === id))
+                  .filter((d): d is TraitDef => Boolean(d && d.kind === 'extra'))
+                  .filter((d) => !(d.oncePerGame && (state.traitUsed ?? []).includes(d.id)));
+                for (const t of extraTraits) {
                   if (t.id === 'trait_s13') {
                     add('trait-13', `【变体1】${t.name}（任意地点响 ⚠，每局一次）`, () => {
                       setExtraPick({
@@ -9459,7 +9861,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         rooms: state.map.rooms.map((r) => r.id),
                         actorPlayerId: p.id,
                       });
-                    });
+                    }, true);
                     continue;
                   }
                   if (t.id === 'trait_s19') {
@@ -9487,7 +9889,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         ],
                         actorPlayerId: p.id,
                       });
-                    });
+                    }, true);
                     add('trait-19-noise', `【变体1】${t.name}：在相邻地点响 ⚠`, () => {
                       const start = p.roomId;
                       setExtraPick({
@@ -9497,7 +9899,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         rooms: start ? generalNeighbors(state.map, start) : [],
                         actorPlayerId: p.id,
                       });
-                    });
+                    }, true);
                     continue;
                   }
                   if (t.id === 'trait_s20') {
@@ -9516,7 +9918,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           : [],
                         actorPlayerId: p.id,
                       });
-                    });
+                    }, true);
                   }
                 }
                 /**
@@ -9525,7 +9927,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                  * 在这里放计划相关额外行动」）。
                  *
                  * 只列**已完成计划**里 `kind === 'extra'` 的那几条：
-                 * 現場研究（+2 移动力）、秘術草藥（治疗+清恐惧）、蜂鳴器②（在带标记处响）。
+                 * 現場研究（移动 1–2 格）、秘術草藥（治疗+清恐惧）、蜂鳴器②（在带标记处响）。
                  * 「特殊行動」那几条仍在计划卡弹窗里（要选地点/道具）。
                  *
                  * ⚠ 能不能发动由**服务端**算好（`usable` / `blockReason`），
@@ -9542,7 +9944,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       <button
                         key={`${p.id}-plan-${card.id}-${i}`}
                         type="button"
-                        disabled={Boolean(generalPickLock) || a.used || (mine && a.usable === false)}
+                        disabled={busySurvivorIds.has(p.id) || a.used || (mine && a.usable === false)}
                         title={
                           a.used
                             ? '这一条本局已经用过了'
@@ -9714,18 +10116,19 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                               />
                             )}
                             {showAbilityMarker && (
-                              <img
-                                className="plan-card-progress-marker used-marker"
-                                src={encodeURI('/Image/UI/计划进度标识.png')}
-                                alt="已用"
+                              <div
+                                className="plan-card-progress-marker plan-marker-host"
                                 style={{
                                   left: `${survLayout.planCards.abilityMarker.x}%`,
                                   top: `${survLayout.planCards.abilityMarker.y}%`,
                                   width: `${survLayout.planCards.abilityMarker.w}%`,
                                   height: `${survLayout.planCards.abilityMarker.h}%`,
-                                  transform: 'rotate(90deg)',
                                 }}
-                              />
+                              >
+                                <div className="plan-marker-turn">
+                                  <img src={encodeURI('/Image/UI/计划进度标识.png')} alt="已用" />
+                                </div>
+                              </div>
                             )}
                           </div>
                           <ul className="plan-progress-list">
@@ -10281,6 +10684,42 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
         </div>
       )}
 
+      {/**
+       * 【变体1】特性 11「安静搜查」：发现要响时问持有者，必须自己选。
+       * 放在缩放区域外面，盖住整张桌子。点空白处不会关掉，也不会自动取消。
+       */}
+      {state.variant1 && state.pendingQuietSearch && (
+        <div className="hud-overlay">
+          <div className="hud-overlay-card" onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 100%)' }}>
+            <div className="hud-overlay-head">
+              <h3>安静搜查（每局一次）</h3>
+            </div>
+            <p>
+              {state.players.find((p) => p.id === state.pendingQuietSearch?.playerId)?.name ?? '持有者'}
+              ，
+              {state.pendingQuietSearch.from === 'suitcase'
+                ? '手提箱翻到的发现牌带有响声标记'
+                : '这次发现牌带有响声标记'}
+              。你可以取消这一次响声，也可以让它照响。
+            </p>
+            <div className="row">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void onAction({ type: 'resolveQuietSearch', use: true })}
+              >
+                取消这次响声
+              </button>
+              <button
+                type="button"
+                onClick={() => void onAction({ type: 'resolveQuietSearch', use: false })}
+              >
+                让它照响
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {state.phase === 'gameOver' && (
         <div className="hud-overlay">
           <div className="hud-overlay-card rematch-overlay-card">

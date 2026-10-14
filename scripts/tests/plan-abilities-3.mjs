@@ -1,7 +1,7 @@
 /**
  * **【变体3】计划能力：要选目标的 + 移动类**。
  *
- *  - 現場研究（額外行動：【移動】×2）→ 本小回合移动力 +2，**不占一般行动**
+ *  - 現場研究（額外行動：【移動】×1–2）→ 一步一步走 1–2 格，**不占一般行动**
  *  - 秘術草藥（螺旋地点：治療 + 清中毒）
  *  - 通道調查 ①「所有秘密通道互相連接」→ 手电筒能去**任意**通道口
  *  - 通道調查 ②「特殊行動：移動通過一條秘密通道」→ 占一般行动、要选出口
@@ -79,8 +79,8 @@ const tryIt = (st, action, socketId = 's') => {
 };
 const text = (st, n = 6) => st.logs.slice(-n).map((l) => l.text).join(' | ');
 
-/* ═══════════ ① 現場研究：額外行動，移动力 +2 ═══════════ */
-console.log('=== ① 現場研究：額外行动 +2 格移动力（不占一般行动） ===');
+/* ═══════════ ① 現場研究：額外行動，一步一步走 1–2 格 ═══════════ */
+console.log('=== ① 現場研究：額外行动移动 1–2 格（不占一般行动） ===');
 {
   const st = mk();
   const surv = survivorOf(st);
@@ -89,10 +89,27 @@ console.log('=== ① 現場研究：額外行动 +2 格移动力（不占一般�
   st.planCompletedId = 'plan_field_study';
   const err = tryIt(st, { type: 'usePlanAbility', planId: 'plan_field_study', index: 0 });
   ok(!err, '发动成功', String(err ?? ''));
-  ok(surv.moveLeft === 4, '**移动力 2 → 4**', String(surv.moveLeft));
+  ok(surv.moveLeft === 2, '**不加移动力，仍是原来的 2**', String(surv.moveLeft));
+  ok(st.pendingPathDraft?.min === 1 && st.pendingPathDraft?.max === 2, '挂出 1–2 格路径',
+    JSON.stringify(st.pendingPathDraft));
   ok(surv.mainActionUsed !== true, '**没占一般行动**', String(surv.mainActionUsed));
-  ok(st.planUsedAbilities.includes('plan_field_study#0'), '记下"本局已用过"（每场一次）',
+  ok(!st.planUsedAbilities.includes('plan_field_study#0'), '还没确认，先不记已用过',
     JSON.stringify(st.planUsedAbilities));
+  const door = st.map.edges.find((e) =>
+    (e.from === 'B1' || e.to === 'B1') && (!e.pathType || e.pathType === 'door' || e.pathType === 'dashed'),
+  );
+  const next = door ? (door.from === 'B1' ? door.to : door.from) : null;
+  ok(Boolean(next), 'B1 有相邻地点', String(next));
+  if (next) {
+    const stepErr = tryIt(st, { type: 'move', toRoomId: next });
+    ok(!stepErr, '可以点相邻的一格', String(stepErr ?? ''));
+    const fin = tryIt(st, { type: 'finishPendingMove' });
+    ok(!fin, '确认后才移动', String(fin ?? ''));
+    ok(surv.roomId === next, '走到了点的那一格', String(surv.roomId));
+  }
+  ok(st.planUsedAbilities.includes('plan_field_study#0'), '确认后记下"本局已用过"',
+    JSON.stringify(st.planUsedAbilities));
+  ok(surv.mainActionUsed !== true, '走完仍不占一般行动', String(surv.mainActionUsed));
   const err2 = tryIt(st, { type: 'usePlanAbility', planId: 'plan_field_study', index: 0 });
   ok(Boolean(err2), '**同一场不能再用第二次**', String(err2 ?? ''));
 

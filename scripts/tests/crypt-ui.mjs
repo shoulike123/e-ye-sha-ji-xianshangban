@@ -274,9 +274,15 @@ console.log('=== ⑥ 乔治「聪明绝顶」只在书本地点显示 ===');
     );
   };
 
+  geo.items = {};
   const atBook = render(bookRoom.id);
   ok(atBook.includes('聪明绝顶'), '在书本地点时显示「聪明绝顶」的选项');
-  ok(atBook.includes('抽一张搜索牌'), '在书本地点时能看到两个按钮');
+  ok(atBook.includes('抽一张搜索牌'), '在书本地点时仍能抽搜索牌');
+  ok(!atBook.includes('弃工具箱 +1 修理'), '没有工具箱时不显示「弃工具箱 +1 修理」');
+
+  geo.items = { toolbox: 1 };
+  const withBox = render(bookRoom.id);
+  ok(withBox.includes('弃工具箱 +1 修理'), '有工具箱时显示「弃工具箱 +1 修理」');
 
   const notAtBook = render('G1');
   ok(!notAtBook.includes('聪明绝顶'), '不在书本地点时**整块都不显示**（不是灰按钮）');

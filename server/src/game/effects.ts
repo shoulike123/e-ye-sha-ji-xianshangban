@@ -1497,6 +1497,19 @@ export function addFear(state: GameState, targetId: string, amount: number) {
 }
 
 /**
+ * 清掉恐惧标记，惊吓过度一并收掉。
+ * 只在恐惧枚数真的减少时返回 true。
+ * 惊吓过度是已经 2 枚之后再被吓一次发出的声音，标记数不变，
+ * 所以只清掉这个状态、枚数本来就是 0，不算变化，不要写战报。
+ */
+export function wipeFear(p: PlayerState): boolean {
+  const changed = p.fear > 0;
+  p.fear = 0;
+  p.overFear = false;
+  return changed;
+}
+
+/**
  * 「这名幸存者有没有**守護之石**」（墓穴遗物，角标 ∞）的判定（由 engine 注入）。
  *
  * `effects.ts` 不认识墓穴的遗物规则，只要知道"这次伤害能不能被他挡住"。
@@ -2131,10 +2144,9 @@ function applyOne(state: GameState, p: PlayerState, fx: EffectDef, ctx: EffectCo
       break;
     }
     case 'clearFear':
-      p.fear = 0;
-      p.overFear = false;
-      /** 消除恐惧是**幸存者自己的行为**：幸存者大回合里对杀手隐藏 */
-      log(state, `${p.name} 消除恐惧。`, 'survivor');
+      /** 恐惧本来就是 0：动作可以结算，但不写战报 */
+      if (wipeFear(p))
+        log(state, `${p.name} 消除恐惧。`, 'survivor');
       break;
     case 'placeBlockade':
       if (p.roomId) {
@@ -2585,7 +2597,7 @@ export function isLowProfile(state: GameState, p: PlayerState): boolean {
   return /安娜|anna|survivor1/i.test(`${p.characterId ?? ''} ${ch?.name ?? ''} ${p.name}`);
 }
 
-export function senseRooms(state: GameState, roomIds: string[]): PlayerState[] {
+export function senseRooms(state: GameState, roomIds: string[], silent = false): PlayerState[] {
   const names: string[] = [];
   const seen = new Set<string>();
   const hit: PlayerState[] = [];
@@ -2600,14 +2612,16 @@ export function senseRooms(state: GameState, roomIds: string[]): PlayerState[] {
       }
     }
   }
-  const place = roomIds.map((id) => roomName(state, id)).join('与');
-  log(
-    state,
-    names.length
-      ? `${place}感知到了${names.join('、')}`
-      : `${place}没有感知到人。`,
-  );
+  if (!silent) log(state, senseResultText(state, roomIds, names), 'all', true);
   return hit;
+}
+
+/** 同一次感知的结果句，给「先写特性、再写结果」用 */
+export function senseResultText(state: GameState, roomIds: string[], names: string[]): string {
+  const place = roomIds.map((id) => roomName(state, id)).join('与');
+  return names.length
+    ? `${place}感知到了${names.join('、')}`
+    : `${place}没有感知到人。`;
 }
 
 /** 在搜索点抽 1 张。杀手搜到人会记 lastSearchFound，幸存者抽到钥匙就上架 */

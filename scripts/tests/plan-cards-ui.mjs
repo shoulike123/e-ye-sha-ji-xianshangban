@@ -122,6 +122,8 @@ console.log('=== ④ 完成计划：另一张隐藏、带框能力的标记 ==='
   st.planCompletedId = 'plan_careful_repair';
   const html = draw(buildSnapshot(st, 's'), { initialPlanOpen: true });
   ok(html.includes('謹慎修理'), '已完成的那张还在');
+  ok(html.includes('计划「謹慎修理」已完成'), '行动区写明计划已完成，不再提示去确认');
+  ok(!html.includes('先确认一张计划'), '已完成时不再显示「先确认一张计划」');
   /**
    * ⚠ **别直接断言"整页没有『燃燒瓶』三个字"** —— 开局那条战报会写
    * "给幸存者方下发 2 张计划卡（「…」、「…」）"，随机发牌偶尔就会带上这张，
@@ -140,9 +142,9 @@ console.log('=== ④ 完成计划：另一张隐藏、带框能力的标记 ==='
   st2.planStep = 2;
   st2.planCompletedId = 'plan_field_study';
   const html2 = draw(buildSnapshot(st2, 's'), { initialPlanOpen: true });
-  ok(html2.includes('rotate(90deg)'),
+  ok(html2.includes('plan-marker-turn'),
     '**有框的卡：完成之后标识顺时针 90° 放到能力右侧**',
-    'style 里应出现 transform: rotate(90deg)');
+    '标记包在 plan-marker-turn 里，样式负责转 90°');
 }
 
 /* ═══════════ ⑤ 杀手：完全看不到 ═══════════ */

@@ -1048,11 +1048,11 @@ export function continueSealAllBlockade(state: GameState): boolean {
   return true;
 }
 
-export function startAnyDoorsBlockade(state: GameState, want: number): boolean {
+export function startAnyDoorsBlockade(state: GameState, want: number, title = '进化 4 级'): boolean {
   const available = allUnblockedDoorIds(state);
   const need = Math.min(want, available.length);
   if (need <= 0) {
-    log(state, '地图上没有未封堵的门，跳过进化封堵。');
+    log(state, `地图上没有未封堵的门，跳过${title}封堵。`, 'killer');
     return false;
   }
   const slots = blockadeSlots(state);
@@ -1065,11 +1065,12 @@ export function startAnyDoorsBlockade(state: GameState, want: number): boolean {
     placed: 0,
     firstRoomId: null,
     secondRoomId: null,
+    title,
   };
   if (removeLeft > 0) {
-    log(state, `进化 4 级要封 ${need} 扇门。请先依次移除 ${removeLeft} 个场上封堵，再选新门。`, 'killer');
+    log(state, `${title}要封 ${need} 扇门。请先依次移除 ${removeLeft} 个场上封堵，再选新门。`, 'killer');
   } else {
-    log(state, `进化 4 级：请在整张地图选 ${need} 扇未封堵的门（每扇点两个相邻地点，行动区确认）。`, 'killer');
+    log(state, `${title}：请在整张地图选 ${need} 扇未封堵的门（每扇点两个相邻地点，行动区确认）。`, 'killer');
   }
   return true;
 }
@@ -1162,11 +1163,17 @@ export function confirmAnyDoor(state: GameState): void {
   job.firstRoomId = null;
   job.secondRoomId = null;
   if (job.placed >= job.need) {
-    log(state, `进化 4 级封堵完成（${job.placed} 扇）。`);
+    const title = job.title || '进化 4 级';
+    log(
+      state,
+      title === '进化 4 级'
+        ? `进化 4 级封堵完成（${job.placed} 扇）。`
+        : `「${title}」封堵完成（${job.placed} 扇）。`,
+    );
     state.pendingBlockadeJob = null;
     return;
   }
-  log(state, `已封 ${job.placed}/${job.need}。请继续选下一扇门。`);
+  log(state, `已封 ${job.placed}/${job.need}。请继续选下一扇门。`, 'killer');
 }
 
 export function afterOneDoorPlaced(state: GameState): void {

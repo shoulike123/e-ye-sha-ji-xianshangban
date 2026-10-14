@@ -8,7 +8,7 @@
  */
 import { loadContent } from '../../server/dist/content/loader.js';
 import {
-  createLobby, createPlayer, startGame, handleAction, searchAsZombie, buildSnapshot,
+  createLobby, createPlayer, startGame, handleAction, searchAsZombie, buildSnapshot, startEncounter,
 } from '../../server/dist/game/engine.js';
 import { spawnZombieAt } from '../../server/dist/game/zombies.js';
 
@@ -163,6 +163,46 @@ console.log('=== ⑤ 快照：两条特性对杀手可见 ===');
   ok(snapK.pendingPreyOffer === true || snapK.variant1 === true,
     '杀手快照里有 `pendingPreyOffer`（他要能点）',
     JSON.stringify({ pendingPreyOffer: snapK.pendingPreyOffer ?? null }));
+}
+
+/* ═══════════ ⑥ 幽魂 1 级：取消遭遇时不开战惊吓 ═══════════ */
+console.log('=== ⑥ 玩弄猎物取消 → 幽魂 1 级惊吓不发生；继续才惊吓 ===');
+{
+  function mkSpectre() {
+    const st = mkQueen({ K: ['trait_k02'] });
+    st.players.K.characterId = 'killer2';
+    st.killerLevel = 1;
+    for (const id of survIds) {
+      st.players[id].roomId = 'B1';
+      st.players[id].fear = 0;
+      st.players[id].overFear = false;
+    }
+    st.players.K.roomId = 'B1';
+    startEncounter(st, 'B1');
+    return st;
+  }
+  const cancelled = mkSpectre();
+  ok(cancelled.pendingPreyOffer === true, '幽魂有玩弄猎物时先问，不开战');
+  ok(survIds.every((id) => (cancelled.players[id].fear ?? 0) === 0),
+    '询问期间恐惧还是 0');
+  ok(!cancelled.logs.some((l) => l.text.includes('幽魂进化 1 级')),
+    '询问期间没有幽魂 1 级战报');
+  const err = tryIt(cancelled, 'K', { type: 'useTrait', traitId: 'trait_k02' });
+  ok(!err, '可以取消', String(err ?? ''));
+  ok(!cancelled.encounter, '遭遇已取消');
+  ok(survIds.every((id) => (cancelled.players[id].fear ?? 0) === 0),
+    '取消后幽魂 1 级没有惊吓');
+  ok(!cancelled.logs.some((l) => l.text.includes('幽魂进化 1 级')),
+    '取消后没有幽魂 1 级战报');
+
+  const kept = mkSpectre();
+  const err2 = tryIt(kept, 'K', { type: 'useTrait', traitId: 'trait_k02', decline: true });
+  ok(!err2, '可以不取消', String(err2 ?? ''));
+  ok(survIds.every((id) => (kept.players[id].fear ?? 0) === 1),
+    '继续遭遇后才触发幽魂 1 级惊吓',
+    survIds.map((id) => kept.players[id].fear).join(','));
+  ok(kept.logs.some((l) => l.text.includes('幽魂进化 1 级')),
+    '继续遭遇才写幽魂 1 级战报');
 }
 
 console.log(`\n女王 × 特性 02/11（僵尸搜索遭遇）：${pass} 通过 / ${fail} 失败`);

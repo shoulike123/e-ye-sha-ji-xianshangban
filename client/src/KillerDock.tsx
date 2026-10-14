@@ -47,7 +47,11 @@ export function KillerActionDock({
   activeTraitId,
   traitDisabledReasons,
   traitPayHint,
+  onConfirmTraitPay,
   onCancelTraitPay,
+  traitPayCanConfirm,
+  traitPayIndices,
+  onTraitPayIndex,
 }: {
   players: PublicPlayerView[];
   characters: CharacterDef[];
@@ -82,7 +86,14 @@ export function KillerActionDock({
   traitDisabledReasons?: Record<string, string>;
   /** 「发动「XX」需要弃 N 张：点手牌选（已选 n/N）」这类提示；null = 不显示 */
   traitPayHint?: string | null;
+  /** 点了才真正弃牌发动。选够之前按钮是灰的，避免选完牌却找不到确认。 */
+  onConfirmTraitPay?: () => void;
+  traitPayCanConfirm?: boolean;
   onCancelTraitPay?: () => void;
+  /** 正在为特性弃牌时，已选中的手牌下标（同名牌可以各选一份） */
+  traitPayIndices?: number[];
+  /** 点第 i 张手牌 = 选进/移出这次弃牌。没传就还是原来的打牌/看牌。 */
+  onTraitPayIndex?: (index: number) => void;
 }) {
   const killer = killerPlayer(players);
   const ch = characters.find((c) => c.id === killer?.characterId);
@@ -211,7 +222,7 @@ export function KillerActionDock({
           const playable = Boolean(cid && playableIds.has(cid));
           const pending = cid != null && pendingCard === cid;
           const isPayCard = cid != null && cid === payForCard;
-          const isPayPick = cid != null && picked.has(cid);
+          const isPayPick = cid != null && (picked.has(cid) || (traitPayIndices ?? []).includes(i));
           if (!cid) {
             return <div key={`hand-${i}`} className="killer-dock-hand empty" style={boxStyle(box)} />;
           }
@@ -221,7 +232,14 @@ export function KillerActionDock({
               type="button"
               className={`killer-dock-hand${playable && !paying ? ' playable' : ''}${pending || isPayCard ? ' pending' : ''}${isPayPick ? ' pay-pick' : ''}${i >= prevHandLen ? ' card-enter' : ''}`}
               style={boxStyle(box)}
-              onClick={() => (paying ? onPlayCard(cid) : onInspectCard?.(cid))}
+              onClick={() => {
+                if (onTraitPayIndex) {
+                  onTraitPayIndex(i);
+                  return;
+                }
+                if (paying) onPlayCard(cid);
+                else onInspectCard?.(cid);
+              }}
               title={card?.name ?? cid}
             >
               {src ? (
@@ -287,6 +305,16 @@ export function KillerActionDock({
           {traitPayHint && (
             <div className="killer-dock-trait-pay">
               <span>{traitPayHint}</span>
+              {onConfirmTraitPay && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!traitPayCanConfirm}
+                  onClick={onConfirmTraitPay}
+                >
+                  确认弃牌
+                </button>
+              )}
               {onCancelTraitPay && (
                 <button type="button" onClick={onCancelTraitPay}>
                   取消

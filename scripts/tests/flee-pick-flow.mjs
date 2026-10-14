@@ -157,31 +157,43 @@ console.log('=== ③ 撤离时的点击不会再掉进"普通移动" ===');
   ok(!good, '用 encounterFlee 撤离成功', String(good ?? ''));
 }
 
-console.log('=== ④ 【变体1】特性 09「生存本能」：撤离走 2 格 + 清空恐惧 ===');
+console.log('=== ④ 【变体1】特性 09「生存本能」：一步一步最多 2 步，走完清恐惧 ===');
 {
+  const { generalAdjacentRooms } = await import('../../server/dist/game/effects.js');
   const st = mkSolo(true);
   const { marco } = toFleeStart(st);
-  /** 给马尔科挂上特性 09，并塞 3 个恐惧标记 */
   st.traits = { ...(st.traits ?? {}), [marco.id]: ['trait_s09'] };
-  marco.fear = 3;
+  marco.fear = 2;
   const from = marco.roomId;
   tryIt(st, HOST, { type: 'pickFleeSurvivor', targetPlayerId: marco.id });
   const legal = buildSnapshot(st, HOST).legalMoves;
-  console.log(`    马尔科在 ${from}，撤离可点：${JSON.stringify(legal)}`);
-  /** 找一个"2 格远"的落点：挑一个不在相邻集合里的可点格子 */
-  const { generalAdjacentRooms } = await import('../../server/dist/game/effects.js');
   const near = new Set(generalAdjacentRooms(st.map, from));
-  const twoAway = legal.find((r) => !near.has(r) && r !== from);
-  if (twoAway) {
-    const err = tryIt(st, HOST, { type: 'encounterFlee', moveToRoomId: twoAway });
-    ok(!err, `带「生存本能」能走 2 格到 ${twoAway}`, String(err ?? ''));
-    ok(marco.roomId === twoAway, '确实走了 2 格', `${from} → ${marco.roomId}`);
-    ok(marco.fear === 0, '**走 2 格之后清空全部恐惧**', `fear=${marco.fear}`);
-  }
-  else {
-    ok(false, '地图上找不到"2 格远"的撤离落点（无法验证特性 09）', JSON.stringify(legal));
-  }
-  /** 没这张特性的人依然只能走 1 格 */
+  ok(legal.every((r) => near.has(r)), '高亮只有相邻 1 格，不能一下点到 2 格外', JSON.stringify(legal));
+  const step1 = legal[0];
+  const step2 = step1 ? generalAdjacentRooms(st.map, step1).find((r) => r !== from) : null;
+  ok(Boolean(step1 && step2), '能接出第 2 步', `${step1} → ${step2}`);
+  const jumped = tryIt(st, HOST, { type: 'encounterFlee', moveToRoomId: step2 });
+  ok(Boolean(jumped), '不能一下跳到 2 格外', String(jumped));
+  const err = tryIt(st, HOST, { type: 'encounterFlee', path: [from, step1, step2] });
+  ok(!err, '一步一步走 2 步可以撤离', String(err ?? ''));
+  ok(marco.roomId === step2, '停在第 2 步', `${from} → ${marco.roomId}`);
+  ok(marco.fear === 0, '走完清空全部恐惧', `fear=${marco.fear}`);
+  const moveLine = st.logs.find((l) => l.text.includes('遭遇后移动到'));
+  ok(moveLine?.vis === 'survivor', '移动本身不告诉杀手', moveLine?.vis);
+  ok(
+    st.logs.some((l) => l.vis === 'all' && l.text.includes('生存本能') && l.text.includes('恐惧')),
+    '消除恐惧告诉杀手',
+  );
+
+  const stStay = mkSolo(true);
+  const stay = toFleeStart(stStay);
+  stStay.traits = { ...(stStay.traits ?? {}), [stay.marco.id]: ['trait_s09'] };
+  stay.marco.fear = 1;
+  tryIt(stStay, HOST, { type: 'pickFleeSurvivor', targetPlayerId: stay.marco.id });
+  const stayErr = tryIt(stStay, HOST, { type: 'encounterFlee', moveToRoomId: null });
+  ok(!stayErr, '留在原地也可以', String(stayErr ?? ''));
+  ok(stay.marco.fear === 0, '走 0 步同样消除恐惧', `fear=${stay.marco.fear}`);
+
   const st2 = mkSolo(true);
   const r2 = toFleeStart(st2);
   tryIt(st2, HOST, { type: 'pickFleeSurvivor', targetPlayerId: r2.sofia.id });

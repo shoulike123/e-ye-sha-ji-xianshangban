@@ -128,6 +128,38 @@ export function traitAvailableForKiller(state: GameState, traitId: string): bool
 }
 
 /** 查一张特性的定义（`traitById` 是开局时从 content 灌进来的） */
+/**
+ * 【感知】发现了幸存者之后，把「可以发动」的特性挂出来等杀手自己选。
+ *
+ * 卡面都写「可以」，不能自动发动：
+ *  - 10 即刻反应：弃 1 张 →【移动】X1
+ *  - 15 谋杀意图：弃 1 张 →【惊吓】刚发现的那批人
+ *  - 16 敏锐感知：每轮一次 → 再【感知】一个颜色区域
+ *
+ * 安娜「低调行事」已经在各条【感知】里被滤掉，这里收到的名单里不会有她。
+ * 没发现人就不挂。
+ */
+export function offerSenseTraits(state: GameState, witnessed: Array<{ id: string }>): void {
+  if (!state.variant1 || !witnessed.length) return;
+  const kid = state.killerId;
+  if (!kid) return;
+  const mine = state.traits[kid] ?? [];
+  const usable = mine.filter((id) => {
+    if (id === 'trait_k16') return !(state.traitUsedThisRound ?? []).includes(id);
+    return id === 'trait_k10' || id === 'trait_k15';
+  });
+  if (!usable.length) return;
+  state.pendingSenseTraits = true;
+  state.pendingSenseWitnessed = witnessed.map((w) => w.id);
+  log(
+    state,
+    `【变体1】感知发现了幸存者 —— 可以发动特性卡：${usable
+      .map((id) => traitDef(state, id)?.name ?? id)
+      .join('、')}。`,
+    'killer',
+  );
+}
+
 export function traitDef(state: GameState, id: string): TraitDef | undefined {
   return state.traitById?.[id];
 }
