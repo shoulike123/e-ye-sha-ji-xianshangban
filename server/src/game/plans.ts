@@ -125,12 +125,6 @@ export function planStepSatisfied(state: GameState, step: PlanStep | undefined):
       const kill = killerRoomIds(state);
       return alive.some((p) => kill.includes(p.roomId!));
     }
-    /**
-     * 与杀手相邻、且不是杀手所在地点。
-     * 火箭发射器的「分析杀手弱点」用这条：同地点不算。
-     */
-    case 'killerAdjacent':
-      return alive.some((p) => roomsAdjacentToKillers(state).includes(p.roomId!));
     /** 所有幸存者位于同一地点（只剩一人时，它同时满足"同一地点"和"不同地点"） */
     case 'allSame':
       return roomsOf(alive).size === 1;
@@ -163,7 +157,6 @@ export function planStepText(state: GameState, step: PlanStep | undefined): stri
   }
   const names: Record<string, string> = {
     killerRoom: '杀手地点',
-    killerAdjacent: '与杀手相邻的地点（不含杀手所在地点）',
     allSame: '所有幸存者位于同一地点',
     allDifferent: '所有幸存者位于不同地点',
     hiddenExit: '隐藏出口',

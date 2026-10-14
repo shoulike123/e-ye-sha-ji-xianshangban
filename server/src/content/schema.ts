@@ -258,8 +258,7 @@ export type TraitDef = z.infer<typeof TraitSchema>;
  *
  * 判定只看两类条件（用户口径：**只检查人物位置**）：
  *  - `icon`：四类地点图标 —— `gear`=修理地点 / `hammer`=锤子地点 / `book`=书本地点 / `spiral`=螺旋地点
- *  - `place`：整句位置条件 —— `killerRoom`=杀手地点 / `killerAdjacent`=与杀手相邻且不是同地点 /
- *    `allSame`=所有幸存者同一地点 /
+ *  - `place`：整句位置条件 —— `killerRoom`=杀手地点 / `allSame`=所有幸存者同一地点 /
  *    `allDifferent`=所有幸存者不同地点 / `hiddenExit`=隐藏出口
  *
  * 能力里：
@@ -270,7 +269,7 @@ export type TraitDef = z.infer<typeof TraitSchema>;
  */
 export const PlanStepSchema = z.object({
   icon: z.enum(['gear', 'hammer', 'book', 'spiral']).optional(),
-  place: z.enum(['killerRoom', 'killerAdjacent', 'allSame', 'allDifferent', 'hiddenExit', 'mainExit']).optional(),
+  place: z.enum(['killerRoom', 'allSame', 'allDifferent', 'hiddenExit', 'mainExit']).optional(),
   /** 进度名（风味文字，判定不看它） */
   label: z.string(),
 });
