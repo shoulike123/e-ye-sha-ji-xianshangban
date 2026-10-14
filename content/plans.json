@@ -275,7 +275,7 @@
       "progress": [
         { "icon": "hammer", "label": "回收火箭發射器" },
         { "icon": "book", "label": "閱讀使用手冊" },
-        { "place": "killerRoom", "label": "分析殺手弱點" },
+        { "place": "killerAdjacent", "label": "分析殺手弱點" },
         { "icon": "hammer", "label": "修復火箭發射器" }
       ],
       "abilities": [

@@ -151,6 +151,7 @@ import {
   planDefaults,
   planHasImpl,
   planMarkersAt,
+  roomsAdjacentToKillers,
   planSwitchProgress,
   planViewFor,
   planVoters,
@@ -3046,7 +3047,7 @@ function checkPlanBombTrapOnKillerSearch(state: GameState, roomId: string | null
 }
 /**
  * 【变体3】**幸存者回合开始时**的两条获胜条件：
- *  - 火箭發射器：所有幸存者都在**同一个**与杀手相邻的地点，且**上一回合没有发生遭遇**
+ *  - 火箭發射器：所有幸存者都在**同一个**与杀手相邻的地点（不能是杀手所在地点），且**上一回合没有发生遭遇**
  *  - 被封印的傳送門：所有幸存者都在**螺旋地点**，且队伍物品栏里有秘密地图＋手电筒＋古代护符
  *
  * 返回 true = 已经结束对局（调用方要停手）。
@@ -3063,12 +3064,13 @@ function checkPlanRoundStartWins(state: GameState): boolean {
     /** ① 火箭發射器 */
     if (planImplActive(state, 'winOnAllAdjacentNoEncounter') && !hadEncounterLastRound) {
         const rooms = [...new Set(alive.map((s) => s.roomId).filter(Boolean))] as string[];
-        const killer = state.killerId ? state.players[state.killerId] : null;
-        if (rooms.length === 1 && killer?.roomId) {
+        if (rooms.length === 1) {
             const here = rooms[0]!;
-            /** 「與殺手相鄰」= 地图上的相邻地点（不管封堵/潜行那一套） */
-            const adjacent = mapAdjacentRooms(state.map, killer.roomId).includes(here);
-            if (adjacent) {
+            /**
+             * 「與殺手相鄰」= 普通门 / 虚线相邻。
+             * 和杀手站在同一格不算，2 对 3 / 雕像局里站在任一杀手那一格也不算。
+             */
+            if (roomsAdjacentToKillers(state).includes(here)) {
                 planWinSurvivors(
                     state,
                     '火箭發射器',

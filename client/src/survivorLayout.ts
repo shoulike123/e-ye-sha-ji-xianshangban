@@ -314,7 +314,7 @@ export const DEFAULT_SURVIVOR_LAYOUT: SurvivorLayout = {
     // 女王僵尸：圆心右侧
     zombie: { dx: 34, dy: 0, size: 34 },
     // 【变体3】计划标记：圆心左侧（用户口径："放在圆圈左边就行"）
-    planMarker: { dx: -34, dy: 0, size: 30 },
+    planMarker: { dx: -34, dy: 0, size: 60 },
   },
   /** 【变体3】计划卡上的进度标识放哪（相对卡面的百分比） */
   planCards: {

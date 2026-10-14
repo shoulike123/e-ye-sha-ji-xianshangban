@@ -17,7 +17,7 @@
  */
 import type { GameContent } from '../content/loader.js';
 import type { PlanAbility, PlanDef, PlanStep } from '../content/schema.js';
-import { log, mainExitRoomId, shuffle } from './effects.js';
+import { generalAdjacentRooms, log, mainExitRoomId, shuffle } from './effects.js';
 import type { GameState, PlayerState } from './types.js';
 
 /** 开局发几张 */
@@ -84,6 +84,21 @@ export function killerRoomIds(state: GameState): string[] {
     .map((p) => p.roomId!);
 }
 
+/**
+ * 与任一杀手相邻、并且不是任何杀手所在地点的房间。
+ * 普通门 / 虚线才算相邻；站在杀手那一格不算。
+ */
+export function roomsAdjacentToKillers(state: GameState): string[] {
+  const kill = killerRoomIds(state);
+  const out = new Set<string>();
+  for (const roomId of kill) {
+    for (const next of generalAdjacentRooms(state.map, roomId)) {
+      if (!kill.includes(next)) out.add(next);
+    }
+  }
+  return [...out];
+}
+
 /** 带某个 tag 的地点 */
 export function roomsWithTag(state: GameState, tag: string): string[] {
   return (state.map.rooms ?? []).filter((r) => (r.tags ?? []).includes(tag)).map((r) => r.id);
@@ -110,6 +125,12 @@ export function planStepSatisfied(state: GameState, step: PlanStep | undefined):
       const kill = killerRoomIds(state);
       return alive.some((p) => kill.includes(p.roomId!));
     }
+    /**
+     * 与杀手相邻、且不是杀手所在地点。
+     * 火箭发射器的「分析杀手弱点」用这条：同地点不算。
+     */
+    case 'killerAdjacent':
+      return alive.some((p) => roomsAdjacentToKillers(state).includes(p.roomId!));
     /** 所有幸存者位于同一地点（只剩一人时，它同时满足"同一地点"和"不同地点"） */
     case 'allSame':
       return roomsOf(alive).size === 1;
@@ -142,6 +163,7 @@ export function planStepText(state: GameState, step: PlanStep | undefined): stri
   }
   const names: Record<string, string> = {
     killerRoom: '杀手地点',
+    killerAdjacent: '与杀手相邻的地点（不含杀手所在地点）',
     allSame: '所有幸存者位于同一地点',
     allDifferent: '所有幸存者位于不同地点',
     hiddenExit: '隐藏出口',

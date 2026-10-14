@@ -247,6 +247,16 @@ console.log('=== ④ 反擊！火箭發射器：幸存者回合开始时的位�
   d.encountersThisRound = 0;
   startRound(d);
   ok(d.phase !== 'gameOver', '对照：**没凑在同一个地点也不赢**', String(d.phase));
+
+  /** 全员和杀手站在同一格 → 不算「相邻」 */
+  const e = mk();
+  const killerE = e.players[e.killerId];
+  killerE.roomId = 'R1';
+  for (const s of survivorsOf(e)) s.roomId = 'R1';
+  e.planCompletedId = 'plan_rocket';
+  e.encountersThisRound = 0;
+  startRound(e);
+  ok(e.phase !== 'gameOver', '对照：**和杀手同一地点不算相邻，不赢**', String(e.phase));
 }
 
 /* ═══════════ ⑤ 被封印的傳送門：全员在螺旋地点 + 三样东西 ═══════════ */

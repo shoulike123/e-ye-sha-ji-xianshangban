@@ -633,7 +633,7 @@ export function Board({
     trapPart: { dx: 0, dy: 34, size: 28 },
     coreMarker: { dx: 0, dy: -34, size: 30 },
     zombie: { dx: 34, dy: 0, size: 34 },
-    planMarker: { dx: -34, dy: 0, size: 30 },
+    planMarker: { dx: -34, dy: 0, size: 60 },
   },
 }: BoardProps) {
   const roomMap = new Map(map.rooms.map((r) => [r.id, r]));
