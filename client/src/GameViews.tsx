@@ -410,12 +410,12 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
           {solo
             ? `单人热座：必须选好 1 名杀手和 ${neededSurv} 名幸存者。你依次操控三名幸存者，再操控杀手。`
             : duo
-              ? `1 对 1：两人加入后一人选杀手，一人点选 ${neededSurv} 名幸存者并操控她们。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+              ? `1 对 1：一人选杀手，一人点选 ${neededSurv} 名幸存者并操控她们。玩家在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
               : vs2
-                ? `1对2：三人加入后一人选杀手，两人点选 ${neededSurv} 名幸存者并共控她们。操作和 1对1 一样，先做先得。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+                ? `1对2：一人选杀手，两人点选 ${neededSurv} 名幸存者并共控她们。操作和 1对1 一样，先做先得。玩家在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
                 : state.mode === '2v3'
-                  ? `2对3：必须凑齐 2 名杀手 + 3 名幸存者（共 5 人）。两名杀手**各有一套牌库、手牌与行动区**，共用地图与战报；开局两人各选先后手（一致才生效），每轮交替行动。开局钥匙进度 +1、修理进度 +1。幸存者各自控制自己的角色。最先点准备的幸存者是主玩家，由他决定发现牌、十字弩、反击计划标记放在哪、确认或改变计划，以及情報分享选谁抽牌，不需要其他人确认。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
-                  : `1对3：必须凑齐 1 名杀手 + ${neededSurv} 名幸存者。每人只操控自己的角色。最先点准备的幸存者是主玩家，由他决定发现牌、十字弩、反击计划标记放在哪、确认或改变计划，以及情報分享选谁抽牌，不需要其他人确认。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
+                  ? `2对3：2 名杀手 + 3 名幸存者（共 5 人）。两名杀手**各有一套牌库、手牌与行动区**，共用地图与战报；开局两人各选先后手，每轮交替行动。开局钥匙进度 +1、修理进度 +1。幸存者各自控制自己的角色。最先点准备的幸存者是主玩家，由他做幸存者的共同决定。玩家在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+                  : `1对3：1 名杀手 + ${neededSurv} 名幸存者。每人只操控自己的角色。最先点准备的幸存者是主玩家，由他做幸存者的共同决定。玩家在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
           {' '}地图：<strong>{state.map.name}</strong>
         </p>
         <p className="muted">
@@ -429,7 +429,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
         </p>
         {isHost && (
           <div className="stack">
-            <span className="muted">选择地图（换图后所有人会看到新底图）</span>
+            <span className="muted">选择地图</span>
             <div className="row">
               {(state.playableMaps ?? []).map((m) => (
                 <button
@@ -568,7 +568,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
                     : (state.traitDifficulty ?? 'normal') === 'hard'
                       ? '每名杀手抽 4 选 2'
                       : '每名杀手抽 6 选 3'}
-                。一局不会发出重复的特性卡，幸存者先选、杀手后选。
+                。
               </p>
             )}
             {/**
@@ -590,10 +590,9 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
             </div>
             {state.variant3 && (
               <p className="muted">
-                开局给幸存者方随机发 2 张计划卡。他们在**发现阶段之前**可以确认 / 改变计划
-                （1对1、1对2谁先点谁生效；1对3、2对3由主玩家决定，不需要其他人确认）；**发现阶段结束后**按**人物位置**判定能不能推进进度，
+                开局给幸存者方随机发 2 张计划卡。在发现阶段之前可以确认 / 改变计划
+                ；发现阶段结束后按人物位置判定能不能推进进度，
                 每个大回合最多推进一条。整张计划完成后全队获得它的能力。
-                **杀手完全看不到这些卡。**
               </p>
             )}
           </div>
@@ -620,9 +619,9 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
               【变体2】分头行动：{state.split ? '开' : '关'}
             </button>
             <span className="muted">
-              杀手每杀死一人就升一级，且**杀人不结束游戏**；钥匙各自保管、不报告杀手；
+              杀手每杀死一人就升一级，且杀人不结束游戏；钥匙各自保管、不报告杀手；
               攒到 {state.splitEscapeKeys ?? 3} 把钥匙站在出口
-              （或拿秘密地图站到隐藏出口），**下个大回合一开始就自动单独逃脱**、不花行动；
+              （或拿秘密地图站到隐藏出口），下个大回合一开始就自动单独逃脱、不花行动；
               全员逃脱或被杀死后各自结算胜负（0–1 人：杀手失败，2 人：胜利，3 人：完全胜利）。
             </span>
           </div>
@@ -756,7 +755,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
             {state.you.faction === 'spectator' && (
               <p className="muted">
                 你是【观众】：不占杀手 / 幸存者座位，开局不需要「准备」。
-                进游戏后**默认幸存者界面**，行动区可以随时切换到杀手视角。
+                进游戏后默认幸存者界面，行动区可以随时切换到杀手视角。
               </p>
             )}
             {(duo || vs2) && (
@@ -772,9 +771,9 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
               */}
             {state.mode === '2v3' && state.you.faction === 'killer' && (
               <div className="stack">
-                <h3>先后手（两人一致才生效）</h3>
+                <h3>先后手</h3>
                 <p className="muted">
-                  你选一个偏好；两名杀手选的**一致**才生效（都选先手 / 都选后手也算一致，那就按座位顺序）。
+                  你选一个偏好；两名杀手选的一致才生效。
                   每轮结束后先手与后手互换。
                 </p>
                 <div className="row">
@@ -831,7 +830,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
                   : vs2
                     ? '先选杀手阵营，再选 1 名杀手角色。幸存者那边两人一起点选 3 名角色。'
                     : state.mode === '2v3'
-                      ? '先选阵营，再选 1 名角色。2对3：**两名**杀手 + 3 名幸存者，每人只操控自己；两名杀手有自己的牌库与行动区。'
+                      ? '先选阵营，再选 1 名角色。2对3：2名杀手 + 3 名幸存者，每人只操控自己。'
                       : `先选阵营，再选 1 名角色。1对3：杀手 1 人、幸存者 ${neededSurv} 人，每人只操控自己。`}
               </p>
               {(state.you.faction === 'killer' ? killers : survivors).map((c) => {
@@ -955,7 +954,6 @@ function TraitPickOverlay({
         </div>
         <p className="muted">
           抽到 {pick.options.length} 张，选 {pick.keep} 张作为他的特性。
-          没选中的会直接弃掉，本局不会再出现。
         </p>
         <div className="trait-pick-grid">
           {pick.options.map((id) => {
@@ -973,7 +971,7 @@ function TraitPickOverlay({
                     src={encodeURI(def.art)}
                     alt={def.name}
                     draggable={false}
-                    title="点图片放大查看（点卡片其它地方 = 选中）"
+                    title="点图片放大查看"
                     /**
                      * **点图片 = 只看大图**（用户要求：不要"放大看"按钮，点图就放大）。
                      * 所以这里阻止冒泡，免得顺手把卡片也选/取消选中了。
@@ -1005,7 +1003,7 @@ function TraitPickOverlay({
             确认（{picked.length}/{pick.keep}）
           </button>
           <span className="muted">
-            点图片可放大查看；点卡片其它地方选中／取消。选满 {pick.keep} 张才能确认。
+            点图片可放大查看；点卡片其它地方选中／取消。选满 {pick.keep} 张确认。
           </span>
         </div>
       </div>
@@ -1390,6 +1388,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     traitName: string;
     need: number;
   } | null>(null);
+  /** 不用弃牌的特性：先确认，确认后才发给服务器 */
+  const [traitConfirm, setTraitConfirm] = useState<{ traitId: string; traitName: string } | null>(null);
   /** 按手牌下标选，同名牌可以各弃一份 */
   const [traitPayIdx, setTraitPayIdx] = useState<number[]>([]);
   const [evoPayIds, setEvoPayIds] = useState<string[]>([]);
@@ -1829,7 +1829,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       ? !isSurvivorView && (state.phase === 'survivorMain' || state.phase === 'discovery')
         ? '幸存者正在行动'
         : state.pendingSurvivorPick
-        ? '单人：在行动区选择下一名幸存者（也可点立绘或状态栏），可随时改选，确认后才开始'
+        ? '单人：在行动区选择下一名幸存者，可随时改选，确认后才开始'
         : state.pendingDiscoveryPick
           ? '单人：在行动区选择谁来翻发现牌'
           : state.phase === 'survivorMain' || state.phase === 'discovery'
@@ -1844,21 +1844,21 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       : state.mode === 'duo'
         ? state.you.faction === 'survivor'
           ? state.pendingSurvivorPick
-            ? '1对1：在行动区选择下一名幸存者（也可点立绘或状态栏），确认后才开始'
+            ? '1对1：在行动区选择下一名幸存者，确认后才开始'
             : state.pendingDiscoveryPick
               ? '1对1：在行动区选择谁来翻发现牌'
               : `1对1：你操控 3 名幸存者，当前行动「${state.you.name}」`
           : '1对1：你操控杀手'
         : state.mode === 'vs2'
           ? state.you.faction === 'survivor'
-            ? '1对2：两人共控 3 名幸存者，先做先得，不需要另一人确认。'
+            ? '1对2：两人共控 3 名幸存者，不需要另一人确认。'
             : '1对2：你操控杀手。对面两人共控 3 名幸存者。'
           : state.mode === '2v3'
             ? state.you.faction === 'survivor'
-              ? '2对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。'
+              ? '2对3：你只操控自己的角色。只能交出自己的物品。'
               : '2对3：你操控自己的杀手。两名杀手各有牌库和行动；对面 3 名幸存者各自操作。'
             : state.you.faction === 'survivor'
-              ? '1对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。栏满只能互换。额外行动只显示你能做的。'
+              ? '1对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。'
               : '1对3：你操控杀手。对面 3 名幸存者各自操作。';
 
   useEffect(() => {
@@ -3303,6 +3303,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
    * 杀手卡牌区据此把卡置灰并写明原因（用户要求：弃牌得有足够手牌）。
    */
   const traitDisabledReasons: Record<string, string> = {};
+  const traitResolving = Boolean(
+    state.pendingMoveRange != null ||
+      state.pendingBlockade ||
+      state.pendingBlockadeJob ||
+      state.killerSenseRoomActive ||
+      state.pendingSenseColor ||
+      state.pendingTraitVictim,
+  );
+  const senseChoices = new Set(state.pendingSenseTraitChoices ?? []);
+  const levelChoices = new Set(state.pendingLevelTraitChoices ?? []);
   if (!isSurvivorView && state.variant1) {
     const timed = new Set(['trait_k01', 'trait_k05', 'trait_k06', 'trait_k07', 'trait_k20']);
     const offerIds = new Set(state.pendingKillerTraitOffer?.options ?? []);
@@ -3310,12 +3320,24 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
       if (group.id !== state.you.id && group.id !== state.pendingKillerTraitOffer?.killerId) continue;
       for (const def of group.defs) {
         const need = KILLER_TRAIT_PAY_CLIENT[def.id] ?? 0;
-        if (need > 0 && killerHand.length < need)
+        if (traitResolving)
+          traitDisabledReasons[def.id] = '请先完成当前特性';
+        else if (need > 0 && killerHand.length < need)
           traitDisabledReasons[def.id] = `手牌只有 ${killerHand.length} 张，不够弃 ${need} 张`;
+        else if (state.pendingSenseTraits) {
+          traitDisabledReasons[def.id] = senseChoices.has(def.id) ? '' : '先处理这次感知列出的特性';
+          if (!traitDisabledReasons[def.id]) delete traitDisabledReasons[def.id];
+        }
+        else if (levelChoices.size > 0) {
+          traitDisabledReasons[def.id] = levelChoices.has(def.id) ? '' : '先确认这次升级的特性';
+          if (!traitDisabledReasons[def.id]) delete traitDisabledReasons[def.id];
+        }
         else if (timed.has(def.id) && !offerIds.has(def.id))
           traitDisabledReasons[def.id] = state.pendingKillerTraitOffer
             ? '现在不是这张的时机'
             : '会在该杀手的大回合开始或结束时询问';
+        else if (def.id === 'trait_k10' || def.id === 'trait_k15' || def.id === 'trait_k16')
+          traitDisabledReasons[def.id] = '只能在感知发现幸存者之后发动';
       }
     }
   }
@@ -3455,6 +3477,29 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
   const cancelTraitPay = () => {
     setTraitPay(null);
     setTraitPayIdx([]);
+  };
+  const beginListedTrait = (id: string) => {
+    const def = (state.traitDefs ?? []).find((d) => d.id === id);
+    const need = KILLER_TRAIT_PAY_CLIENT[id] ?? 0;
+    if (need > 0) {
+      setTraitConfirm(null);
+      setTraitPay({ traitId: id, traitName: def?.name ?? id, need });
+      setTraitPayIdx([]);
+      return;
+    }
+    setTraitPay(null);
+    setTraitPayIdx([]);
+    setTraitConfirm({ traitId: id, traitName: def?.name ?? id });
+  };
+  const submitTraitConfirm = () => {
+    if (!traitConfirm) return;
+    const traitId = traitConfirm.traitId;
+    setTraitConfirm(null);
+    void onAction({
+      type: 'useTrait',
+      traitId,
+      actorPlayerId: state.pendingKillerTraitOffer?.killerId ?? state.you.id,
+    });
   };
   const submitTraitPay = () => {
     if (!traitPay || traitPayIdx.length !== traitPay.need) return;
@@ -4870,16 +4915,16 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
              * 【变体1】02 玩弄猎物：遭遇爆发时**先问杀手**要不要取消这次遭遇
              * （用户顺序：先杀手取不取消，再幸存者用不用 12）。
              */}
-            {!isSurvivorView && state.variant1 && state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0 && !state.pendingBlockade && !state.pendingBlockadeJob && state.pendingMoveRange == null && !state.killerSenseRoomActive && (
+            {!isSurvivorView && state.variant1 && state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0 && !traitResolving && !state.pendingSenseTraits && !(state.pendingLevelTraitChoices?.length) && !(state.pendingMoveSurvivorPick?.length) && (
               <div className="panel stack">
                 <strong>
                   【变体1】{state.pendingKillerTraitOffer.when === 'start' ? '回合开始' : '回合结束'}
                   ：可以发动特性
                 </strong>
                 <p className="muted">
-                  这是持有该特性的杀手的大回合。发动要先弃牌（点下面的手牌，同名牌可以各选一份），也可以都不发动。
+                  点一张先确认。确认了就必须做完。跳过会放过还没做的。
                 </p>
-                {!traitPay && (
+                {!traitPay && !traitConfirm && (
                   <div className="row">
                     {state.pendingKillerTraitOffer.options.map((id) => {
                       const def = (state.traitDefs ?? []).find((d) => d.id === id);
@@ -4888,21 +4933,9 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           key={`trait-window-${id}`}
                           type="button"
                           className="primary"
-                          onClick={() => {
-                            const need = KILLER_TRAIT_PAY_CLIENT[id] ?? 0;
-                            if (need <= 0) {
-                              void onAction({
-                                type: 'useTrait',
-                                traitId: id,
-                                actorPlayerId: state.pendingKillerTraitOffer?.killerId ?? state.you.id,
-                              });
-                              return;
-                            }
-                            setTraitPay({ traitId: id, traitName: def?.name ?? id, need });
-                            setTraitPayIdx([]);
-                          }}
+                          onClick={() => beginListedTrait(id)}
                         >
-                          发动「{def?.name ?? id}」
+                          {def?.name ?? id}
                         </button>
                       );
                     })}
@@ -4913,6 +4946,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         if (!id) return;
                         setTraitPay(null);
                         setTraitPayIdx([]);
+                        setTraitConfirm(null);
                         void onAction({
                           type: 'useTrait',
                           traitId: id,
@@ -4921,7 +4955,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         });
                       }}
                     >
-                      {state.pendingKillerTraitOffer.when === 'start' ? '都不发动，开始回合' : '都不发动，结束回合'}
+                      跳过
                     </button>
                   </div>
                 )}
@@ -4972,7 +5006,88 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 )}
               </div>
             )}
-            {!isSurvivorView && traitPay && !(state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0) && (
+            {!isSurvivorView && state.variant1 && (state.pendingSenseTraitChoices?.length ?? 0) > 0 && !traitResolving && !traitPay && !traitConfirm && (
+              <div className="panel stack">
+                <strong>
+                  【变体1】感知之后：
+                  {(state.pendingSenseTraitChoices ?? []).map((id) => (state.traitDefs ?? []).find((d) => d.id === id)?.name ?? id).join('、')}
+                </strong>
+                <p className="muted">
+                  {(state.pendingSenseTraitChoices ?? []).includes('trait_k16')
+                    ? '敏锐感知单独结算。这次跳过只跳过它，和前面的即刻反应、谋杀意图无关。确认后会再感知一个颜色，那次也会先结算杀手效果，再问即刻反应和谋杀意图。'
+                    : '点一张先确认，顺序自定。这里的跳过只放过即刻反应和谋杀意图。敏锐感知要等这次做完或跳过之后，再单独问、单独跳过。'}
+                </p>
+                <div className="row">
+                  {(state.pendingSenseTraitChoices ?? []).map((id) => {
+                    const def = (state.traitDefs ?? []).find((d) => d.id === id);
+                    return (
+                      <button
+                        key={`sense-trait-${id}`}
+                        type="button"
+                        className="primary"
+                        onClick={() => beginListedTrait(id)}
+                      >
+                        {def?.name ?? id}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = state.pendingSenseTraitChoices?.[0];
+                      if (!id) return;
+                      setTraitPay(null);
+                      setTraitPayIdx([]);
+                      setTraitConfirm(null);
+                      void onAction({
+                        type: 'useTrait',
+                        traitId: id,
+                        decline: true,
+                        actorPlayerId: state.you.id,
+                      });
+                    }}
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            )}
+            {!isSurvivorView && state.variant1 && (state.pendingLevelTraitChoices?.length ?? 0) > 0 && !traitResolving && !traitPay && !traitConfirm && (
+              <div className="panel stack">
+                <strong>【变体1】升级特性：请确认先做哪一张</strong>
+                <p className="muted">这两张都要做，不能跳过。点一张先确认，确认了就必须做完。</p>
+                <div className="row">
+                  {(state.pendingLevelTraitChoices ?? []).map((id) => {
+                    const def = (state.traitDefs ?? []).find((d) => d.id === id);
+                    return (
+                      <button
+                        key={`level-trait-${id}`}
+                        type="button"
+                        className="primary"
+                        onClick={() => beginListedTrait(id)}
+                      >
+                        {def?.name ?? id}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {!isSurvivorView && traitConfirm && (
+              <div className="panel stack">
+                <strong>确认发动「{traitConfirm.traitName}」？</strong>
+                <p className="muted">确认后必须做完，不能再取消。</p>
+                <div className="row">
+                  <button type="button" className="primary" onClick={submitTraitConfirm}>
+                    确认
+                  </button>
+                  <button type="button" onClick={() => setTraitConfirm(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+            {!isSurvivorView && traitPay && !(state.pendingKillerTraitOffer && state.pendingKillerTraitOffer.options.length > 0 && !traitResolving && !state.pendingSenseTraits && !(state.pendingLevelTraitChoices?.length) && !(state.pendingMoveSurvivorPick?.length)) && (
               <div className="panel stack">
                 <p className="muted">
                   发动「{traitPay.traitName}」：点手牌选 {traitPay.need} 张弃置（已选 {traitPayIdx.length}/{traitPay.need}）。同名牌可以各选一份。
@@ -9272,6 +9387,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             isSurvivorView || isSpectator
               ? undefined
               : (traitId) => {
+                  const listed = new Set([
+                    ...(state.pendingKillerTraitOffer?.options ?? []),
+                    ...(state.pendingSenseTraitChoices ?? []),
+                    ...(state.pendingLevelTraitChoices ?? []),
+                  ]);
+                  if (listed.has(traitId)) {
+                    beginListedTrait(traitId);
+                    return;
+                  }
                   const def = (state.traitDefs ?? []).find((d) => d.id === traitId);
                   const need = KILLER_TRAIT_PAY_CLIENT[traitId] ?? 0;
                   if (!def) return;

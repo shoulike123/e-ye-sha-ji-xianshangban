@@ -603,10 +603,31 @@ export interface GameState {
   /**
    * 【变体1】感知**发现了幸存者**之后，等杀手决定要不要发动特性卡
    * （10 即刻反应 / 15 谋杀意图 / 16 敏锐感知 —— 卡面都写"可以"，所以要他确认）。
+   *
+   * 先一起列出即刻反应和谋杀意图，杀手选哪张先做。
+   * 这两张都做完或跳过之后，才列出敏锐感知。
+   * 16 的额外感知走完，才做感知之后的事（比如君臨天下移动目击者）。
    */
   pendingSenseTraits: boolean;
+  /** 只剩一张时记下它；两张一起列的时候是 null */
+  pendingSenseTraitId: string | null;
+  /** 当前这一批可以点的感知特性（即刻反应和谋杀意图，或单独的敏锐感知） */
+  pendingSenseTraitChoices: string[];
   /** 刚感知到的那批幸存者（特性 15「谋杀意图」要惊吓的就是他们） */
   pendingSenseWitnessed: string[];
+  /**
+   * 感知命中后还没走完的后续。栈顶是当前这次感知。
+   * 敏锐感知的额外感知会再压一层，走完才回到下面那次（例如君臨天下的移动）。
+   */
+  senseFollowStack: Array<{
+    witnessed: string[];
+    /** 还没处理的特性。10 和 15 一起列，都处理完才问 16 */
+    traits: string[];
+    /** 这层特性问完之后：移动目击者 / 继续这张牌 / 没有后续 */
+    after: 'reign' | 'card' | null;
+    /** 正在等这张特性自己的后续（移动，或敏锐感知的颜色感知） */
+    waiting: null | 'move' | 'color';
+  }>;
   /** 【变体1】"**每轮一次**"的特性这轮用没用过（目前只有 16 敏锐感知），每轮清空 */
   traitUsedThisRound: string[];
   /**
@@ -624,6 +645,11 @@ export interface GameState {
    * （卡面写"任意 1 个幸存者" → 必须他选，不许系统代选）。
    */
   pendingTraitVictim: { killerId: string; traitId: string; level: number } | null;
+  /**
+   * 【变体1】升级时还没确认的特性（17 压迫威慑 / 18 狡诈猎手）。
+   * 两张都在时杀手自己选先做哪张。这两张必须做，没有跳过。
+   */
+  pendingLevelTraitChoices: string[];
   /**
    * 【变体1】特性 18「拾物妙手」：正在"**两张发现牌都留下**"。
    *
@@ -953,6 +979,11 @@ export interface GameState {
    * 摸牌带来的弃牌或进化确认完，才判「回合结束时」的效果，不会摸第二次。
    */
   turnEndDrawStarted?: boolean;
+  /**
+   * 回合开始的特性还没结完，重现先别做。
+   * 特性要在潜行被重现清掉之前判定。
+   */
+  revealAfterStartTraits?: boolean;
   /**
    * 「你的回合结束时」的判定已经开始（女王 / 狼人 / 粘液 / 特性）。
    * 摸牌和它带来的进化都已经结算完。再进来只交接，不再重跑那些效果。
@@ -2140,6 +2171,12 @@ export interface PublicSnapshot {
   pendingTraitDiscard?: number;
   /** 【变体1】感知命中后可以发动特性卡（10/15/16）—— 只发杀手 */
   pendingSenseTraits?: boolean;
+  /** 只剩一张时是它；即刻反应和谋杀意图一起列时为 null */
+  pendingSenseTraitId?: string | null;
+  /** 当前可以点的感知特性 */
+  pendingSenseTraitChoices?: string[];
+  /** 升级时还没确认的特性（压迫威慑 / 狡诈猎手）。没有跳过 */
+  pendingLevelTraitChoices?: string[];
   /**
    * 【变体1】特性 11「安静搜查」的询问：**只发给本人**。
    * 有值时表示"发现要发出响声了，问你要不要取消"。

@@ -27,7 +27,7 @@ import {
 } from './effects.js';
 /** 守護之石出示后要**从背包移除并进普通弃牌堆**（它不是 ∞） */
 import { discardRelic, removeRelic } from './relic.js';
-import { offerSenseTraits } from './traits.js';
+import { traitDef } from './traits.js';
 import {
   hasEvolutionPending,
   maybeOfferWhizSearch,
@@ -113,6 +113,7 @@ export function hasPendingKillerChoice(state: GameState): boolean {
     Boolean(state.pendingBlockadePlace) ||
     Boolean(state.pendingSensePair) ||
     state.pendingSenseColor ||
+    state.pendingSenseTraits ||
     state.pendingLurkPick ||
     Boolean(state.pendingAmulet) ||
     /**
@@ -230,6 +231,183 @@ export function queenSenseFear(state: GameState, witnessed: PlayerState[]): numb
     true,
   );
   return witnessed.length;
+}
+
+const SENSE_TRAIT_ORDER = ['trait_k10', 'trait_k15', 'trait_k16'] as const;
+
+function senseTraitQueue(state: GameState): string[] {
+  if (!state.variant1 || !state.killerId) return [];
+  const mine = state.traits[state.killerId] ?? [];
+  return SENSE_TRAIT_ORDER.filter((id) => {
+    if (!mine.includes(id)) return false;
+    if (id === 'trait_k16' && (state.traitUsedThisRound ?? []).includes(id)) return false;
+    return true;
+  });
+}
+
+function clearSenseTraitPrompt(state: GameState): void {
+  state.pendingSenseTraits = false;
+  state.pendingSenseTraitId = null;
+  state.pendingSenseTraitChoices = [];
+}
+
+/** 现在能点的感知特性：即刻反应和谋杀意图一起列，两张都处理完才列敏锐感知 */
+function offeredSenseTraits(top: { traits: string[]; waiting: null | 'move' | 'color' }): string[] {
+  if (top.waiting) return [];
+  const follow = top.traits.filter((id) => id === 'trait_k10' || id === 'trait_k15');
+  if (follow.length) return follow;
+  if (top.traits.includes('trait_k16')) return ['trait_k16'];
+  return [];
+}
+
+/** 特性问完、牌也没有别的待选时，把这张牌收尾 */
+let onSenseChainIdle: ((state: GameState) => void) | null = null;
+export function setSenseChainIdleHandler(fn: (state: GameState) => void): void {
+  onSenseChainIdle = fn;
+}
+
+function startReignMove(state: GameState, witnessed: string[]): void {
+  state.pendingSenseMoveAfter = false;
+  state.pendingMoveSurvivorPick = witnessed;
+  const names = witnessed.map((id) => state.players[id]?.name ?? id).join('、');
+  log(state, `君臨天下：目击了 ${names}，请选其中 1 名移动 0–2 步。`, 'killer');
+}
+
+/**
+ * 问栈顶的下一张特性；这层问完了，就做这层感知之后的事，或回到下面那一层。
+ * 调用时如果栈顶还停在「敏锐感知的颜色感知」，表示那次额外感知已经走完。
+ */
+function ensureSenseFollow(state: GameState): void {
+  if (!state.senseFollowStack) state.senseFollowStack = [];
+}
+
+function presentSenseFollow(state: GameState): void {
+  ensureSenseFollow(state);
+  while (state.senseFollowStack.length) {
+    const top = state.senseFollowStack[state.senseFollowStack.length - 1]!;
+    if (top.waiting === 'color') {
+      top.waiting = null;
+      top.traits = top.traits.filter((id) => id !== 'trait_k16');
+    }
+    if (top.waiting === 'move') {
+      clearSenseTraitPrompt(state);
+      return;
+    }
+    const offered = offeredSenseTraits(top);
+    if (offered.length) {
+      state.pendingSenseTraits = true;
+      state.pendingSenseTraitChoices = [...offered];
+      state.pendingSenseTraitId = offered.length === 1 ? offered[0]! : null;
+      state.pendingSenseWitnessed = [...top.witnessed];
+      const names = offered.map((id) => traitDef(state, id)?.name ?? id).join('、');
+      log(
+        state,
+        offered.includes('trait_k16')
+          ? `【变体1】感知之后：可以发动「${names}」，也可以跳过。`
+          : `【变体1】感知之后：可以发动「${names}」，顺序自定，也可以跳过。敏锐感知要等这两张都处理完。`,
+        'killer',
+      );
+      return;
+    }
+    const done = state.senseFollowStack.pop()!;
+    clearSenseTraitPrompt(state);
+    state.pendingSenseWitnessed = [];
+    if (done.after === 'reign' && done.witnessed.length) {
+      startReignMove(state, done.witnessed);
+      return;
+    }
+    if (done.after === 'card') {
+      continueKillerQueue(state);
+      if (!state.senseFollowStack.length && !hasPendingKillerChoice(state))
+        onSenseChainIdle?.(state);
+      return;
+    }
+  }
+  clearSenseTraitPrompt(state);
+  if (!state.senseFollowStack.length)
+    onSenseChainIdle?.(state);
+}
+
+/**
+ * 一次感知的人已经确定。
+ * 先结算杀手自己的感知效果（女王 2 级惊吓），再列出即刻反应和谋杀意图。
+ * 这两张都做完或跳过之后，才列出敏锐感知。
+ * 全部问完（或本来就没有）才做 `after`：君臨天下的移动，或继续这张牌。
+ *
+ * 返回 true = 还要等杀手选特性或做后续，调用方先不要往下走。
+ */
+export function settleSenseHit(
+  state: GameState,
+  witnessed: PlayerState[],
+  after: 'reign' | 'card' | null,
+): boolean {
+  ensureSenseFollow(state);
+  queenSenseFear(state, witnessed);
+  const traits = witnessed.length ? senseTraitQueue(state) : [];
+  if (!traits.length) {
+    if (after === 'reign' && witnessed.length) {
+      startReignMove(state, witnessed.map((w) => w.id));
+      return true;
+    }
+    return false;
+  }
+  state.senseFollowStack.push({
+    witnessed: witnessed.map((w) => w.id),
+    traits,
+    after,
+    waiting: null,
+  });
+  presentSenseFollow(state);
+  return true;
+}
+
+/** 跳过当前这一批还没做的感知特性（即刻反应和谋杀意图一起跳，或只跳敏锐感知） */
+export function skipOfferedSenseTraits(state: GameState): void {
+  ensureSenseFollow(state);
+  const top = state.senseFollowStack[state.senseFollowStack.length - 1];
+  const offered = top && !top.waiting ? offeredSenseTraits(top) : [];
+  if (!top || !offered.length)
+    throw new Error('现在不是发动这张特性的时机');
+  const names = offered.map((id) => traitDef(state, id)?.name ?? id).join('、');
+  top.traits = top.traits.filter((id) => !offered.includes(id));
+  log(state, `【变体1】跳过「${names}」。`, 'killer');
+  presentSenseFollow(state);
+}
+
+/** 不发动当前这一张。现在的询问用跳过整批，这里留着给旧调用。 */
+export function declineCurrentSenseTrait(state: GameState, _traitId: string): void {
+  skipOfferedSenseTraits(state);
+}
+
+/**
+ * 杀手确定发动当前这一张。
+ * 10 要等移动走完，16 要等额外感知整段走完，15 立刻就算用过。
+ */
+export function acceptCurrentSenseTrait(state: GameState, traitId: string): void {
+  ensureSenseFollow(state);
+  const top = state.senseFollowStack[state.senseFollowStack.length - 1];
+  const offered = top && !top.waiting ? offeredSenseTraits(top) : [];
+  if (!top || !offered.includes(traitId))
+    throw new Error('现在不是发动这张特性的时机');
+  if (traitId === 'trait_k10') {
+    top.traits = top.traits.filter((id) => id !== traitId);
+    top.waiting = 'move';
+    clearSenseTraitPrompt(state);
+    return;
+  }
+  if (traitId === 'trait_k16') {
+    top.waiting = 'color';
+    state.traitUsedThisRound = [...(state.traitUsedThisRound ?? []), traitId];
+    clearSenseTraitPrompt(state);
+    return;
+  }
+  top.traits = top.traits.filter((id) => id !== traitId);
+  clearSenseTraitPrompt(state);
+}
+
+/** 即刻反应的移动走完，或敏锐感知的额外感知整段走完 */
+export function resumeSenseFollow(state: GameState): void {
+  presentSenseFollow(state);
 }
 
 /** 离某格不超过 range 步的活着的幸存者 */
@@ -493,9 +671,7 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
       return moveNearestNoiseSearch(state);
     case 'senseAllNoise': {
       const seen = senseAllNoise(state);
-      queenSenseFear(state, seen);
-      offerSenseTraits(state, seen);
-      return false;
+      return settleSenseHit(state, seen, 'card');
     }
     // —— 未命名（killer7）——
     case 'removeFromDiscardPermanent': {
@@ -547,9 +723,7 @@ function applyEffectNow(state: GameState, k: PlayerState, fx: EffectDef): boolea
       return true;
     case 'senseRange': {
       const seen = senseRange(state, typeof fx.value === 'number' ? fx.value : 1);
-      queenSenseFear(state, seen);
-      offerSenseTraits(state, seen);
-      return false;
+      return settleSenseHit(state, seen, 'card');
     }
     /**
      * ⚠ **进化卡牌的那 6 个 op 原来在这里各有一个 `case`，已经删掉**：
@@ -907,11 +1081,15 @@ export function resolveSenseColor(state: GameState, color: 'R' | 'B' | 'G'): voi
    * 在行动区要给出信息然后杀手确认"）。
    */
   setKillerInfo(state, `感知${label}区域`, [placeLine, whoLine]);
-  /** 女王等级 2：感知目击 → 惊吓 */
-  queenSenseFear(state, found);
-  /** 发现了人之后，10 / 15 / 16 由杀手自己决定发不发动 */
-  offerSenseTraits(state, found);
-  continueKillerQueue(state);
+  /**
+   * 先杀手自己的感知效果，再问特性。
+   * 这是敏锐感知的额外感知时，走完才回到外面那次（例如君臨天下的移动）。
+   */
+  const nested = state.senseFollowStack?.at(-1)?.waiting === 'color';
+  const waiting = settleSenseHit(state, found, nested ? null : 'card');
+  if (waiting) return;
+  if (nested) presentSenseFollow(state);
+  else continueKillerQueue(state);
 }
 
 /** 杀手牌移动：点相邻一格（可以往回走）。点自己的格子等于停下来 */
@@ -1074,6 +1252,11 @@ export function finishKillerCardMove(state: GameState): void {
   state.pendingMoveRange = null;
   state.pendingMoveMin = 0;
   continueKillerQueue(state);
+  const follow = state.senseFollowStack?.at(-1);
+  if (follow?.waiting === 'move') {
+    follow.waiting = null;
+    presentSenseFollow(state);
+  }
 }
 
 /** 潜行回合开始：公开所在格，按牌面惊吓/点名，再强制搜一次 */

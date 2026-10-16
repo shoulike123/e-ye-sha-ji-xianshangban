@@ -59,7 +59,21 @@ console.log('=== 颜色感知：看见别人就挂出特性，只有安娜则不
   sofia.roomId = 'B1';
   st.traits[st.killerId] = ['trait_k10', 'trait_k15', 'trait_k16'];
   resolveSenseColor(st, 'R');
-  ok(st.pendingSenseTraits === true, '红色区有别人，挂出 10/15/16');
+  ok(st.pendingSenseTraits === true, '红色区有别人，先挂出特性');
+  ok(
+    (st.pendingSenseTraitChoices ?? []).includes('trait_k10') &&
+      (st.pendingSenseTraitChoices ?? []).includes('trait_k15') &&
+      !(st.pendingSenseTraitChoices ?? []).includes('trait_k16'),
+    '先列即刻反应和谋杀意图，敏锐感知还没到',
+  );
+  const skipped = tryIt(st, { type: 'useTrait', traitId: 'trait_k10', decline: true, actorPlayerId: st.killerId });
+  ok(!skipped, '可以跳过前两张', String(skipped ?? ''));
+  ok(
+    (st.pendingSenseTraitChoices ?? []).length === 1 && st.pendingSenseTraitChoices[0] === 'trait_k16',
+    '跳过前两张之后，敏锐感知单独列出来',
+    JSON.stringify(st.pendingSenseTraitChoices),
+  );
+  ok(st.pendingMoveSurvivorPick == null, '特性没问完，先不做感知之后的移动');
   ok((st.pendingSenseWitnessed ?? []).includes(marco.id), '目击名单有马尔科');
   ok(!(st.pendingSenseWitnessed ?? []).includes(will.id), '安娜不在目击名单');
   ok(

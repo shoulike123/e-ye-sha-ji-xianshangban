@@ -258,7 +258,6 @@ import {
   hasTraitForKiller,
   killerHasTrait,
   markTraitUsed,
-  offerSenseTraits,
   pickTraits,
   setKillerScopeHandler,
   setTraitDraftDoneHandler,
@@ -391,12 +390,21 @@ setUpgradeHandler((s) => upgradeKillerWithCollapse(s));
  */
 setSlyTrickChecker((s) => Boolean(s.variant1 && s.killerId && hasTrait(s, s.killerId, 'trait_k03')));
 setEvolutionCollapseGate((s, fromLv, toLv) => interceptEvolutionForCollapse(s, fromLv, toLv));
-import { completeKillerCardMove, confirmPathDraft, finishKillerCardMove, confirmAmuletUse, continueKillerQueue, effectiveCardSpeed, finishLurkPick, forcedRevealAndSearch, encounterCardAttackBonus, canPlayAsEncounterAttack, runAttackTimingExtras, runOptionalEffect, hasPendingKillerChoice, resolveSenseColor, colorPrefixRooms, flushDeferredPlayedCard, queenSenseFear, setMoveSurvivorDoneHandler, setSearchFoundHandler, interruptCurrentCardEffects, pickStatueStepAction, fearAtRange, attackCardConditionBlockReason, cardRequirementBlockReason, } from './killerCards.js';
+import { completeKillerCardMove, confirmPathDraft, finishKillerCardMove, confirmAmuletUse, continueKillerQueue, effectiveCardSpeed, finishLurkPick, forcedRevealAndSearch, encounterCardAttackBonus, canPlayAsEncounterAttack, runAttackTimingExtras, runOptionalEffect, hasPendingKillerChoice, resolveSenseColor, colorPrefixRooms, flushDeferredPlayedCard, setSenseChainIdleHandler, settleSenseHit, declineCurrentSenseTrait, acceptCurrentSenseTrait, resumeSenseFollow, setMoveSurvivorDoneHandler, setSearchFoundHandler, interruptCurrentCardEffects, pickStatueStepAction, fearAtRange, attackCardConditionBlockReason, cardRequirementBlockReason, } from './killerCards.js';
 /**
  * 君臨天下「目击者移动」结算完的收尾。
  * 放在这里是因为 killerCards 不能 import engine（成环），只能反向注入。
  */
 setMoveSurvivorDoneHandler((state) => {
+    if (hasPendingKillerChoice(state))
+        return;
+    flushDeferredPlayedCard(state);
+    state.pendingCardSpeed = null;
+    maybeStartEncounter(state);
+    maybeFinishKillerMain(state);
+});
+setSenseChainIdleHandler((state) => {
+    tryOpenAfterStartTraits(state);
     if (hasPendingKillerChoice(state))
         return;
     flushDeferredPlayedCard(state);
@@ -937,6 +945,10 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         pendingTraitDiscard: 0,
         pendingTraitDiscardFrom: null,
         pendingSenseTraits: false,
+        pendingSenseTraitId: null,
+        pendingSenseTraitChoices: [],
+        pendingLevelTraitChoices: [],
+        senseFollowStack: [],
         pendingSenseWitnessed: [],
         traitUsedThisRound: [],
         pendingQuietSearch: null,
@@ -1028,6 +1040,7 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         leverGateOwnerId: null,
         pendingTurnEndSwitch: false,
         turnEndDrawStarted: false,
+        revealAfterStartTraits: false,
         endOfTurnEffectsDone: false,
         pendingGatePay: null,
         castleHallFirstEnterDone: false,
@@ -1753,6 +1766,29 @@ export function beginKillerTurn(state: GameState) {
      */
     log(state, `${k.statueIndex != null ? '雕像' : k.name} 的回合：先打任意张快速牌，再二选一（2 次移动/搜索房间，或 1 张特殊卡牌），无遭遇则进入慢速阶段。`);
     /**
+     * 回合开始的特性比**重现**早。
+     * 迅捷行动、进阶追踪，以及回合结束的完全围困、危险伏击、恐惧光环、狼人 4 级，
+     * 都要看**当时**还在不在潜行。重现会把潜行清掉，所以必须等特性结完再重现。
+     */
+    state.revealAfterStartTraits = false;
+    offerTurnStartTraits(state);
+    if (state.pendingKillerTraitOffer?.when === 'start') {
+        state.revealAfterStartTraits = true;
+        return;
+    }
+    openKillerTurnAfterStartTraits(state);
+}
+
+/**
+ * 回合开始的特性已经结完（或本来就没有）。
+ * 还在潜行就在这里重现并强制搜索；爆竹标记也等重现后再放。
+ */
+function openKillerTurnAfterStartTraits(state: GameState): void {
+    const kid = state.killerId;
+    const k = kid ? state.players[kid] : null;
+    if (!k)
+        return;
+    /**
      * **重现（不是"潜行结束"）**：杀手回合开始时如果还在潜行，
      * 就主动现身 → 公开所在格 → **强制搜索一次**。
      *
@@ -1772,8 +1808,26 @@ export function beginKillerTurn(state: GameState) {
     else {
         placeFirecrackerMarker(state);
     }
-    /** 【变体1】05 / 06 / 07：回合开始、还没打牌时插入询问（只问正在行动的这名杀手） */
-    offerTurnStartTraits(state);
+}
+
+/** 回合开始特性的后续都走完了，才重现 */
+function tryOpenAfterStartTraits(state: GameState): void {
+    if (!state.revealAfterStartTraits)
+        return;
+    if (state.pendingKillerTraitOffer?.when === 'start' && state.pendingKillerTraitOffer.options.length > 0)
+        return;
+    if (
+        killerTraitResolving(state)
+        || state.pendingSenseTraits
+        || (state.pendingMoveSurvivorPick?.length ?? 0) > 0
+        || state.encounter
+        || state.pendingLurkPick
+        || state.pendingAmulet
+        || state.pendingOverFearWound
+    )
+        return;
+    state.revealAfterStartTraits = false;
+    openKillerTurnAfterStartTraits(state);
 }
 
 /** 这一轮还没行动过、还活着的幸存者 */
@@ -2160,6 +2214,10 @@ export function startRound(state: GameState) {
         /** 【变体1】"每轮一次"的特性卡（16 敏锐感知）跟着大回合复位 */
         state.traitUsedThisRound = [];
         state.pendingSenseTraits = false;
+        state.pendingSenseTraitId = null;
+        state.pendingSenseTraitChoices = [];
+        state.pendingLevelTraitChoices = [];
+        state.senseFollowStack = [];
         state.pendingSenseWitnessed = [];
         /**
          * 雕像停滞只持续「上一个杀手回合」：
@@ -2646,6 +2704,10 @@ export function finishStartCommon(state: GameState, content: GameContent) {
     state.pendingTraitDiscard = 0;
     state.pendingTraitDiscardFrom = null;
     state.pendingSenseTraits = false;
+    state.pendingSenseTraitId = null;
+    state.pendingSenseTraitChoices = [];
+    state.pendingLevelTraitChoices = [];
+    state.senseFollowStack = [];
     state.pendingSenseWitnessed = [];
     state.traitUsedThisRound = [];
     state.discoveryKeepBoth = false;
@@ -3230,41 +3292,55 @@ export function revealEvolutionTraits(state: GameState, level: number): number |
         return 4;
     }
     /**
-     * 18 狡诈猎手：「当你升级到等级 2/4 时，在任意地点【封堵】X1」（地点由杀手选）。
-     *
-     * 复用现成的「任选门封堵」作业（和特性 13、进化 4 级同一套）：
-     * 挂上 `pendingBlockadeJob` 之后杀手点地图选门、再在行动区确认。
-     * ⚠ 不加 `pendingTraitSetupResume` —— 这条发生在**局中升级**，
-     * 收尾该走原本的 `ackEvolution` → `maybeCloseKillerUpkeep` 流程。
+     * 18 狡诈猎手、17 压迫威慑先列出来，杀手确认后才开始。
+     * 两张都有时自己选顺序。这两张必须做，不给跳过。
      */
-    if ((level === 2 || level === 4) && hasTrait(state, kid, 'trait_k18')) {
-        if (startAnyDoorsBlockade(state, 1, '狡诈猎手')) {
-            log(
-                state,
-                `【变体1】${name} 的特性「狡诈猎手」：升级到 ${level} 级，请在任意地点选 1 扇门【封堵】。`,
-                'all',
-                true,
-            );
-        }
-        else {
-            log(state, `【变体1】${name} 的特性「狡诈猎手」：场上没有可以封堵的门，跳过。`, 'all', true);
-        }
-    }
-    /**
-     * 17 压迫威慑：「当你升级到等级 3/4/5 时，【惊吓】任意 1 个幸存者」。
-     *
-     * ⚠ 目标**由杀手自己选**（用户要求：卡面上写"任意"的都要选，不许系统代选）——
-     * 所以这里只挂起，等他在界面上点一名幸存者（`useTrait { targetPlayerId }`）。
-     */
-    if ((level === 3 || level === 4 || level === 5) && hasTrait(state, kid, 'trait_k17')) {
-        state.pendingTraitVictim = { killerId: kid, traitId: 'trait_k17', level };
+    const levelChoices: string[] = [];
+    if ((level === 2 || level === 4) && hasTrait(state, kid, 'trait_k18'))
+        levelChoices.push('trait_k18');
+    if ((level === 3 || level === 4 || level === 5) && hasTrait(state, kid, 'trait_k17'))
+        levelChoices.push('trait_k17');
+    state.pendingLevelTraitChoices = levelChoices;
+    if (levelChoices.length > 1) {
         log(
             state,
-            `【变体1】${name} 的特性「压迫威慑」：升级到 ${level} 级，请**选 1 名幸存者**【惊吓】。`,
+            `【变体1】${name} 升级到 ${level} 级：请确认先发动「压迫威慑」或「狡诈猎手」。两张都要做，不能跳过。`,
             'killer',
         );
     }
+    else if (levelChoices.length === 1) {
+        const only = traitDef(state, levelChoices[0]!)?.name ?? levelChoices[0];
+        log(state, `【变体1】${name} 升级到 ${level} 级：请确认发动「${only}」。`, 'killer');
+    }
     return undefined;
+}
+
+/** 升级特性已确认：17 接着选人，18 接着选门。确认之后不能取消。 */
+function beginLevelTrait(state: GameState, who: PlayerState, traitId: string): void {
+    const choices = state.pendingLevelTraitChoices ?? [];
+    if (!choices.includes(traitId))
+        throw new Error('现在不是发动这张特性的时机');
+    state.pendingLevelTraitChoices = choices.filter((id) => id !== traitId);
+    if (traitId === 'trait_k18') {
+        if (startAnyDoorsBlockade(state, 1, '狡诈猎手')) {
+            log(
+                state,
+                `【变体1】${who.name}「狡诈猎手」：请在任意地点选 1 扇门【封堵】。`,
+                'killer',
+            );
+            return;
+        }
+        log(state, `【变体1】${who.name} 的特性「狡诈猎手」：场上没有可以封堵的门，跳过。`, 'all', true);
+        if (!(state.pendingLevelTraitChoices?.length) && !state.pendingTraitVictim)
+            advanceEvolutionAfterChoice(state);
+        return;
+    }
+    state.pendingTraitVictim = { killerId: who.id, traitId: 'trait_k17', level: state.killerLevel };
+    log(
+        state,
+        `【变体1】${who.name}「压迫威慑」：升级到 ${state.killerLevel} 级，请**选 1 名幸存者**【惊吓】。`,
+        'killer',
+    );
 }
 
 /**
@@ -3291,12 +3367,17 @@ function evolutionTraitStage(state: GameState, level: number): boolean {
      * （坍塌打断后的补跑）。没有这道守卫的话，坍塌走完补跑时会**再结算一遍**
      * 特性（09 慢热杀手会重复 +1 力量）。
      */
+    const levelTraitsWaiting = Boolean(state.pendingTraitVictim)
+        || Boolean(state.pendingBlockadeJob)
+        || (state.pendingLevelTraitChoices?.length ?? 0) > 0;
     if (state.evolutionTraitStageAtLevel === level)
-        return Boolean(state.pendingTraitVictim) || Boolean(state.pendingBlockadeJob);
+        return levelTraitsWaiting;
     state.evolutionTraitStageAtLevel = level;
     revealEvolutionTraits(state, level);
-    /** 17 要杀手自己选惊吓目标；18 要杀手点地图选门 */
-    return Boolean(state.pendingTraitVictim) || Boolean(state.pendingBlockadeJob);
+    /** 17 / 18 还在列表里，或已经确认、正在选人 / 选门 */
+    return Boolean(state.pendingTraitVictim)
+        || Boolean(state.pendingBlockadeJob)
+        || (state.pendingLevelTraitChoices?.length ?? 0) > 0;
 }
 
 /**
@@ -4949,27 +5030,46 @@ function assertNoKillerTraitWindow(state: GameState): void {
  * 窗口空了：开始类就放行打牌；结束类直接交接（摸牌已经在这些判定之前做过）。
  * 粘液腺体等其他收尾已经在特性之前做过了。
  */
+/** 有一张特性正在结算（移动、选点、封堵、选人），其他特性先别动 */
+function killerTraitResolving(state: GameState): boolean {
+    return state.pendingMoveRange != null
+        || Boolean(state.pendingBlockade)
+        || Boolean(state.pendingBlockadeJob)
+        || Boolean(state.killerSenseRoomActive)
+        || state.pendingSenseColor
+        || Boolean(state.pendingTraitVictim)
+        || (state.senseFollowStack ?? []).some((frame) => frame.waiting != null);
+}
+
 function afterTimedTraitEffect(state: GameState): void {
     const offer = state.pendingKillerTraitOffer;
-    if (!offer)
+    if (!offer) {
+        tryOpenAfterStartTraits(state);
         return;
+    }
     if (state.encounter || state.phase === 'gameOver') {
+        state.pendingKillerTraitOffer = null;
+        state.revealAfterStartTraits = false;
+        return;
+    }
+    const busy = killerTraitResolving(state)
+        || state.pendingSenseTraits
+        || (state.pendingLevelTraitChoices?.length ?? 0) > 0
+        || (state.pendingMoveSurvivorPick?.length ?? 0) > 0;
+    if (busy) {
+        if (offer.options.length > 0 || offer.when === 'end')
+            return;
         state.pendingKillerTraitOffer = null;
         return;
     }
-    if (
-        state.pendingMoveRange != null ||
-        state.pendingBlockade ||
-        state.pendingBlockadeJob ||
-        state.killerSenseRoomActive
-    )
-        return;
     if (offer.options.length > 0)
         return;
     const when = offer.when;
     state.pendingKillerTraitOffer = null;
-    if (when !== 'end')
+    if (when !== 'end') {
+        tryOpenAfterStartTraits(state);
         return;
+    }
     finishKillerTurn(state);
 }
 
@@ -6639,8 +6739,8 @@ function advanceEvolutionAfterChoice(state: GameState): void {
      */
     if (collapseStillResolving(state))
         return;
-    /** 特性作业（17 选惊吓目标 / 18 选门）还没做完 → 继续等它 */
-    if (state.pendingTraitVictim || state.pendingBlockadeJob)
+    /** 特性作业（17 选惊吓目标 / 18 选门 / 还没确认先做哪张）还没做完 → 继续等它 */
+    if (state.pendingTraitVictim || state.pendingBlockadeJob || (state.pendingLevelTraitChoices?.length ?? 0) > 0)
         return;
     /**
      * ③ **进化相关的特性卡**（变体1）。
@@ -6986,7 +7086,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
      */
     const collapseFloorAction = action.type === 'collapseMove'
         || action.type === 'confirmAmulet'
-        || action.type === 'discardKillerCard';
+        || action.type === 'discardKillerCard'
+        /**
+         * 坍塌伤害可以经「恐惧迸发」把人吓到惊恐过度。
+         * 这时进化确认还挂着，回答惊恐过度必须放行，否则和下面那道闸互相拒绝。
+         */
+        || ((action.type === 'confirmOverFearWound' || action.type === 'skipOverFearWound')
+            && Boolean(state.pendingOverFearWound));
     if (state.pendingCollapseMoves && !collapseFloorAction) {
         throw new Error('坍塌还没收尾：先让屋里的人轮流走一步离开');
     }
@@ -7012,10 +7118,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
          * 直接结算 —— 丧尸不会生成，`pendingQueenSpawnRooms` 还永远留着，
          * 回合收尾被 `hasEvolutionChoicePending` 一直挡住。**整局卡死。**
          *
-         * 扼杀者 4 级是"结算完之后"才挂的（那时 ack 已清），走不到这条闸门；
-         * 但两个动作共用一个 handler，一起放行没有副作用。
+         * 2对3 里先结算的扼杀者 4 级会在队友还没确认时就挂出选地点。
+         * 点地点、确认、以及满 5 个时选移除，都要在这道闸里放行。
          */
         action.type !== 'confirmEvoRooms' &&
+        !(action.type === 'pickStranglerCoreRoom' && state.pendingStranglerCoreRooms != null) &&
+        !(action.type === 'placeCoreMarker' && Boolean(state.pendingCorePick)) &&
+        /**
+         * 幽魂 3 级以上：进化确认期间若有人惊恐过度（压迫威慑、或坍塌触发恐惧迸发），
+         * 回答这个询问必须放行。否则这边要「先确认进化」，那边要「先决定惊恐过度」，两边都走不了。
+         */
+        !((action.type === 'confirmOverFearWound' || action.type === 'skipOverFearWound')
+            && Boolean(state.pendingOverFearWound)) &&
         // 可选效果（「可以」）：先决定执行或跳过
         action.type !== 'resolveOptionalEffect' &&
         /**
@@ -7036,8 +7150,15 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
          *  - 18「狡诈猎手」= `confirmEvoBlockade` 确认封堵
          * 不放行它们就会"特性挂出来了却点不动"（本文件外那套测试抓到的）。
          */
-        !(action.type === 'useTrait' && Boolean(state.pendingTraitVictim)) &&
+        !(action.type === 'useTrait' && (Boolean(state.pendingTraitVictim) || (state.pendingLevelTraitChoices?.length ?? 0) > 0)) &&
         !(action.type === 'confirmEvoBlockade' && Boolean(state.pendingBlockadeJob)) &&
+        /**
+         * 狡诈猎手确认之后还要在地图上选门。选门是 `move`，槽位不够时先拆旧封堵。
+         * 这两步发生在进化确认还没走完的时候，不放行就会报「请先确认进化效果」，门点不了。
+         */
+        !(action.type === 'move' && (Boolean(state.pendingBlockadeJob) || Boolean(state.pendingBlockade))) &&
+        !(action.type === 'removeBoardBlockade' && Boolean(state.pendingBlockadeJob)) &&
+        !(action.type === 'relocateBlockade' && Boolean(state.pendingBlockadeJob)) &&
         /**
          * ⚠ **坍塌的"轮流走一步"也必须放行** —— 否则又一个死锁（刚抓到的）：
          *   进化的坍塌结算会挂出"谁先走"的队列，而进化流程**必须等它走完**
@@ -7076,7 +7197,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
     if (state.pendingOverFearWound &&
         action.type !== 'confirmOverFearWound' &&
         action.type !== 'skipOverFearWound' &&
-        action.type !== 'confirmAmulet') {
+        action.type !== 'confirmAmulet' &&
+        /** 坍塌的人还要走出来；惊恐过度不能把这一步也冻住 */
+        !(action.type === 'collapseMove' && Boolean(state.pendingCollapseMoves))) {
         throw new Error('请先决定是否弃牌伤害惊恐过度的幸存者');
     }
     if (state.pendingWhizSearch &&
@@ -7507,16 +7630,26 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                  */
                 const offerNow = state.pendingKillerTraitOffer;
                 const timedIds = [...TURN_START_TRAIT_IDS, ...TURN_END_TRAIT_IDS] as string[];
+                if ((state.pendingLevelTraitChoices ?? []).includes(traitId)) {
+                    if (action.decline)
+                        throw new Error('这张特性必须发动');
+                    if (killerTraitResolving(state))
+                        throw new Error('请先完成当前特性');
+                    beginLevelTrait(state, who, traitId);
+                    break;
+                }
                 if (action.decline && offerNow && (offerNow.options.includes(traitId) || timedIds.includes(traitId))) {
                     if (offerNow.killerId !== who.id)
                         throw new Error('现在不是这名杀手的特性');
+                    if (killerTraitResolving(state) || state.pendingSenseTraits)
+                        throw new Error('请先完成当前特性');
                     const when = offerNow.when;
                     offerNow.options = [];
                     log(
                         state,
                         when === 'start'
-                            ? `【变体1】${who.name} 不发动回合开始的特性。`
-                            : `【变体1】${who.name} 不发动回合结束的特性。`,
+                            ? `【变体1】${who.name} 跳过剩余的回合开始特性。`
+                            : `【变体1】${who.name} 跳过剩余的回合结束特性。`,
                         'killer',
                     );
                     afterTimedTraitEffect(state);
@@ -7527,7 +7660,11 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                  * 2对3 的询问记着持有者，队友的大回合不会带上这张。
                  */
                 if (timedIds.includes(traitId)) {
-                    if (state.pendingBlockade || state.pendingBlockadeJob || state.pendingMoveRange != null || state.killerSenseRoomActive)
+                    if (
+                        killerTraitResolving(state)
+                        || state.pendingSenseTraits
+                        || (state.pendingLevelTraitChoices?.length ?? 0) > 0
+                    )
                         throw new Error('请先完成当前特性的选择');
                     if (!offerNow || offerNow.killerId !== who.id || !offerNow.options.includes(traitId))
                         throw new Error('现在不是发动这张特性的时机');
@@ -7535,6 +7672,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         throw new Error('这张特性要在回合开始时发动');
                     if ((TURN_END_TRAIT_IDS as readonly string[]).includes(traitId) && offerNow.when !== 'end')
                         throw new Error('这张特性要在回合结束时发动');
+                }
+                if (
+                    action.decline &&
+                    (traitId === 'trait_k10' || traitId === 'trait_k15' || traitId === 'trait_k16')
+                ) {
+                    declineCurrentSenseTrait(state, traitId);
+                    break;
                 }
                 /**
                  * ⚠ **不要按 id 去重**。杀手牌组里同一张有好几份，弃 2 张可以是两份相同的牌。
@@ -7569,12 +7713,14 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     throw new Error('不在地图上');
                 if (traitId === 'trait_k01' && !state.rules.enableBlockades)
                     throw new Error('本局未启用封堵');
-                if ((traitId === 'trait_k10' || traitId === 'trait_k16') && !state.pendingSenseTraits)
-                    throw new Error('只能在【感知】发现幸存者之后发动');
-                if (traitId === 'trait_k15' && (!state.pendingSenseTraits || !state.pendingSenseWitnessed.length))
-                    throw new Error('「谋杀意图」只能在【感知】发现幸存者之后发动');
-                if (traitId === 'trait_k16' && (state.traitUsedThisRound ?? []).includes(traitId))
-                    throw new Error('「敏锐感知」每轮只能用一次');
+                const pickingVictim = traitId === 'trait_k17' && state.pendingTraitVictim?.traitId === traitId;
+                if (killerTraitResolving(state) && !pickingVictim)
+                    throw new Error('请先完成当前特性');
+                if (
+                    (traitId === 'trait_k10' || traitId === 'trait_k15' || traitId === 'trait_k16') &&
+                    !(state.pendingSenseTraitChoices ?? []).includes(traitId)
+                )
+                    throw new Error('现在不是发动这张特性的时机');
                 if (
                     traitId === 'trait_k06' &&
                     !state.firecrackerThisRound &&
@@ -7639,11 +7785,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                                 `【感知】距离 1 内的所有地点（${list.map((id) => roomName(state, id)).join('、')}）。`,
                             'killer',
                         );
-                        queenSenseFear(state, witnessed);
-                        /** 【变体1】感知命中 → 挂出可发动的特性卡（10/15/16） */
-                        offerSenseTraits(state, witnessed);
                         const seenNames = [...new Set(witnessed.map((s) => s.name))];
                         log(state, senseResultText(state, list, seenNames), 'all', true);
+                        settleSenseHit(state, witnessed, null);
                         break;
                     }
                     /**
@@ -7686,8 +7830,9 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         );
                         break;
                     }
-                    /** 10 即刻反应：感知发现幸存者后 → 弃 1 张换【移动】X1 */
+                    /** 10 即刻反应：感知发现幸存者后 → 弃 1 张换【移动】X1。走完才问下一张特性。 */
                     case 'trait_k10': {
+                        acceptCurrentSenseTrait(state, traitId);
                         state.pendingMoveRange = 1;
                         state.pendingMoveMin = 1;
                         log(
@@ -7695,18 +7840,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                             `【变体1】${who.name}「即刻反应」：弃掉 ${need} 张卡牌，请点地图【移动】1 格。`,
                             'killer',
                         );
-                        /** 这一批"感知到的"已经用过了，收掉挂起（免得同一批人反复发动） */
-                        state.pendingSenseTraits = false;
-                        state.pendingSenseWitnessed = [];
                         break;
                     }
-                    /** 15 谋杀意图：感知发现幸存者后 → 弃 1 张，**惊吓刚发现的那批人** */
+                    /** 15 谋杀意图：惊吓这一次感知到的人，然后问下一张 */
                     case 'trait_k15': {
                         const victims = state.pendingSenseWitnessed
                             .map((id) => state.players[id])
                             .filter((s): s is NonNullable<typeof s> =>
                                 Boolean(s?.alive && s.faction === 'survivor'),
                             );
+                        acceptCurrentSenseTrait(state, traitId);
                         log(
                             state,
                             `【变体1】${who.name}「谋杀意图」：弃掉 ${need} 张卡牌，` +
@@ -7716,22 +7859,18 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                         );
                         for (const v of victims)
                             addFear(state, v.id, 1);
-                        state.pendingSenseTraits = false;
-                        state.pendingSenseWitnessed = [];
+                        resumeSenseFollow(state);
                         break;
                     }
-                    /** 16 敏锐感知：**每轮一次**、不弃牌 → 额外【感知】一个颜色区域 */
+                    /** 16 敏锐感知：额外感知走完杀手效果和其余特性后，才回到这次感知的后续 */
                     case 'trait_k16': {
+                        acceptCurrentSenseTrait(state, traitId);
                         state.pendingSenseColor = true;
-                        state.traitUsedThisRound = [...(state.traitUsedThisRound ?? []), traitId];
                         log(
                             state,
                             `【变体1】${who.name}「敏锐感知」：请再选一个**颜色区域**【感知】。`,
                             'killer',
                         );
-                        /** 收掉这一次的挂起；换个颜色区域再感知命中时会重新挂（16 每轮只有一次） */
-                        state.pendingSenseTraits = false;
-                        state.pendingSenseWitnessed = [];
                         break;
                     }
                     /**
@@ -12069,10 +12208,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 if (!a || !b)
                     throw new Error('请先选好两个相连地点');
                 const witnessed = senseRooms(state, [a, b], true);
-                /** 女王等级 2：感知目击 → 惊吓 */
-                queenSenseFear(state, witnessed);
-            /** 【变体1】感知命中 → 挂出可发动的特性卡（10/15/16） */
-            offerSenseTraits(state, witnessed);
                 state.pendingSensePair = null;
                 /**
                  * ⚠ 以前这里**什么都不报** —— 感知完两处相连地点，
@@ -12088,7 +12223,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                     : '那两处地点都没有人。';
                 log(state, `逻辑推理 —— ${placeLine}；${whoLine}`, 'all', true);
                 setKillerInfo(state, '逻辑推理：两处相连地点', [placeLine, whoLine]);
-                continueKillerQueue(state);
+                if (!settleSenseHit(state, witnessed, 'card'))
+                    continueKillerQueue(state);
             }
             else {
                 throw new Error('当前没有待确认的感知');
@@ -12137,8 +12273,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('仅杀手可执行');
             finishLurkPick(state, action.targetPlayerId);
             maybeStartEncounter(state);
-            /** 重现里的潜藏威胁处理完、又没遭遇：这时才是「回合开始」 */
-            offerTurnStartTraits(state);
             break;
         }
         case 'confirmAmulet': {
@@ -12152,7 +12286,6 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 maybeStartEncounter(state);
                 maybeFinishKillerMain(state);
             }
-            offerTurnStartTraits(state);
             break;
         }
         /**
@@ -12557,35 +12690,21 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'confirmSenseRoom': {
             if (p.faction !== 'killer')
                 throw new Error('仅杀手可确认感知');
-            const { roomId: sensedRoom, witnessed } = confirmSenseRoom(state);
-            /** 女王等级 2：感知目击 → 惊吓（这一条对所有〔感知〕都生效） */
-            queenSenseFear(state, witnessed);
-            /** 【变体1】感知命中 → 挂出可发动的特性卡（10/15/16） */
-            offerSenseTraits(state, witnessed);
+            const { witnessed } = confirmSenseRoom(state);
             /**
-             * 只感知一个地点时，立绘已在 `confirmSenseRoom` 里挪到该地点。
-             * 君臨天下目击到人之后，还要接着选一名按路径移动。
+             * 先杀手自己的感知效果，再逐张问特性，最后才是君臨天下的移动。
+             * 没目击到人时没有移动，直接把这张牌收尾。
              */
-            if (state.pendingSenseMoveAfter && witnessed.length) {
-                state.pendingSenseMoveAfter = false;
-                /** 目击到人 → 接着让杀手**选一名目击者移动**（0–2 步，路径由杀手选） */
-                state.pendingMoveSurvivorPick = witnessed.map((w) => w.id);
-                log(
-                    state,
-                    `君臨天下：目击了 ${witnessed.map((w) => w.name).join('、')}，请选其中 1 名移动 0–2 步。`,
-                    'killer',
-                );
-                afterTimedTraitEffect(state);
-                break;
-            }
-            /** 不是君臨天下（或缺省到没目击人）：照原流程收尾，**不动立绘** */
+            const reign = Boolean(state.pendingSenseMoveAfter && witnessed.length);
             state.pendingSenseMoveAfter = false;
-            continueKillerQueue(state);
-            if (!hasPendingKillerChoice(state)) {
-                flushDeferredPlayedCard(state);
-                state.pendingCardSpeed = null;
-                maybeStartEncounter(state);
-                maybeFinishKillerMain(state);
+            if (!settleSenseHit(state, witnessed, reign ? 'reign' : 'card')) {
+                continueKillerQueue(state);
+                if (!hasPendingKillerChoice(state)) {
+                    flushDeferredPlayedCard(state);
+                    state.pendingCardSpeed = null;
+                    maybeStartEncounter(state);
+                    maybeFinishKillerMain(state);
+                }
             }
             afterTimedTraitEffect(state);
             break;
@@ -12990,14 +13109,12 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 break;
             maybeStartEncounter(state);
             maybeFinishKillerMain(state);
-            offerTurnStartTraits(state);
             break;
         }
         case 'skipOverFearWound': {
             resolveOverFearWound(state, false, []);
             maybeStartEncounter(state);
             maybeFinishKillerMain(state);
-            offerTurnStartTraits(state);
             break;
         }
         case 'confirmEvoBlockade': {
@@ -13931,6 +14048,12 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
          */
         pendingSenseTraits:
             state.variant1 && viewerFaction === 'killer' ? state.pendingSenseTraits : false,
+        pendingSenseTraitId:
+            state.variant1 && viewerFaction === 'killer' ? state.pendingSenseTraitId : null,
+        pendingSenseTraitChoices:
+            state.variant1 && viewerFaction === 'killer' ? [...(state.pendingSenseTraitChoices ?? [])] : [],
+        pendingLevelTraitChoices:
+            state.variant1 && viewerFaction === 'killer' ? [...(state.pendingLevelTraitChoices ?? [])] : [],
         /**
          * 【变体1】特性 11「安静搜查」的询问 —— **只发给本人**（别人不该被问第二次）。
          */

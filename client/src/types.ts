@@ -388,6 +388,12 @@ export interface PublicSnapshot {
   pendingTraitDiscard?: number;
   /** 【变体1】感知命中后可以发动特性卡（10 即刻反应 / 15 谋杀意图 / 16 敏锐感知） */
   pendingSenseTraits?: boolean;
+  /** 只剩一张时是它；即刻反应和谋杀意图一起列时为 null */
+  pendingSenseTraitId?: string | null;
+  /** 当前可以点的感知特性 */
+  pendingSenseTraitChoices?: string[];
+  /** 升级时还没确认的特性（压迫威慑 / 狡诈猎手）。没有跳过 */
+  pendingLevelTraitChoices?: string[];
   /** 【变体1】特性 11「安静搜查」的询问（只发给本人）：要不要取消这次发现的响声 */
   pendingQuietSearch?: { playerId: string; from: 'suitcase' | 'discovery' } | null;
   /** 【变体1】17 压迫威慑：等杀手选 1 名幸存者惊吓（只发杀手） */

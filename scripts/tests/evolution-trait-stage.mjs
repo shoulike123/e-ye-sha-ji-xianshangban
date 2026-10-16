@@ -90,7 +90,10 @@ console.log('=== ② 开了变体1 + 特性17：特性作业排在坍塌之后 =
     `cardPick=${JSON.stringify(st.pendingEvolutionCardPick)} ack=${Boolean(st.pendingEvolutionAck)}`);
   ok((st.collapsedRooms ?? []).length > 0, '确认之后坍塌发生了（第二步）',
     JSON.stringify(st.collapsedRooms ?? []));
-  ok(st.pendingTraitVictim != null, '坍塌之后挂出特性作业（第三步）');
+  ok((st.pendingLevelTraitChoices ?? []).includes('trait_k17'), '坍塌之后先列出压迫威慑，等确认');
+  ok(st.pendingTraitVictim == null, '没确认之前还不选人');
+  ok(!tryIt(st, { type: 'useTrait', traitId: 'trait_k17' }), '确认发动');
+  ok(st.pendingTraitVictim != null, '确认之后才挂出选人（第三步）');
 
   const victim = Object.values(st.players).find((p) => p.faction === 'survivor' && p.alive);
   const err = tryIt(st, { type: 'useTrait', traitId: 'trait_k17', targetPlayerId: victim.id });
@@ -116,7 +119,7 @@ console.log('=== ③ 非墓穴地图：没有坍塌，但特性照常 ===');
   upgradeViaEnginePath(st);
   console.log(`  确认 → ${tryIt(st, { type: 'ackEvolution' }) ?? 'OK'}`);
   ok((st.collapsedRooms ?? []).length === 0, '小屋地图没有坍塌（条件不满足 → 跳过）');
-  ok(st.pendingTraitVictim != null, '但特性作业照常挂出（它只看变体1）');
+  ok((st.pendingLevelTraitChoices ?? []).includes('trait_k17'), '但特性照常列出来（它只看变体1）');
 }
 
 console.log(`\n进化特性时机：${pass} 通过 / ${fail} 失败`);
