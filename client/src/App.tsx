@@ -7,6 +7,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { GameView, LobbyView } from './GameViews';
 import { useGameSocket } from './useGameSocket';
+import { startAssetPreload, prioritizeCurrentGame } from './preloadAssets';
 
 export default function App() {
   const { connected, state, error, setError, createRoom, joinRoom, sendAction, leaveRoom, cursors, sendCursor } = useGameSocket();
@@ -14,6 +15,15 @@ export default function App() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [lanUrls, setLanUrls] = useState<string[]>([]);
+
+  useEffect(() => {
+    startAssetPreload();
+  }, []);
+
+  useEffect(() => {
+    if (!state) return;
+    prioritizeCurrentGame(state);
+  }, [state]);
 
   // 问服务器：同学该打开哪个网址（地图在房间里面选）
   useEffect(() => {

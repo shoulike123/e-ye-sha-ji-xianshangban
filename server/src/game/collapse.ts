@@ -243,7 +243,8 @@ function clearRoomMarkers(state: GameState, roomId: string): string[] {
   const planMarks = (state.planMarkers ?? []).filter((r) => r === roomId).length;
   if (planMarks) {
     clearPlanMarkersIn(state, roomId);
-    gone.push(`计划标记 ×${planMarks}`);
+    /** 计划标记只告诉幸存者；杀手不知道计划流程，也不知道标记在哪 */
+    log(state, `坍塌清掉了「${roomName(state, roomId)}」上的计划标记。`, 'survivor');
   }
 
   /** 捕网「本回合不能离开」的效果（人都被赶走了，锁也没意义） */

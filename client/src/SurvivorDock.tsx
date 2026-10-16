@@ -608,32 +608,35 @@ export function SurvivorSkillBoards({
           dropHover={dropHover}
           onDragPointerDown={onDragPointerDown}
         />
-        {/**
-         * **【变体1】特性卡**（用户要求：幸存者选完的特性卡放在**各自物品栏下方**）。
-         *
-         * 只画这个人自己那张 —— 幸存者特性同伴互相可见、杀手看不到
-         * （可见性由服务端按视角过滤，这里拿到什么画什么）。
-         * 点一下放大看；"每场游戏仅限一次"的用掉后**卡面变暗**。
-         */}
-        {traitDefs?.length ? (
-          <div className="trait-card-row">
-            {traitIdsFor(p.id).map((def) => (
-              <button
-                key={`trait-${p.id}-${def.id}`}
-                type="button"
-                className={`trait-chip${(traitUsed ?? []).includes(def.id) ? ' used' : ''}`}
-                title={`${def.name}：${def.text}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onZoomTrait?.(def.art, `${def.name}（幸存者特性）`);
-                }}
-              >
-                <img src={encodeURI(def.art)} alt={def.name} draggable={false} />
-              </button>
-            ))}
-          </div>
-        ) : null}
       </>
+    );
+  };
+
+  /**
+   * 【变体1】特性卡放在装备卡**外面**的下方。
+   * 放进装备卡里会把卡片撑高，鼓励标记 / 坚毅标记按百分比就会被挤离人物身体。
+   */
+  const traitRow = (p: PublicPlayerView) => {
+    if (!traitDefs?.length) return null;
+    const defs = traitIdsFor(p.id);
+    if (!defs.length) return null;
+    return (
+      <div className="trait-card-row">
+        {defs.map((def) => (
+          <button
+            key={`trait-${p.id}-${def.id}`}
+            type="button"
+            className={`trait-chip${(traitUsed ?? []).includes(def.id) ? ' used' : ''}`}
+            title={`${def.name}：${def.text}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoomTrait?.(def.art, `${def.name}（幸存者特性）`);
+            }}
+          >
+            <img src={encodeURI(def.art)} alt={def.name} draggable={false} />
+          </button>
+        ))}
+      </div>
     );
   };
 
@@ -666,21 +669,24 @@ export function SurvivorSkillBoards({
           onClick={() => onToggle(selected.id)}
         >
           <div className="surv-board-pop-stage" onClick={(e) => e.stopPropagation()}>
-            {board ? (
-              <img
-                className="surv-skill-bg"
-                src={encodeURI(board)}
-                alt={ch?.name ?? selected.name}
-                draggable={false}
-              />
-            ) : (
-              <div className="surv-skill-fallback">
-                <strong>{ch?.name ?? selected.name}</strong>
-                <span>{art?.role}</span>
-              </div>
-            )}
-            {slotUi(selected, true)}
-            {bodyTokens(selected)}
+            <div className="surv-skill-board">
+              {board ? (
+                <img
+                  className="surv-skill-bg"
+                  src={encodeURI(board)}
+                  alt={ch?.name ?? selected.name}
+                  draggable={false}
+                />
+              ) : (
+                <div className="surv-skill-fallback">
+                  <strong>{ch?.name ?? selected.name}</strong>
+                  <span>{art?.role}</span>
+                </div>
+              )}
+              {slotUi(selected, true)}
+              {bodyTokens(selected)}
+            </div>
+            {traitRow(selected)}
           </div>
         </div>,
         document.body,
@@ -708,36 +714,38 @@ export function SurvivorSkillBoards({
           const mine = p.id === youId;
 
           return (
-            <div
-              key={p.id}
-              role="button"
-              tabIndex={0}
-              className={`surv-skill-wrap${open ? ' open' : ''}${p.id === activePlayerId ? ' acting' : ''}${mine ? ' mine' : ''}`}
-              onClick={() => {
-                if (skipBoardClick.current) {
-                  skipBoardClick.current = false;
-                  return;
-                }
-                onToggle(p.id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+            <div key={p.id} className="surv-skill-col">
+              <div
+                role="button"
+                tabIndex={0}
+                className={`surv-skill-wrap${open ? ' open' : ''}${p.id === activePlayerId ? ' acting' : ''}${mine ? ' mine' : ''}`}
+                onClick={() => {
+                  if (skipBoardClick.current) {
+                    skipBoardClick.current = false;
+                    return;
+                  }
                   onToggle(p.id);
-                }
-              }}
-            >
-              {board ? (
-                <img className="surv-skill-bg" src={encodeURI(board)} alt={ch?.name ?? p.name} draggable={false} />
-              ) : (
-                <div className="surv-skill-fallback">
-                  <strong>{ch?.name ?? p.name}</strong>
-                  <span>{art?.role}</span>
-                </div>
-              )}
-              {slotUi(p, false)}
-              {bodyTokens(p)}
-              {!open && <span className="surv-skill-hint">点击放大</span>}
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onToggle(p.id);
+                  }
+                }}
+              >
+                {board ? (
+                  <img className="surv-skill-bg" src={encodeURI(board)} alt={ch?.name ?? p.name} draggable={false} />
+                ) : (
+                  <div className="surv-skill-fallback">
+                    <strong>{ch?.name ?? p.name}</strong>
+                    <span>{art?.role}</span>
+                  </div>
+                )}
+                {slotUi(p, false)}
+                {bodyTokens(p)}
+                {!open && <span className="surv-skill-hint">点击放大</span>}
+              </div>
+              {traitRow(p)}
             </div>
           );
         })}

@@ -4,7 +4,7 @@
  * 规则要点：
  *  - 地图上有宝箱时建立宝藏牌堆（4 张：3 银质匕首 + 1 银质子弹），
  *    宝藏牌堆**放在幸存者地图上**；宝箱只在幸存者地图显示（杀手地图没有）。
- *  - 幸存者开一个宝箱 → 牌堆顶抽 1 张、那个宝箱图标消失。
+ *  - 幸存者开一个宝箱 → 牌堆顶抽 1 张、那个宝箱图标消失。牌堆抽完即止，弃牌不洗回。
  *  - 宝藏牌算物品，占背包格。
  *  - 银质匕首：+5 防御值，**一次性**。
  *  - 银质子弹：用法同弹药包（需左轮手枪），效果不同（掷出的 1、3 都当 5），
@@ -69,13 +69,12 @@ export function setupTreasure(state: GameState, content: { treasure: Array<{ id:
 
 /**
  * 开宝箱：移除这个宝箱 + 从宝藏牌堆抽 1 张。
- * @returns 抽到的牌 id（null = 牌堆空且弃牌堆也空）
+ * @returns 抽到的牌 id（null = 宝藏牌堆已空）
  */
 export function openChest(state: GameState, chestId: string): string | null {
   const roomId = state.treasureChests[chestId];
   if (!roomId) return null;
   delete state.treasureChests[chestId];
-  // 摸牌堆空时把弃牌堆洗回（和搜索牌堆同规则）
   const cardId = drawTreasureCard(state);
   log(
     state,

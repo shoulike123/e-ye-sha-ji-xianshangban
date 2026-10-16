@@ -295,6 +295,14 @@ export interface PublicSnapshot {
   split?: boolean;
   /** 【分头行动】本大回合的先手（棋子 id）；开局前没选就是 null */
   splitFirstId?: string | null;
+  /** 1对3 / 2对3：你是不是幸存者主玩家 */
+  youAreSurvivorLead?: boolean;
+  survivorLeadName?: string | null;
+  /** 【反击！暗中伏击】还在等主玩家选计划标记地点 */
+  pendingPlanMarkerPlace?: {
+    candidates: Array<{ id: string; name: string }>;
+    youDecide: boolean;
+  } | null;
   /** 【分头行动】座位顺序基准（不旋转），用来画"从左往右"轮转 */
   splitOrderBase?: string[];
   /** 【分头行动】一个人单独逃脱要几把钥匙（默认 3，服务端下发，前端不用写死） */
@@ -572,6 +580,15 @@ export interface PublicSnapshot {
   yourDiscardPile: Array<{ id: string; name: string }>;
   pendingSurvivorPick?: boolean;
   pendingDiscoveryPick?: boolean;
+  pendingDiscoveryProposal?: {
+    targetId: string;
+    targetName: string;
+    proposedByName: string;
+    youAreProposer: boolean;
+    youMustConfirm: boolean;
+    agreedNames: string[];
+    waitingNames: string[];
+  } | null;
   discoveryActorId?: string | null;
   pileCounts?: {
     search: number;
@@ -963,7 +980,7 @@ export type ClientAction =
   | { type: 'setVariant1'; on: boolean }
   /** 【变体3】计划卡开关 */
   | { type: 'setVariant3'; on: boolean }
-  /** 【变体3】确认 / 改变计划（要所有幸存者玩家同意） */
+  /** 【变体3】确认 / 改变计划（1对1、1对2谁先点谁生效；1对3、2对3由主玩家决定） */
   | { type: 'pickPlan'; planId: string }
   /** 【变体3】计划确认投票 */
   | { type: 'votePlan'; accept: boolean }
@@ -1189,6 +1206,9 @@ export type ClientAction =
   /** 【分头行动】开局前选定本大回合的先手 */
   | { type: 'pickSplitFirst'; playerId: string }
   | { type: 'respondCoopAction'; accept: boolean }
+  | { type: 'respondDiscoveryPick'; accept: boolean }
+  | { type: 'transferSurvivorLead'; playerId: string }
+  | { type: 'confirmPlanMarkerRooms'; roomIds: string[] }
   | { type: 'discardItem'; itemId: string }
   | {
       type: 'useSkill';

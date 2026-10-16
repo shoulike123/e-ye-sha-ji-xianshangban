@@ -81,3 +81,12 @@ export function skillCardSrc(art: SurvivorArt | null): string | null {
 export function survivorStandeeSrc(art: SurvivorArt | null): string | null {
   return art?.standee ?? null;
 }
+
+/** 打开网页时后台预加载：头像、技能板、立绘、人物介绍 */
+export function survivorPreloadSrcs(): string[] {
+  const out: string[] = [];
+  for (const art of ARTS) {
+    out.push(art.healthy, art.injured, art.skillCard, art.skillBoard, art.standee, art.intro);
+  }
+  return out;
+}

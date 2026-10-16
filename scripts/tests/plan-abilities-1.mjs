@@ -146,28 +146,51 @@ console.log('=== ④ 古代箱子：抽 3 张 ===');
   ok(st.searchDeck.length <= deckBefore - 3,
     '**抽了 3 张搜索牌**', `${deckBefore} → ${st.searchDeck.length}`);
   ok((actor.items.amulet ?? 0) === 0, '**护符被弃掉**', String(actor.items.amulet ?? 0));
+
+  /** 牌库不够 3 张：有几张抽几张，弃牌堆不洗回 */
+  const st2 = mk();
+  const actor2 = actorOf(st2);
+  complete(st2, 'plan_ancient_chest');
+  const plan2 = planOf(st2, 'plan_ancient_chest');
+  const i2 = abilityIndex(st2, 'plan_ancient_chest', 'spendAmuletDraw3');
+  actor2.items.amulet = 1;
+  const kept = st2.searchDeck.slice(0, 2);
+  const discarded = st2.searchDeck.slice(2, 5);
+  st2.searchDeck = [...kept];
+  st2.searchDiscard = [...discarded];
+  applyPlanAbility(st2, plan2, i2, actor2.id);
+  ok(st2.searchDeck.length === 0, '不够 3 张就全抽完', `剩 ${st2.searchDeck.length}`);
+  ok(discarded.every((id) => st2.searchDiscard.includes(id)),
+    '搜索弃牌没有洗回牌库', JSON.stringify(st2.searchDiscard));
 }
 
 /* ═══════════ ⑤ 完成时的即时效果：放标记 / 螺旋地点响 ═══════════ */
 console.log('=== ⑤ 完成计划时的即时效果 ===');
 {
-  /** 反擊！暗中伏擊：立刻在幸存者地点放计划标记 */
+  /** 反擊！暗中伏擊：只在杀手与幸存者同地点放一个，放定后不再另放 */
   const st = mk();
   const survs = Object.values(st.players).filter((p) => p.faction === 'survivor' && p.alive);
-  const rooms = st.map.rooms.filter((r) => r.id !== st.players[st.killerId].roomId);
-  survs[0].roomId = rooms[0].id;
-  survs[1].roomId = rooms[0].id;
-  survs[2].roomId = rooms[1].id;
+  const killer = st.players[st.killerId];
+  const away = st.map.rooms.filter((r) => r.id !== killer.roomId);
+  survs.forEach((p) => { p.roomId = away[0].id; });
   st.planMarkers = [];
+  st.planMarkerLocked = false;
   const plan = planOf(st, 'plan_ambush');
   const i = abilityIndex(st, 'plan_ambush', 'placePlanMarkerAtSurvivors');
   applyPlanAbility(st, plan, i, survs[0].id);
-  console.log(`   幸存者所在地点：${rooms[0].id}（2 人）、${rooms[1].id}（1 人）；` +
-    `计划标记 = ${JSON.stringify(st.planMarkers)}`);
-  ok(st.planMarkers.includes(rooms[0].id) && st.planMarkers.includes(rooms[1].id),
-    '**每个有幸存者的地点都放了标记**（同地只放一个）',
-    JSON.stringify(st.planMarkers));
-  ok(new Set(st.planMarkers).size === st.planMarkers.length, '没有重复标记');
+  ok((st.planMarkers ?? []).length === 0, '**没有同地点时不放标记**', JSON.stringify(st.planMarkers));
+
+  survs[0].roomId = killer.roomId;
+  applyPlanAbility(st, plan, i, survs[0].id);
+  ok((st.planMarkers ?? []).length === 1 && st.planMarkers[0] === killer.roomId && st.planMarkerLocked,
+    '**同地点放定唯一标记**', JSON.stringify(st.planMarkers));
+
+  const lockedAt = st.planMarkers[0];
+  killer.roomId = away[1].id;
+  survs[0].roomId = away[1].id;
+  applyPlanAbility(st, plan, i, survs[0].id);
+  ok(st.planMarkers.length === 1 && st.planMarkers[0] === lockedAt,
+    '**已经放定就不再另放、也不换地方**', JSON.stringify(st.planMarkers));
 
   /** 反擊！奧術封印：完成时在螺旋地点响 */
   const st2 = mk();

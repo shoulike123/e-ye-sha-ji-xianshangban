@@ -3,12 +3,12 @@
  *
  * 规则（用户口径，见 `变体3_设计.md`）：
  *  - 开局给**幸存者方**随机下发 2 张计划卡；**杀手看不到**（快照只发幸存者视角）。
- *  - 幸存者方**共同进行一个计划**：在大回合中、**发现阶段之前**可以确认 / 改变计划，
- *    每一次（含第一次确认）都要**所有幸存者玩家各自弹窗同意**。
+ *  - 幸存者方**共同进行一个计划**：在大回合中、**发现阶段之前**可以确认 / 改变计划。
+ *    1对1 / 1对2 谁先点谁生效；1对3 / 2对3 由主玩家一个人定，不需要其他人确认。
  *  - 判定时机：**发现阶段结束后、大回合结束前**插入一次检查 ——
  *    **只检查人物位置**（四类地点图标 / 整句位置条件），不查动作、物品、有没有搜索过。
  *  - 每个大回合**最多推进一个进度**；推进一次就停。
- *  - 本回合**换过计划** → 进发现阶段检查时**原计划进度清零**，再从新计划第一条看起。
+ *  - 本回合**改变过计划** → 发现阶段结束后先把所有计划进度清零，再检查当前计划的第一条。
  *  - 完成整张计划 → **另一张计划卡隐藏**、所有幸存者获得它的能力；
  *    文字写明「每場遊戲僅限一次」的能力**先到先得**（队伍共享一次）。
  *
@@ -45,6 +45,7 @@ export function planDefaults() {
     planCompletedId: null as string | null,
     planUsedAbilities: [] as string[],
     planMarkers: [] as string[],
+    planMarkerLocked: false,
     encountersThisRound: 0,
   };
 }
@@ -182,6 +183,7 @@ export function setupPlanCards(state: GameState, content: GameContent): void {
   state.planCompletedId = null;
   state.planUsedAbilities = [];
   state.planMarkers = [];
+  state.planMarkerLocked = false;
   if (!state.variant3)
     return;
   const pool = (content.plans ?? []).map((p) => p.id);
@@ -194,7 +196,7 @@ export function setupPlanCards(state: GameState, content: GameContent): void {
     state,
     `【变体3】计划卡：给幸存者方下发 ${state.planHand.length} 张计划卡` +
       `（${state.planHand.map((id) => `「${state.planById[id]?.name ?? id}」`).join('、')}）——` +
-      '在发现阶段之前可以确认 / 改变计划（要所有幸存者玩家同意）。**杀手看不到这些卡**。',
+      '在发现阶段之前可以确认 / 改变计划。1对1、1对2谁先点谁生效；1对3、2对3由主玩家决定。**杀手看不到这些卡**。',
     'survivor',
   );
 }
@@ -210,12 +212,18 @@ export function onPlanRoundStart(state: GameState): void {
 /**
  * 现在能不能选 / 改计划：**幸存者大回合中、发现阶段之前**。
  *
- * 传了 `controllerId` 时还会管【变体2 分头行动】那条：**只有当前先手玩家**能选 / 改。
+ * 1对3 / 2对3 只看是不是主玩家。其余模式里开了分头行动时，只有当前先手能选。
  */
 export function canPickPlan(state: GameState, controllerId?: string): boolean {
   if (!state.variant3) return false;
   if (state.planCompletedId) return false;
   if (state.phase !== 'survivorMain') return false;
+  /**
+   * 1对3 / 2对3：确认和改变计划是大家一起定的事，只由主玩家定。
+   * 分头行动的先手标记不代替这个决定。
+   */
+  if (state.mode === 'multi' || state.mode === '2v3')
+    return Boolean(controllerId) && controllerId === state.survivorLeadId;
   /**
    * 分头行动：只有**当前先手**能选择 / 改变计划。
    * "当前先手" = `turnOrder` 里第一个还活着的幸存者
@@ -232,15 +240,33 @@ export function canPickPlan(state: GameState, controllerId?: string): boolean {
   return true;
 }
 
-/** 票仓：**所有幸存者玩家**（有人掉线就卡着等，所以不剔除掉线的人） */
+/**
+ * 票仓：**所有幸存者玩家**（有人掉线就卡着等，所以不剔除掉线的人）。
+ *
+ * 单人 / 1对1 / 1对2 记在 `survivorOperators`（共控那一侧的真人）。
+ * 1对3 / 2对3 开局会把这份名单清空（各控各的，没有共控席），
+ * 投票人改成每名幸存者棋子的操控者，不能用空名单——空数组的 `every` 恒为真，
+ * 一个人点选就会直接确认计划。
+ */
 export function planVoters(state: GameState): Array<{ id: string; name: string }> {
+  if (state.mode === 'multi' || state.mode === '2v3') {
+    const seen = new Set<string>();
+    const out: Array<{ id: string; name: string }> = [];
+    for (const p of Object.values(state.players)) {
+      if (p.faction !== 'survivor' || !p.controllerId || seen.has(p.controllerId)) continue;
+      seen.add(p.controllerId);
+      out.push({ id: p.controllerId, name: p.controllerName || p.name });
+    }
+    return out;
+  }
   return (state.survivorOperators ?? []).map((o) => ({ id: o.id, name: o.name }));
 }
 
 /**
  * 发起"确认 / 改变计划"。第一次选 = 确认计划；之后再选 = 改变计划。
  *
- * ⚠ **每一次都要所有幸存者玩家各自同意**（用户口径）；发起人自己算第一票。
+ * 1对1 / 1对2：共控的人谁先点谁生效。
+ * 1对3 / 2对3：只由主玩家定，定了就生效。
  */
 export function beginPlanSwitch(
   state: GameState,
@@ -249,8 +275,10 @@ export function beginPlanSwitch(
 ): void {
   if (!state.variant3)
     throw new Error('本局没有开启【变体3】计划卡');
+  if ((state.mode === 'multi' || state.mode === '2v3') && controllerId !== state.survivorLeadId)
+    throw new Error('只有主玩家可以确认或改变计划');
   if (!canPickPlan(state, controllerId))
-    throw new Error('现在不能选择计划（只能在幸存者大回合、发现阶段之前；分头行动时只有先手能选）');
+    throw new Error('现在不能选择计划（只能在幸存者大回合、发现阶段之前）');
   if (state.pendingPlanSwitch)
     throw new Error('已经在等大家确认计划了');
   if (!state.planHand.includes(planId))
@@ -263,12 +291,6 @@ export function beginPlanSwitch(
     requestedBy: controllerId,
     votes: [controllerId],
   };
-  log(
-    state,
-    `【变体3】${state.planCurrentId ? '改变计划' : '确认计划'}：` +
-      `「${planById(state, planId)?.name ?? planId}」——等所有幸存者玩家确认。`,
-    'survivor',
-  );
   maybeFinishPlanSwitch(state);
 }
 
@@ -319,13 +341,13 @@ export function votePlanSwitch(
   maybeFinishPlanSwitch(state);
 }
 
-/** 全员同意 → 计划生效 */
+/**
+ * 点选即生效。
+ * 1对1 / 1对2 先做先得；1对3 / 2对3 主玩家的选择不需要其他人再同意。
+ */
 function maybeFinishPlanSwitch(state: GameState): void {
   const pend = state.pendingPlanSwitch;
   if (!pend) return;
-  const voters = planVoters(state);
-  const all = voters.every((v) => pend.votes.includes(v.id));
-  if (!all) return;
   const plan = planById(state, pend.toId);
   const first = !pend.fromId;
   state.planCurrentId = pend.toId;
@@ -338,7 +360,7 @@ function maybeFinishPlanSwitch(state: GameState): void {
     state,
     first
       ? `【变体3】计划确认：「${plan?.name ?? pend.toId}」——从第一条进度开始。`
-      : `【变体3】计划变更：「${plan?.name ?? pend.toId}」（原计划的进度会在发现阶段检查时清零）。`,
+      : `【变体3】计划变更：「${plan?.name ?? pend.toId}」（发现阶段结束后，所有计划进度清零，再检查当前计划的第一条）。`,
     'survivor',
   );
   state.pendingPlanSwitch = null;
@@ -358,14 +380,17 @@ export function checkPlanProgress(state: GameState): boolean {
     state.planChangedThisRound = false;
     return false;
   }
-  /** ① 本回合**换过计划** → 原计划进度清零，从新计划第一条重新看 */
+  /**
+   * 本回合改变过计划：先把进度清零，再往下检查当前计划的第一条。
+   * 这一次不受「本大回合已经推进过」限制。
+   */
   if (state.planChangedThisRound) {
     state.planStep = 0;
     state.planChangedThisRound = false;
-    log(state, '【变体3】本回合换过计划：进度清零，从当前计划的第一条重新开始。', 'survivor');
+    state.planAdvancedThisRound = false;
+    log(state, '【变体3】发现阶段后发现本回合改变了计划：所有计划进度清零，接着检查当前计划的第一条。', 'survivor');
   }
-  /** ② 每个大回合最多推进一个进度 */
-  if (state.planAdvancedThisRound) {
+  else if (state.planAdvancedThisRound) {
     log(state, '【变体3】本大回合已经推进过一个进度了，剩下的大回合再说。', 'survivor');
     return false;
   }
@@ -569,9 +594,13 @@ export function applyPlanAbility(
     `【变体3】计划能力「${plan.name}」：${ab.text}`,
     'survivor',
   );
-  if (ab.mapMarker && actor?.roomId) {
-    addPlanMarker(state, actor.roomId);
-    log(state, `【变体3】在「${roomNameOf(state, actor.roomId)}」放置计划标记。`, 'survivor');
+  if (ab.mapMarker && actor?.roomId && ab.impl !== 'placePlanMarkerAtSurvivors') {
+    if (addPlanMarker(state, actor.roomId)) {
+      log(state, `【变体3】在「${roomNameOf(state, actor.roomId)}」放置计划标记。放定之后不再另放。`, 'survivor');
+    }
+    else {
+      log(state, '【变体3】计划标记已经放定，不能再放到别的地点。', 'survivor');
+    }
   }
   planAbilityEffect?.(state, plan, index, actorId ?? null, target ?? null);
 }
@@ -607,9 +636,12 @@ export function setPlanAbilityEffectHandler(
 
 /* ------------------------------------------------ 地图上的计划标记 ---- */
 
-export function addPlanMarker(state: GameState, roomId: string): void {
-  if (!state.planMarkers) state.planMarkers = [];
-  if (!state.planMarkers.includes(roomId)) state.planMarkers.push(roomId);
+/** 计划完成时放定的那一个标记。已经放定就不再另放、也不换地方。 */
+export function addPlanMarker(state: GameState, roomId: string): boolean {
+  if (state.planMarkerLocked || (state.planMarkers ?? []).length > 0) return false;
+  state.planMarkers = [roomId];
+  state.planMarkerLocked = true;
+  return true;
 }
 
 export function planMarkersAt(state: GameState, roomId: string): boolean {

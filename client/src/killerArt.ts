@@ -399,3 +399,20 @@ export function killerStatueSrc(
 export function killerCardSrc(cardId: string): string | null {
   return KILLER_CARD_BY_ID[cardId] ?? null;
 }
+
+/** 打开网页时后台预加载：立绘、牌背、进化牌、行动牌 */
+export function killerPreloadSrcs(): string[] {
+  const out: string[] = [];
+  for (const art of KILLERS) {
+    out.push(
+      art.standee,
+      art.back,
+      art.evolution,
+      art.intro,
+      ...art.specialRules,
+      ...art.standees,
+      ...art.cards,
+    );
+  }
+  return out;
+}

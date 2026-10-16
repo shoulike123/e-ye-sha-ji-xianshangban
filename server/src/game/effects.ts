@@ -1077,41 +1077,21 @@ export function resumeDeferredDeckRecycle(state: GameState): void {
   if (leftDiscards > 0) discardFromKillerDeck(state, leftDiscards);
 }
 
-function ensureDeck(
-  state: GameState,
-  deckKey: 'searchDeck' | 'discoveryDeck' | 'killerDeck' | 'treasureDeck',
-  discardKey: 'searchDiscard' | 'discoveryDiscard' | 'killerDiscard' | 'treasureDiscard',
-): boolean {
-  if (state[deckKey].length > 0) return true;
-  if (state[discardKey].length === 0) {
-    return false;
-  }
-  const recycled = [...state[discardKey]];
-  state[deckKey] = shuffle(recycled);
-  state[discardKey] = [];
-  if (discardKey === 'searchDiscard' || discardKey === 'discoveryDiscard') {
-    if (!state.survivorDiscard) state.survivorDiscard = [];
-    for (const id of recycled) {
-      const i = state.survivorDiscard.indexOf(id);
-      if (i >= 0) state.survivorDiscard.splice(i, 1);
-    }
-  }
-  return state[deckKey].length > 0;
-}
-
+/** 搜索牌库抽完即止，弃牌不洗回。 */
 export function drawSearchCard(state: GameState): string | null {
-  if (!ensureDeck(state, 'searchDeck', 'searchDiscard')) return null;
+  if (state.searchDeck.length === 0) return null;
   return state.searchDeck.shift() ?? null;
 }
 
+/** 发现牌库抽完即止，弃牌不洗回。 */
 export function drawDiscoveryCard(state: GameState): string | null {
-  if (!ensureDeck(state, 'discoveryDeck', 'discoveryDiscard')) return null;
+  if (state.discoveryDeck.length === 0) return null;
   return state.discoveryDeck.shift() ?? null;
 }
 
-/** 宝藏牌堆（狼人）：摸牌堆空时把弃牌堆洗回 */
+/** 宝藏牌堆抽完即止，弃牌不洗回。 */
 export function drawTreasureCard(state: GameState): string | null {
-  if (!ensureDeck(state, 'treasureDeck', 'treasureDiscard')) return null;
+  if (state.treasureDeck.length === 0) return null;
   return state.treasureDeck.shift() ?? null;
 }
 
@@ -1534,6 +1514,24 @@ export function setGuardStoneChecker(fn: (p: PlayerState) => boolean): void {
  * ⚠ 改这一条之前是"守護之石 > 护符"（有守护之石就永远轮不到护符）——
  * 用户要求反过来：「先询问古代护符再询问守护之石，用了第一个就不用问第二个」。
  */
+export function passSplitFirstIfHolderDown(state: GameState): void {
+  if (!state.split || !state.splitFirstId) return;
+  const holder = state.players[state.splitFirstId];
+  if (holder?.alive && holder.faction === 'survivor') return;
+  const base = state.splitOrderBase?.length ? state.splitOrderBase : state.turnOrder;
+  const idx = Math.max(0, base.indexOf(state.splitFirstId));
+  for (let i = 1; i <= base.length; i += 1) {
+    const id = base[(idx + i) % base.length];
+    const next = id ? state.players[id] : null;
+    if (next?.alive && next.faction === 'survivor') {
+      state.splitFirstId = id;
+      log(state, `先手标记交给 ${next.name}。已倒下的幸存者之后都跳过。`, 'all', true);
+      return;
+    }
+  }
+  state.splitFirstId = null;
+}
+
 export function applyDamage(
   state: GameState,
   targetId: string,
@@ -1591,6 +1589,7 @@ export function applyDamage(
   onSurvivorDamaged?.(state, targetId, sourceId);
   if (target.hp <= 0) {
     target.alive = false;
+    passSplitFirstIfHolderDown(state);
     /**
      * 【分头行动】被杀的人**立绘留在原地变暗**（用户规则），所以 `roomId` **不清空** ——
      * 他的钥匙和物品就留在那个地点，同地点的人可以从"遗留物"里拿。
@@ -3012,6 +3011,7 @@ export function checkSplitEscapes(state: GameState): void {
     p.items = {};
     p.escaped = true;
     p.alive = false;
+    passSplitFirstIfHolderDown(state);
     log(
       state,
       `${p.name} **单独逃脱**（${

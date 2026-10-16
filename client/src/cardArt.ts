@@ -146,3 +146,12 @@ export function effectiveHandCost(
   if ((state.killerLevel ?? 1) < 3) return base;
   return Math.max(0, base - 1);
 }
+
+/** 搜索牌、发现牌、背包物品的卡面，打开网页时后台预加载 */
+export function itemAndSearchPreloadSrcs(): string[] {
+  return [
+    ...Object.values(ITEM_CARD),
+    ...Object.values(SEARCH_BY_NAME),
+    ...Object.values(DISCOVERY_BY_NAME),
+  ];
+}

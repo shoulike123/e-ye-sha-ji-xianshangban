@@ -263,6 +263,8 @@ export interface RoomMenuInput {
    * `kind` 在幸存者视角下是 null（问号）—— 只有杀手知道具体是什么陷阱。
    */
   hunterTraps: Array<{ kind: string | null; revealed: boolean }>;
+  /** 幸存者视角：这个地点有没有计划标记（菜单里排在最后） */
+  planMarkerHere?: boolean;
 }
 
 /**
@@ -365,6 +367,8 @@ export function roomMenuRowsFor(input: RoomMenuInput): RoomMenuRow[] {
   /** 爆竹标记优先于响声标记：爆竹回合全场都有响声，位置上只留爆竹标记 */
   if (firecrackerHere) rows.push({ key: 'firecracker', text: '爆竹标记' });
   else if (noiseHere) rows.push({ key: 'noise', text: '响声标记' });
+  if (input.planMarkerHere && viewerFaction !== 'killer')
+    rows.push({ key: 'plan-marker', text: '计划标记' });
 
   return rows;
 }
@@ -781,6 +785,7 @@ export function Board({
         firecrackerHere: firecrackerRoomId === roomMenu.roomId,
         noiseHere: noises.includes(roomMenu.roomId),
         hunterTraps: hunterTraps.filter((t) => t.roomId === roomMenu.roomId && !t.removed),
+        planMarkerHere: viewerFaction !== 'killer' && planMarkers.includes(roomMenu.roomId),
       })
     : [];
 

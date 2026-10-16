@@ -419,6 +419,8 @@ export interface GameState {
    * 行动推进和**发现牌归属**（取 `turnOrder` 第一个活人）全都自动跟着走。
    */
   splitFirstId: string | null;
+  /** 本大回合结束时先手已经往后移过，发现收尾重入时不再移 */
+  splitAdvancedThisRound: boolean;
   /** 座位顺序（**不旋转**的基准），开局第一次轮转时记下 */
   splitOrderBase: string[];
   soloKillerCharacterId: string | null;
@@ -453,6 +455,15 @@ export interface GameState {
    * 投票人集合与解散完全一致（除观众以外、还连着的玩家）。
    */
   restart: { requestedBy: string | null; votes: string[] };
+  /**
+   * 1对3 / 2对3 的幸存者主玩家（操控者 id）。
+   * 选人时最先点准备的幸存者；由他决定大家一起定的事，也可以把身份交给别人。
+   */
+  survivorLeadId: string | null;
+  /**
+   * 【反击！暗中伏击】完成时：主玩家还没选定把计划标记放在哪些幸存者地点。
+   */
+  pendingPlanMarkerPlace: { candidates: string[] } | null;
   /** 1对2：一般行动/额外行动等队友确认 */
   pendingCoopAction: {
     fromControllerId: string;
@@ -534,6 +545,8 @@ export interface GameState {
   planUsedAbilities: string[];
   /** 【变体3】地图上的计划标记（地点 id；坍塌会清掉该地点的标记） */
   planMarkers: string[];
+  /** 计划完成时标记已经放定，之后不能再放 */
+  planMarkerLocked: boolean;
   /**
    * 【变体3】**本大回合发生过几次遭遇**。
    *
@@ -718,6 +731,16 @@ export interface GameState {
   survivorDiscard: string[];
   pendingSurvivorPick: boolean;
   pendingDiscoveryPick: boolean;
+  /**
+   * 发现阶段「谁来拿牌」还没定案。
+   * 1对2：一人点了角色，等另一名操控者确认。
+   * 1对3 / 2对3：一人提出自己拿，等其他幸存者同意。
+   */
+  pendingDiscoveryProposal: {
+    targetId: string;
+    proposedBy: string;
+    agreed: string[];
+  } | null;
   discoveryActorId: string | null;
   pendingSensePair: { firstRoomId: string | null; secondRoomId?: string | null } | null;
   pendingSenseColor: boolean;
@@ -1880,6 +1903,12 @@ export type ClientAction =
   | { type: 'tradeKeys'; targetPlayerId: string; amount: number; fromPlayerId?: string }
   | { type: 'respondTrade'; accept: boolean }
   | { type: 'respondCoopAction'; accept: boolean }
+  /** 发现阶段：确认或取消「谁来拿发现牌」 */
+  | { type: 'respondDiscoveryPick'; accept: boolean }
+  /** 1对3 / 2对3：主玩家把身份交给另一名幸存者 */
+  | { type: 'transferSurvivorLead'; playerId: string }
+  /** 【反击！暗中伏击】主玩家选定计划标记要放的地点 */
+  | { type: 'confirmPlanMarkerRooms'; roomIds: string[] }
   | { type: 'discardItem'; itemId: string }
   | {
       type: 'useSkill';
@@ -1981,6 +2010,14 @@ export interface PublicSnapshot {
    * 行动推进和**发现牌归属**（取 `turnOrder` 第一个活人）全都自动跟着走。
    */
   splitFirstId: string | null;
+  /** 1对3 / 2对3：这名观众是不是幸存者主玩家 */
+  youAreSurvivorLead?: boolean;
+  survivorLeadName?: string | null;
+  /** 【反击！暗中伏击】还在等选定计划标记地点（只发给幸存者） */
+  pendingPlanMarkerPlace?: {
+    candidates: Array<{ id: string; name: string }>;
+    youDecide: boolean;
+  } | null;
   /** 座位顺序（**不旋转**的基准），开局第一次轮转时记下 */
   splitOrderBase: string[];
   soloKillerCharacterId: string | null;
@@ -2572,6 +2609,16 @@ export interface PublicSnapshot {
   yourDiscardPile: Array<{ id: string; name: string }>;
   pendingSurvivorPick: boolean;
   pendingDiscoveryPick: boolean;
+  /** 发现阶段选人还在等确认时，只发给幸存者 */
+  pendingDiscoveryProposal?: {
+    targetId: string;
+    targetName: string;
+    proposedByName: string;
+    youAreProposer: boolean;
+    youMustConfirm: boolean;
+    agreedNames: string[];
+    waitingNames: string[];
+  } | null;
   discoveryActorId: string | null;
   pileCounts: {
     search: number;

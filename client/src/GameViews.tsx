@@ -412,10 +412,10 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
             : duo
               ? `1 对 1：两人加入后一人选杀手，一人点选 ${neededSurv} 名幸存者并操控她们。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
               : vs2
-                ? `1对2：三人加入后一人选杀手，两人点选 ${neededSurv} 名幸存者并共控她们。一般行动和额外行动需另一人确认，交换物品不用。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+                ? `1对2：三人加入后一人选杀手，两人点选 ${neededSurv} 名幸存者并共控她们。操作和 1对1 一样，先做先得。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
                 : state.mode === '2v3'
-                  ? `2对3：必须凑齐 2 名杀手 + 3 名幸存者（共 5 人）。两名杀手**各有一套牌库、手牌与行动区**，共用地图与战报；开局两人各选先后手（一致才生效），每轮交替行动。开局钥匙进度 +1、修理进度 +1。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
-                  : `1对3：必须凑齐 1 名杀手 + ${neededSurv} 名幸存者。每人只选并操控自己的角色；幸存者只能交出自己的物品，给予或互换需对方确认，栏满只能互换。全员选角并准备后由房主开始。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
+                  ? `2对3：必须凑齐 2 名杀手 + 3 名幸存者（共 5 人）。两名杀手**各有一套牌库、手牌与行动区**，共用地图与战报；开局两人各选先后手（一致才生效），每轮交替行动。开局钥匙进度 +1、修理进度 +1。幸存者各自控制自己的角色。最先点准备的幸存者是主玩家，由他决定发现牌、十字弩、反击计划标记放在哪、确认或改变计划，以及情報分享选谁抽牌，不需要其他人确认。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`
+                  : `1对3：必须凑齐 1 名杀手 + ${neededSurv} 名幸存者。每人只操控自己的角色。最先点准备的幸存者是主玩家，由他决定发现牌、十字弩、反击计划标记放在哪、确认或改变计划，以及情報分享选谁抽牌，不需要其他人确认。同学在同一 WiFi 打开本页，输入房间码 ${state.roomCode} 加入。`}
           {' '}地图：<strong>{state.map.name}</strong>
         </p>
         <p className="muted">
@@ -575,7 +575,8 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
              * **【变体3】计划卡开关**（房主选，开局前可改；所有模式都能开）。
              *
              * 开了之后开局给幸存者方**随机发 2 张计划卡**；他们在每个大回合的
-             * 发现阶段之前可以确认 / 改变计划（要所有幸存者玩家同意）。
+             * 发现阶段之前可以确认 / 改变计划。1对1、1对2谁先点谁生效；
+             * 1对3、2对3由主玩家决定。
              * **杀手看不到这些卡。**
              */}
             <div className="row" style={{ marginTop: '0.4rem' }}>
@@ -590,7 +591,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
             {state.variant3 && (
               <p className="muted">
                 开局给幸存者方随机发 2 张计划卡。他们在**发现阶段之前**可以确认 / 改变计划
-                （每次都要所有幸存者玩家同意）；**发现阶段结束后**按**人物位置**判定能不能推进进度，
+                （1对1、1对2谁先点谁生效；1对3、2对3由主玩家决定，不需要其他人确认）；**发现阶段结束后**按**人物位置**判定能不能推进进度，
                 每个大回合最多推进一条。整张计划完成后全队获得它的能力。
                 **杀手完全看不到这些卡。**
               </p>
@@ -807,7 +808,7 @@ export function LobbyView({ state, isHost, error, onAction, onLeave, initialMore
               <p className="muted">
                 {duo
                   ? `点选最多 ${neededSurv} 人，再点一次可取消。对局中由你操控这三人。`
-                  : `点选最多 ${neededSurv} 人，再点一次可取消。对局中两人一起操控这三人；一般行动和额外行动需另一人确认。`}
+                  : `点选最多 ${neededSurv} 人，再点一次可取消。对局中两人一起操控这三人，先做先得。`}
               </p>
               {survivors.map((c) => (
                 <button
@@ -1850,11 +1851,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
           : '1对1：你操控杀手'
         : state.mode === 'vs2'
           ? state.you.faction === 'survivor'
-            ? '1对2：两人共控 3 名幸存者。一般行动和额外行动需另一人确认，交换物品不用。'
+            ? '1对2：两人共控 3 名幸存者，先做先得，不需要另一人确认。'
             : '1对2：你操控杀手。对面两人共控 3 名幸存者。'
-          : state.you.faction === 'survivor'
-            ? '1对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。栏满只能互换。额外行动只显示你能做的。'
-            : '1对3：你操控杀手。对面 3 名幸存者各自操作。';
+          : state.mode === '2v3'
+            ? state.you.faction === 'survivor'
+              ? '2对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。'
+              : '2对3：你操控自己的杀手。两名杀手各有牌库和行动；对面 3 名幸存者各自操作。'
+            : state.you.faction === 'survivor'
+              ? '1对3：你只操控自己的角色。只能交出自己的物品；给予或互换需对方确认。栏满只能互换。额外行动只显示你能做的。'
+              : '1对3：你操控杀手。对面 3 名幸存者各自操作。';
 
   useEffect(() => {
     /** 换人 / 换回合 / 做完一般行动 → 清掉幸存者的路径草稿（杀手那份由服务端管） */
@@ -3227,11 +3232,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
     Boolean(actingSurvivor) &&
     !actingSurvivor!.mainActionUsed &&
     !actingSurvivor!.actedThisRound;
+  const individualDiscovery = state.mode === 'multi' || state.mode === '2v3';
   const canPickDiscovery =
     Boolean(state.pendingDiscoveryPick) &&
+    !state.pendingDiscoveryProposal &&
     state.phase === 'discovery' &&
     isSurvivorView &&
-    (sharedControl || state.you.faction === 'survivor');
+    (individualDiscovery ? Boolean(state.youAreSurvivorLead) : sharedControl || state.you.faction === 'survivor');
   const pickableSurvivorIds =
     canPickSurvivorTurn || canPickDiscovery || canRepickSurvivor
       ? survivors
@@ -3814,10 +3821,10 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             pileCards={pileCards}
             pileTops={pileTopsOnMap}
             cardById={state.cardById}
-            pickableSurvivorIds={pickableSurvivorIds}
+            pickableSurvivorIds={state.phase === 'survivorMain' ? [] : pickableSurvivorIds}
             selectedSurvivorId={pickedNextId}
             activePlayerId={state.activePlayerId}
-            onSurvivorClick={pickSurvivor}
+            onSurvivorClick={state.phase === 'survivorMain' ? undefined : pickSurvivor}
             onPileClick={setInspectPile}
             /**
              * ⚠ 【分头行动】给 Board 的也必须是**固定座位顺序**（方案 B）：
@@ -3829,15 +3836,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
             }
             remoteCursors={
               /**
-               * 只有 1对2 / 1对3 需要互看预选：
+               * 1对2 / 1对3 / 2对3 的幸存者互看预选：
                * 1对1 和单人热座下幸存者就一个操控者，看了没意义。
                */
-              state.mode === 'vs2' || state.mode === 'multi'
+              state.mode === 'vs2' || state.mode === 'multi' || state.mode === '2v3'
                 ? cursors.filter((c) => c.playerId !== state.you.id)
                 : []
             }
             onRoomHover={
-              state.mode === 'vs2' || state.mode === 'multi'
+              state.mode === 'vs2' || state.mode === 'multi' || state.mode === '2v3'
                 ? (roomId) => onCursorRoom?.(roomId)
                 : undefined
             }
@@ -4173,7 +4180,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     const done = state.plans.cards.find((c) => c.completed);
                     if (done) return `计划「${done.name}」已完成`;
                     const cur = state.plans.cards.find((c) => c.active);
-                    if (!cur) return '先确认一张计划（要所有幸存者玩家同意）';
+                    if (!cur) {
+                      return (state.mode === 'multi' || state.mode === '2v3')
+                        ? (state.youAreSurvivorLead
+                          ? '先确认一张计划。选定后立即生效。'
+                          : `等待主玩家${state.survivorLeadName ? `「${state.survivorLeadName}」` : ''}确认计划。`)
+                        : '先确认一张计划。谁先点谁生效。';
+                    }
                     const total = cur.progress.length;
                     return `当前进行「${cur.name}」：进度 ${state.plans.step}/${total}`;
                   })()}
@@ -4720,18 +4733,115 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                 </div>
               </div>
             )}
-            {(showSurvivorPickRow || state.pendingDiscoveryPick) && isSurvivorView && (
+            {individualDiscovery && state.youAreSurvivorLead && isSurvivorView && state.phase !== 'lobby' && state.phase !== 'characterSelect' && (
+              <div className="stack">
+                <p className="muted">你是主玩家。可以把身份交给另一名幸存者，对方接手后也不需要其他人确认。</p>
+                <div className="row">
+                  {survivors.filter((p) => p.alive && p.id !== state.you.id).map((p) => (
+                    <button
+                      key={`lead-${p.id}`}
+                      type="button"
+                      onClick={() => void onAction({ type: 'transferSurvivorLead', playerId: p.id })}
+                    >
+                      让 {p.name} 当主玩家
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {state.pendingPlanMarkerPlace && isSurvivorView && (
               <div className="stack">
                 <p className="muted">
+                  {state.pendingPlanMarkerPlace.youDecide
+                    ? '暗中伏击：杀手和幸存者有多处同地点。选其中一处放置计划标记。选定后立即放定，之后不再另放。'
+                    : `等待主玩家${state.survivorLeadName ? `「${state.survivorLeadName}」` : ''}选择计划标记的地点。`}
+                </p>
+                {state.pendingPlanMarkerPlace.youDecide && (
+                  <div className="row">
+                    {state.pendingPlanMarkerPlace.candidates.map((room) => (
+                      <button
+                        key={room.id}
+                        type="button"
+                        className="primary"
+                        onClick={() => void onAction({ type: 'confirmPlanMarkerRooms', roomIds: [room.id] })}
+                      >
+                        放在{room.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {(showSurvivorPickRow || state.pendingDiscoveryPick) && isSurvivorView && (
+              <div className="stack">
+                {state.pendingDiscoveryProposal ? (
+                  <>
+                    <p className="muted">
+                      {state.pendingDiscoveryProposal.youAreProposer
+                        ? state.mode === 'vs2'
+                          ? `已选择「${state.pendingDiscoveryProposal.targetName}」拿发现牌，等待另一人确认。`
+                          : '你提出由自己拿发现牌，等待其他人同意。'
+                        : state.mode === 'vs2'
+                          ? `对方选择「${state.pendingDiscoveryProposal.targetName}」拿发现牌。`
+                          : `「${state.pendingDiscoveryProposal.proposedByName}」提出由自己拿发现牌。`}
+                    </p>
+                    {(state.pendingDiscoveryProposal.agreedNames.length > 0 ||
+                      state.pendingDiscoveryProposal.waitingNames.length > 0) && (
+                      <p className="muted">
+                        {state.pendingDiscoveryProposal.agreedNames.length
+                          ? `已同意：${state.pendingDiscoveryProposal.agreedNames.join('、')}。`
+                          : ''}
+                        {state.pendingDiscoveryProposal.waitingNames.length
+                          ? `等待：${state.pendingDiscoveryProposal.waitingNames.join('、')}。`
+                          : ''}
+                      </p>
+                    )}
+                    <div className="row">
+                      {state.pendingDiscoveryProposal.youMustConfirm && (
+                        <>
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => void onAction({ type: 'respondDiscoveryPick', accept: true })}
+                          >
+                            {state.mode === 'vs2' ? '确认' : '同意'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void onAction({ type: 'respondDiscoveryPick', accept: false })}
+                          >
+                            {state.mode === 'vs2' ? '取消' : '不同意'}
+                          </button>
+                        </>
+                      )}
+                      {state.pendingDiscoveryProposal.youAreProposer && (
+                        <button
+                          type="button"
+                          onClick={() => void onAction({ type: 'respondDiscoveryPick', accept: false })}
+                        >
+                          取消
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                <p className="muted">
                   {state.pendingDiscoveryPick
-                    ? '发现阶段：点状态栏或立绘选择翻牌的幸存者。'
+                    ? state.mode === 'vs2'
+                      ? '发现阶段：点一名幸存者拿发现牌。先点的生效。'
+                      : individualDiscovery
+                        ? state.youAreSurvivorLead
+                          ? '你是主玩家：点一名幸存者拿发现牌。选定后立即生效，不需要其他人确认。'
+                          : `等待主玩家${state.survivorLeadName ? `「${state.survivorLeadName}」` : ''}选择谁拿发现牌。`
+                        : '发现阶段：点状态栏或立绘选择翻牌的幸存者。'
                     : sharedControl
                       ? '点状态栏、立绘或下方按钮选择行动者。做一般行动前可反复换人，其他角色选项会一直保留。'
                       : '点自己的立绘或下方按钮开始小回合。只能操控自己的角色。'}
                 </p>
                 <div className="row">
                   {survivors
-                    .filter((p) => p.alive)
+                    .filter((p) => p.alive && !(state.pendingDiscoveryPick && individualDiscovery && !state.youAreSurvivorLead))
                     .map((p) => {
                       const pickable = pickableSurvivorIds.includes(p.id);
                       const acted = Boolean(p.actedThisRound) && !canPickDiscovery;
@@ -4752,6 +4862,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       );
                     })}
                 </div>
+                  </>
+                )}
               </div>
             )}
             {/**
@@ -5393,6 +5505,13 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                       : '摸 2 选 1：留下的牌归翻牌者，另一张进入弃牌堆。'}
                   钥匙也带响声：无论要不要都会在翻牌者所在地点响；不要则进弃牌堆，钥匙架不加。
                 </p>
+                {/**
+                  * 1对3 / 2对3 只有被选中翻牌的那个人能留牌；
+                  * 共控模式由操控者代点，不看当前这颗棋子是不是翻牌者。
+                  */}
+                {(sharedControl ||
+                  !state.discoveryActorId ||
+                  state.you.id === state.discoveryActorId) && (
                 <div className="row">
                   {discoveryOptions.map((cid) => {
                     const card = state.cardById[cid];
@@ -5425,6 +5544,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     );
                   })}
                 </div>
+                )}
                 {discoveryOptions.length === 0 && discoveryCard && (
                   <p>
                     已留下：<strong>{discoveryCard.name}</strong>
@@ -6127,7 +6247,8 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   !state.pendingEvolutionAck &&
                   !(state.pendingKillerDiscards > 0) && (
                   <>
-                    {!enc.fleeTargetId && (enc.fleeReadyIds ?? []).length > 0 && (
+                    {!enc.fleeTargetId && (enc.fleeReadyIds ?? []).length > 0 &&
+                      state.mode !== 'multi' && state.mode !== '2v3' && (
                       <div className="stack">
                         <p className="muted">
                           <strong>谁来撤离？</strong>
@@ -6152,8 +6273,14 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                         </div>
                       </div>
                     )}
-                    {enc.fleeTargetId && (() => {
-                      const fleer = state.players.find((pl) => pl.id === enc.fleeTargetId);
+                    {(enc.fleeTargetId || (
+                      (state.mode === 'multi' || state.mode === '2v3') &&
+                      (enc.fleeReadyIds ?? []).includes(state.you.id)
+                    )) && (() => {
+                      const fleerId = (state.mode === 'multi' || state.mode === '2v3')
+                        ? state.you.id
+                        : enc.fleeTargetId;
+                      const fleer = state.players.find((pl) => pl.id === fleerId);
                       const instinct = (fleer?.traits ?? []).includes('trait_s09');
                       return (
                       <div className="stack">
@@ -9270,6 +9397,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
               )?.evolution
             }
             caption="进化牌"
+            size="art"
             onClose={() => setInspectCardId(null)}
           />
         ) : (
@@ -9535,7 +9663,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                     .join('、')} 正在行动，确认或取消之前，这个人不能再开始别的行动。其他人仍可以。`
                 : sharedControl
                 ? state.mode === 'vs2'
-                  ? '两人都可以点。一般行动和额外行动需另一人确认后才生效。'
+                  ? '两人都可以点，先做先得。'
                   : '任何幸存者都可以在幸存者大回合内使用，不受小回合限制。'
                 : '只显示你自己能做的额外行动。别人行动时你也可以用。'}
             </p>
@@ -9994,7 +10122,7 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
        * 【变体3】**计划卡弹窗**（幸存者视角）。
        *
        * 用户要求：点开能看这 2 张卡；这里同时提供"确认 / 改变计划"的入口
-       * （点了要所有幸存者玩家各自同意）与确认进度。
+       * （1对1、1对2谁先点谁生效；1对3、2对3由主玩家决定）与确认进度。
        * 卡面上的**进度标识**按 `survLayout.planCards` 的校准位置画。
        */}
       {planOpen && isSurvivorView && state.plans && (
@@ -10022,10 +10150,15 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   {plans.pendingTarget && (
                     <div className="panel stack plan-pending">
                       <p>
-                        情報分享：请
-                        {plans.pendingTarget.chooserName ?? '一名幸存者'}
-                        选择一名幸存者，从搜索牌库抽取一张牌。
+                        {(state.mode === 'multi' || state.mode === '2v3')
+                          ? (state.youAreSurvivorLead
+                            ? '情報分享：你是主玩家，选一名幸存者从搜索牌库抽一张。选定后立即生效。'
+                            : `情報分享：等待主玩家${state.survivorLeadName ? `「${state.survivorLeadName}」` : ''}选择谁抽牌。`)
+                          : '情報分享：选一名幸存者从搜索牌库抽一张。谁先点谁生效。'}
                       </p>
+                      {((state.mode === 'multi' || state.mode === '2v3')
+                        ? Boolean(state.youAreSurvivorLead)
+                        : (sharedControl || state.you.id === plans.pendingTarget.chooserId)) ? (
                       <div className="row">
                         {plans.pendingTarget.candidates.map((cand) => (
                           <button
@@ -10039,8 +10172,12 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                           </button>
                         ))}
                       </div>
-                      {state.you.id !== plans.pendingTarget.chooserId && (
-                        <p className="muted">由 {plans.pendingTarget.chooserName} 来选，其他人等一等。</p>
+                      ) : (
+                        <p className="muted">
+                          {(state.mode === 'multi' || state.mode === '2v3')
+                            ? '由主玩家来选。'
+                            : `由 ${plans.pendingTarget.chooserName ?? '共控的人'} 来选。`}
+                        </p>
                       )}
                     </div>
                   )}
@@ -10075,8 +10212,11 @@ export function GameView({ state, error, onAction, onLeave, cursors = [], onCurs
                   )}
                   {!plans.canPick && !pend && (
                     <p className="muted">
-                      现在不能确认 / 改变计划 —— 只能在**幸存者大回合、发现阶段之前**改
-                      （分头行动时只有先手能改）。
+                      {(state.mode === 'multi' || state.mode === '2v3')
+                        ? (state.youAreSurvivorLead
+                          ? '现在不能确认 / 改变计划 —— 只能在幸存者大回合、发现阶段之前改。'
+                          : `确认和改变计划由主玩家${state.survivorLeadName ? `「${state.survivorLeadName}」` : ''}决定。`)
+                        : '现在不能确认 / 改变计划 —— 只能在幸存者大回合、发现阶段之前改。谁先点谁生效。'}
                     </p>
                   )}
                   <div className="plan-cards-row">

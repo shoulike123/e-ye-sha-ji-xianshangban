@@ -2217,6 +2217,19 @@ a.ghost-btn {
   flex-shrink: 0;
 }
 
+/** 装备卡和它下方的特性卡分成两截，标记的百分比只相对装备卡 */
+.surv-skill-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.surv-skill-board {
+  position: relative;
+  line-height: 0;
+}
+
 .surv-skill-wrap {
   position: relative;
   padding: 0;

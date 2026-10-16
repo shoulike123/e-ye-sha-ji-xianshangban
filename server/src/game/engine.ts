@@ -151,6 +151,7 @@ import {
   planDefaults,
   planHasImpl,
   planMarkersAt,
+  killerRoomIds,
   roomsAdjacentToKillers,
   planSwitchProgress,
   planViewFor,
@@ -839,23 +840,30 @@ export function controlsPiece(state: GameState, socketId: string, piece: PlayerS
     return piece.controllerId === socketId;
 }
 
+/** 1对3 / 2对3 里，这名操控者是不是幸存者主玩家 */
+export function isSurvivorLead(state: GameState, socketId: string): boolean {
+    return (state.mode === 'multi' || state.mode === '2v3') && state.survivorLeadId === socketId;
+}
+
+/**
+ * 大家一起定的事：1对3 / 2对3 只由主玩家定，定了就生效。
+ * 单人 / 1对1 / 1对2 仍由幸存者操控者直接定。
+ */
+export function canDecideSharedSurvivorMatter(state: GameState, socketId: string): boolean {
+    if (state.mode === 'multi' || state.mode === '2v3')
+        return isSurvivorLead(state, socketId);
+    if (state.mode === 'solo')
+        return socketId === state.hostId;
+    return isSurvivorOperator(state, socketId);
+}
+
 export function otherConnectedSurvivorOperator(state: GameState, socketId: string) {
     return state.survivorOperators.find((o) => o.id !== socketId && o.connected) ?? null;
 }
 
-export function needsCoopConfirm(state: GameState, action: ClientAction, actor: PlayerState) {
-    if (state.mode !== 'vs2' || state.applyingConfirmedCoop)
-        return false;
-    if (actor.faction !== 'survivor')
-        return false;
-    return (action.type === 'move' ||
-        action.type === 'search' ||
-        action.type === 'repair' ||
-        action.type === 'clearFear' ||
-        action.type === 'removeBlockade' ||
-        action.type === 'useItem' ||
-        action.type === 'useSkill' ||
-        action.type === 'useSuitcase');
+export function needsCoopConfirm(_state: GameState, _action: ClientAction, _actor: PlayerState) {
+    /** 1对2 与 1对1 一样先做先得，幸存者操作不再等另一人确认。 */
+    return false;
 }
 
 export function coopActionSummary(state: GameState, action: ClientAction, actor: PlayerState) {
@@ -910,6 +918,7 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         /** 「分头行动」默认关（大厅里由房主勾选，1对3 / 2对3 才有效） */
         split: false,
         splitFirstId: null,
+        splitAdvancedThisRound: false,
         splitOrderBase: [],
         /** 【变体1】特性卡：默认关；难度默认普通。所有模式都能开，和变体2 互不影响 */
         variant1: false,
@@ -942,6 +951,8 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         watchSide: {},
         soloSurvivorCharacterIds: [],
         survivorOperators: [],
+        survivorLeadId: null,
+        pendingPlanMarkerPlace: null,
         crossbowHolderId: null,
         crossbowAssigned: false,
         /** 【解散房间】开局没有任何解散请求 */
@@ -1104,6 +1115,7 @@ export function createLobby(roomCode: string, hostId: string, hostName: string, 
         survivorDiscard: [],
         pendingSurvivorPick: false,
         pendingDiscoveryPick: false,
+        pendingDiscoveryProposal: null,
         discoveryActorId: null,
         pendingSensePair: null,
         pendingSenseColor: false,
@@ -1588,11 +1600,13 @@ export function resolveActorId(state: GameState, socketId: string, action: Clien
                 return pending;
         }
         if (action.type === 'encounterFlee' && state.encounter?.step === 'flee') {
-            /**
-             * ⚠ **（甲）撤离先选人**：只有**被选中那个人**的操控者能发撤离动作。
-             * 以前这里取的是 `fleeQueue[0]`，现在取 `targetId`（名单点出来的）。
-             */
-            const fid = state.encounter.targetId;
+            const enc = state.encounter;
+            if (state.mode === 'multi' || state.mode === '2v3') {
+                const mine = enc.fleeQueue.find((id) => operatedBy(id));
+                if (mine)
+                    return mine;
+            }
+            const fid = enc.targetId;
             if (fid && operatedBy(fid))
                 return fid;
         }
@@ -2066,7 +2080,7 @@ export function startRound(state: GameState) {
         checkSplitEscapes(state);
         if (state.phase === 'gameOver')
             return;
-        if (state.round > 0) advanceSplitFirst(state);
+        state.splitAdvancedThisRound = false;
         applySplitTurnOrder(state);
     }
     state.round += 1;
@@ -2178,6 +2192,7 @@ export function startRound(state: GameState) {
     state.lastDiscoveryCardId = null;
     state.pendingSurvivorPick = false;
     state.pendingDiscoveryPick = false;
+    state.pendingDiscoveryProposal = null;
     state.discoveryActorId = null;
     state.pendingSensePair = null;
     log(state, `—— 第 ${state.round} 回合 ——`);
@@ -2612,6 +2627,7 @@ export function finishStartCommon(state: GameState, content: GameContent) {
     state.survivorDiscard = [];
     state.pendingSurvivorPick = false;
     state.pendingDiscoveryPick = false;
+    state.pendingDiscoveryProposal = null;
     state.discoveryActorId = null;
     state.pendingSensePair = null;
     state.pendingRescueArm = false;
@@ -2851,19 +2867,34 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
                 planDrawSearchCard(state, actor, '古代箱子');
             break;
         }
-        /** 反擊！暗中伏擊：**完成计划时**立刻在幸存者地点放置计划标记 */
+        /**
+         * 【反击！暗中伏击】完成时：计划标记只有一个，
+         * 放在杀手与幸存者同在的地点。
+         * 雕像局若有多处这样的地点，由幸存者方选其中一处。
+         */
         case 'placePlanMarkerAtSurvivors': {
-            const rooms = [...new Set(aliveSurvivorsOf(state).map((s) => s.roomId!).filter(Boolean))];
-            if (!rooms.length) {
-                log(state, '【变体3】暗中伏擊：场上没有幸存者，放不了计划标记。', 'survivor');
+            if (state.planMarkerLocked || (state.planMarkers ?? []).length > 0) {
+                log(state, '【变体3】暗中伏击：计划标记已经放定，不再另放。', 'survivor');
                 break;
             }
-            for (const roomId of rooms) addPlanMarker(state, roomId);
-            log(
-                state,
-                `【变体3】暗中伏擊：在 ${rooms.map((r) => `「${roomName(state, r)}」`).join('、')} 放置了计划标记。`,
-                'survivor',
-            );
+            const kill = new Set(killerRoomIds(state));
+            const rooms = [...new Set(
+                aliveSurvivorsOf(state)
+                    .map((s) => s.roomId)
+                    .filter((id): id is string => Boolean(id && kill.has(id))),
+            )];
+            if (!rooms.length) {
+                log(state, '【变体3】暗中伏击：现在没有杀手和幸存者待在同一地点，放不了计划标记。', 'survivor');
+                break;
+            }
+            if (rooms.length === 1) {
+                if (addPlanMarker(state, rooms[0]!)) {
+                    log(state, `【变体3】暗中伏击：计划标记放在「${roomName(state, rooms[0]!)}」（杀手与幸存者同地点）。放定之后不再另放。`, 'survivor');
+                }
+                break;
+            }
+            state.pendingPlanMarkerPlace = { candidates: rooms };
+            log(state, '【变体3】暗中伏击：有多处杀手与幸存者同地点，请幸存者方选其中一处放置计划标记。', 'survivor');
             break;
         }
         /**
@@ -2974,10 +3005,14 @@ setPlanAbilityEffectHandler((state, plan, index, actorId, target) => {
                 break;
             }
             state.pendingPlanTarget = { planId: plan.id, index, chooserId: actor.id, candidates: cands };
+            const leadPick = state.mode === 'multi' || state.mode === '2v3';
             log(
                 state,
-                `【变体3】情報分享：由 ${who} 选择一名幸存者，从搜索牌库抽取一张牌` +
-                    `（${aliveSurvivorsOf(state).map((s) => s.name).join('、')}）。`,
+                leadPick
+                    ? `【变体3】情報分享：请主玩家选择一名幸存者，从搜索牌库抽取一张牌` +
+                        `（${aliveSurvivorsOf(state).map((s) => s.name).join('、')}）。选定后立即生效。`
+                    : `【变体3】情報分享：选择一名幸存者，从搜索牌库抽取一张牌` +
+                        `（${aliveSurvivorsOf(state).map((s) => s.name).join('、')}）。谁先点谁生效。`,
                 'survivor',
             );
             break;
@@ -3638,10 +3673,18 @@ export function startVs2Game(state: GameState, content: GameContent) {
     state.killerId = killerId;
     state.turnOrder = survivors.map((s) => s.id);
     finishStartCommon(state, content);
-    log(state, `1对2 开始：${killerHuman.name} 操控杀手「${killer.name}」，${survHumans.map((h) => h.name).join('、')} 共控 ${survivors.map((s) => s.name).join('、')}。一般行动和额外行动需另一人确认，交换物品不用。`);
+    log(state, `1对2 开始：${killerHuman.name} 操控杀手「${killer.name}」，${survHumans.map((h) => h.name).join('、')} 共控 ${survivors.map((s) => s.name).join('、')}。先做先得，不需要另一人确认。`);
 }
 
-/** 房主按下开始：按模式走上面三种开局 */
+/** 开局时主玩家必须落在一名幸存者操控者身上 */
+function ensureSurvivorLead(state: GameState) {
+    if (state.mode !== 'multi' && state.mode !== '2v3')
+        return;
+    const survs = Object.values(state.players).filter((p) => p.faction === 'survivor');
+    if (survs.some((p) => p.controllerId === state.survivorLeadId))
+        return;
+    state.survivorLeadId = survs[0]?.controllerId ?? null;
+}
 export function startMultiGame(state: GameState, content: GameContent) {
     const players = Object.values(state.players);
     const killers = players.filter((p) => p.faction === 'killer');
@@ -3665,8 +3708,10 @@ export function startMultiGame(state: GameState, content: GameContent) {
     state.killerId = killers[0].id;
     state.turnOrder = survs.map((s) => s.id);
     state.survivorOperators = [];
+    ensureSurvivorLead(state);
     finishStartCommon(state, content);
-    log(state, `1对3 开始：${killers[0].name} 操控杀手，${survs.map((s) => `${s.controllerName || s.name}→${s.name}`).join('，')}。每人只操控自己的角色。`);
+    const lead = Object.values(state.players).find((p) => p.controllerId === state.survivorLeadId && p.faction === 'survivor');
+    log(state, `1对3 开始：${killers[0].name} 操控杀手，${survs.map((s) => `${s.controllerName || s.name}→${s.name}`).join('，')}。每人只操控自己的角色。主玩家是 ${lead?.controllerName || lead?.name || '幸存者'}，由他决定大家一起定的事，不需要其他人确认。`);
 }
 
 /**
@@ -3723,6 +3768,7 @@ export function start2v3Game(state: GameState, content: GameContent) {
 
     state.turnOrder = survs.map((s) => s.id);
     state.survivorOperators = [];
+    ensureSurvivorLead(state);
     finishStartCommon(state, content);
 
     /**
@@ -3908,6 +3954,14 @@ export function enterNoiseReport(state: GameState) {
     if (state.phase === 'gameOver')
         return;
     /**
+     * 先手标记在幸存者大回合结束时后移一位。
+     * 发现收尾会重入这里，用标记避免移两次。
+     */
+    if (state.split && !state.splitAdvancedThisRound) {
+        advanceSplitFirst(state);
+        state.splitAdvancedThisRound = true;
+    }
+    /**
      * 【变体3】计划卡：**发现阶段结束后、大回合结束前**插一次位置检查
      * （用户口径）——这里正是发现阶段收尾的公共出口，而且此时 `phase`
      * 还停在幸存者回合里，符合"仍在幸存者大回合之内"。
@@ -3921,6 +3975,10 @@ export function enterNoiseReport(state: GameState) {
      * 选完由 `pickPlanTarget` 再回到本函数。
      */
     if (state.pendingPlanTarget) {
+        state.pendingPlanResume = true;
+        return;
+    }
+    if (state.pendingPlanMarkerPlace) {
         state.pendingPlanResume = true;
         return;
     }
@@ -3985,6 +4043,7 @@ export function enterDiscovery(state: GameState) {
     state.discoveryOptions = [];
     state.discoveryKeepQueue = null;
     state.discoveryActorId = null;
+    state.pendingDiscoveryProposal = null;
     const alive = state.turnOrder.filter((id) => {
         const pl = state.players[id];
         return Boolean(pl?.alive && pl.faction === 'survivor');
@@ -4009,7 +4068,7 @@ export function enterDiscovery(state: GameState) {
         return;
     }
     state.pendingDiscoveryPick = true;
-    log(state, '发现阶段：先选择一名幸存者翻发现牌（最多摸 2 留 1；只剩 1 张则直接拿）。');
+    log(state, '发现阶段：先选择谁来拿发现牌（最多摸 2 留 1；只剩 1 张则直接拿）。');
 }
 
 export function discoveryRepairDone(state: GameState) {
@@ -4169,12 +4228,108 @@ export function fastForwardKiller(state: GameState) {
         endKillerTurn(state);
 }
 
+function discoveryControllerName(state: GameState, controllerId: string): string {
+    const op = state.survivorOperators.find((o) => o.id === controllerId);
+    if (op)
+        return op.name;
+    const pl = Object.values(state.players).find((p) => p.controllerId === controllerId);
+    return pl?.controllerName || pl?.name || '幸存者';
+}
+
+/** 这次提议还要谁点头。1对2 是另一名操控者；1对3 / 2对3 是其他活着的幸存者。 */
+function discoveryConfirmers(state: GameState, proposedBy: string): string[] {
+    if (state.mode === 'vs2') {
+        return state.survivorOperators.filter((o) => o.id !== proposedBy).map((o) => o.id);
+    }
+    if (state.mode === 'multi' || state.mode === '2v3') {
+        const seen = new Set<string>();
+        const ids: string[] = [];
+        for (const pl of Object.values(state.players)) {
+            if (pl.faction !== 'survivor' || !pl.alive)
+                continue;
+            if (!pl.controllerId || pl.controllerId === proposedBy || seen.has(pl.controllerId))
+                continue;
+            seen.add(pl.controllerId);
+            ids.push(pl.controllerId);
+        }
+        return ids;
+    }
+    return [];
+}
+
+function discoveryNeedsGroupConfirm(state: GameState): boolean {
+    return state.mode === 'vs2' || state.mode === 'multi' || state.mode === '2v3';
+}
+
+function proposeDiscoveryActor(state: GameState, socketId: string, target: PlayerState) {
+    if (state.pendingDiscoveryProposal)
+        throw new Error('正在等其他人确认这次选择');
+    state.pendingDiscoveryProposal = {
+        targetId: target.id,
+        proposedBy: socketId,
+        agreed: [socketId],
+    };
+    const who = discoveryControllerName(state, socketId);
+    if (state.mode === 'vs2') {
+        log(state, `${who} 选择「${target.name}」拿发现牌，等待另一人确认。`, 'survivor');
+        return;
+    }
+    log(state, `${who} 提出由自己拿发现牌，等待其他人同意。`, 'survivor');
+}
+
+function respondDiscoveryProposal(state: GameState, socketId: string, accept: boolean) {
+    const prop = state.pendingDiscoveryProposal;
+    if (!prop || !state.pendingDiscoveryPick)
+        throw new Error('现在没有待确认的发现牌人选');
+    const confirmers = discoveryConfirmers(state, prop.proposedBy);
+    const isProposer = socketId === prop.proposedBy;
+    const who = discoveryControllerName(state, socketId);
+    if (!accept) {
+        if (!isProposer && !confirmers.includes(socketId))
+            throw new Error('无权处理这次选择');
+        log(state, `${who}${isProposer ? '取消了' : '拒绝了'}这次发现牌人选。`, 'survivor');
+        state.pendingDiscoveryProposal = null;
+        return;
+    }
+    if (isProposer)
+        throw new Error('只能由其他人确认');
+    if (!confirmers.includes(socketId))
+        throw new Error('无权确认这次选择');
+    if (!prop.agreed.includes(socketId))
+        prop.agreed.push(socketId);
+    if (!confirmers.every((id) => prop.agreed.includes(id)))
+        return;
+    const targetId = prop.targetId;
+    state.pendingDiscoveryProposal = null;
+    beginDiscoveryDraw(state, targetId);
+}
+
+function discoveryProposalView(state: GameState, controllerId: string, hide: boolean) {
+    const prop = state.pendingDiscoveryProposal;
+    if (hide || !prop)
+        return null;
+    const confirmers = discoveryConfirmers(state, prop.proposedBy);
+    const othersAgreed = prop.agreed.filter((id) => id !== prop.proposedBy);
+    return {
+        targetId: prop.targetId,
+        targetName: state.players[prop.targetId]?.name ?? '幸存者',
+        proposedByName: discoveryControllerName(state, prop.proposedBy),
+        youAreProposer: controllerId === prop.proposedBy,
+        youMustConfirm: confirmers.includes(controllerId) && !prop.agreed.includes(controllerId),
+        agreedNames: othersAgreed.map((id) => discoveryControllerName(state, id)),
+        waitingNames: confirmers
+            .filter((id) => !prop.agreed.includes(id))
+            .map((id) => discoveryControllerName(state, id)),
+    };
+}
+
 /** 指定的那个人从发现牌堆翻牌。不把弃牌洗回来：牌堆空就是空。 */
 export function beginDiscoveryDraw(state: GameState, actorId: string) {
     const actor = state.players[actorId];
     if (!actor?.alive || actor.faction !== 'survivor')
         throw new Error('无法选择该幸存者');
     state.pendingDiscoveryPick = false;
+    state.pendingDiscoveryProposal = null;
     state.discoveryActorId = actorId;
     const left = state.discoveryDeck.length;
     if (left === 0) {
@@ -5027,7 +5182,9 @@ export function finishEncounter(state: GameState) {
     enc.targetId = null;
     log(
         state,
-        `遭遇结束。${queue.length} 名幸存者需要依次撤离 —— 请点名单选择先让谁撤离（每人可移动 1 格或留在原地）。`,
+        state.mode === 'multi' || state.mode === '2v3'
+            ? `遭遇结束。${queue.length} 名幸存者各自决定撤离（每人可移动 1 格或留在原地）。`
+            : `遭遇结束。${queue.length} 名幸存者需要依次撤离 —— 请点名单选择先让谁撤离（每人可移动 1 格或留在原地）。`,
         'survivor',
     );
 }
@@ -5112,7 +5269,9 @@ export function advanceFleeSelection(state: GameState, doneId?: string | null): 
         endEncounterAndResumeKiller(state);
         return;
     }
-    log(state, `还有 ${left.length} 名幸存者要撤离（${left.map((id) => state.players[id]?.name ?? id).join('、')}），请继续选人。`, 'survivor');
+    log(state, state.mode === 'multi' || state.mode === '2v3'
+        ? `还有 ${left.length} 名幸存者可以自己撤离（${left.map((id) => state.players[id]?.name ?? id).join('、')}）。`
+        : `还有 ${left.length} 名幸存者要撤离（${left.map((id) => state.players[id]?.name ?? id).join('、')}），请继续选人。`, 'survivor');
 }
 
 /** 打中一个人之后：同地还有人就再选，没有人了就结束遭遇 */
@@ -6946,6 +7105,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
      * 该弃的没弃完，不许跳过。
      */
     const discoveryFloorAction = action.type === 'chooseDiscovery'
+        || action.type === 'respondDiscoveryPick'
         || (action.type === 'pickSurvivorTurn' && state.phase === 'discovery' && state.pendingDiscoveryPick);
     if (state.pendingItemDiscard && !discoveryFloorAction &&
         action.type !== 'discardItem' && action.type !== 'confirmAmulet') {
@@ -7104,14 +7264,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             state.variant3 = Boolean(action.on);
             log(state, state.variant3
                 ? '房主开启了【变体3】计划卡——开局给幸存者方随机发 2 张，' +
-                    '他们在发现阶段之前可以确认 / 改变计划（要所有幸存者玩家同意）。**杀手看不到这些卡**。'
+                    '他们在发现阶段之前可以确认 / 改变计划。1对1、1对2谁先点谁生效；' +
+                    '1对3、2对3由主玩家决定，不需要其他人确认。**杀手看不到这些卡**。'
                 : '房主关闭了【变体3】计划卡。', 'all', true);
             break;
         }
         /**
          * 【变体3】**确认 / 改变计划**（幸存者方）。
          *
-         * 第一次选 = 确认计划；之后再选 = 改变计划。**每一次都要所有幸存者玩家各自同意**。
+         * 第一次选 = 确认计划；之后再选 = 改变计划。
+         * 1对1 / 1对2 谁先点谁生效；1对3 / 2对3 只由主玩家定。
          */
         case 'pickPlan': {
             /**
@@ -7125,7 +7287,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('只有幸存者方可以选计划');
             if (!controlsPiece(state, socketId, p))
                 throw new Error('无权操作');
-            beginPlanSwitch(state, p.controllerId, action.planId);
+            beginPlanSwitch(state, socketId, action.planId);
             break;
         }
         /** 【变体3】计划确认的投票（每个幸存者玩家各点一次） */
@@ -7224,14 +7386,22 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         /**
          * 【变体3】「情報分享」：完成计划后**选一名幸存者**从搜索牌库抽 1 张。
          *
-         * 谁选由 `pendingPlanTarget.chooserId` 定（完成计划时在场的那个幸存者）。
+         * 1对1 / 1对2 共控的人谁先点谁生效。1对3 / 2对3 只由主玩家选。
          */
         case 'pickPlanTarget': {
             const pt = state.pendingPlanTarget;
             if (!pt)
                 throw new Error('当前没有待选的目标');
-            if (pt.chooserId !== p.id && !controlsPiece(state, socketId, p))
-                throw new Error('现在不是你选目标');
+            const individual = state.mode === 'multi' || state.mode === '2v3';
+            if (individual) {
+                if (!isSurvivorLead(state, socketId))
+                    throw new Error('只有主玩家可以选择谁抽牌');
+            }
+            else {
+                const chooser = state.players[pt.chooserId];
+                if (!chooser || !controlsPiece(state, socketId, chooser))
+                    throw new Error('现在不是你选目标');
+            }
             if (!pt.candidates.includes(action.playerId))
                 throw new Error('只能选场上活着的幸存者');
             const plan = state.planById?.[pt.planId];
@@ -8063,6 +8233,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 throw new Error('2对3 最多 5 人（2 名杀手 + 3 名幸存者），请先让多余的人退出');
             }
             state.mode = mode;
+            state.survivorLeadId = null;
             state.soloKillerCharacterId = null;
             state.soloSurvivorCharacterIds = [];
             state.crossbowHolderId = null;
@@ -8085,7 +8256,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 : mode === 'duo'
                     ? '已切换为【1 对 1】：一人杀手，一人操控 3 名幸存者。'
                     : mode === 'vs2'
-                        ? '已切换为【1对2】：一人杀手，两人共控 3 名幸存者。一般行动和额外行动需另一人确认。'
+                        ? '已切换为【1对2】：一人杀手，两人共控 3 名幸存者。先做先得，不需要另一人确认。'
                         : mode === '2v3'
                             ? '已切换为【2对3】：2 名杀手各有一套牌库、手牌与行动区，3 名幸存者。'
                             : '已切换为【1对3】模式。');
@@ -8159,8 +8330,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             const target = state.players[action.holderId];
             if (!target || target.faction !== 'survivor' || !target.alive)
                 throw new Error('请指定一名存活幸存者');
-            if (!controlsPiece(state, socketId, target))
-                throw new Error('无权操作该幸存者');
+            if (!canDecideSharedSurvivorMatter(state, socketId))
+                throw new Error('只有主玩家可以指定十字弩持有者');
             state.crossbowHolderId = target.id;
             state.crossbowAssigned = true;
             target.items.crossbow = 1;
@@ -8224,6 +8395,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             p.faction = action.faction;
             p.characterId = null;
             p.ready = false;
+            if (state.survivorLeadId === socketId && action.faction !== 'survivor')
+                state.survivorLeadId = null;
             state.phase = 'characterSelect';
             break;
         }
@@ -8285,6 +8458,44 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
             if (!p.faction || !p.characterId)
                 throw new Error('请先选择阵营和角色');
             p.ready = action.ready;
+            if (action.ready && p.faction === 'survivor' && !state.survivorLeadId)
+                state.survivorLeadId = socketId;
+            break;
+        }
+        case 'transferSurvivorLead': {
+            if (state.mode !== 'multi' && state.mode !== '2v3')
+                throw new Error('只有 1对3 / 2对3 有主玩家');
+            if (!isSurvivorLead(state, socketId))
+                throw new Error('只有主玩家可以转让');
+            const next = state.players[action.playerId];
+            if (!next?.alive || next.faction !== 'survivor' || !next.controllerId)
+                throw new Error('请选另一名存活的幸存者');
+            if (next.controllerId === socketId)
+                throw new Error('你已经是主玩家');
+            state.survivorLeadId = next.controllerId;
+            log(state, `${p.name} 把主玩家交给了 ${next.controllerName || next.name}。之后由他决定大家一起定的事，不需要其他人确认。`, 'all', true);
+            break;
+        }
+        case 'confirmPlanMarkerRooms': {
+            const pend = state.pendingPlanMarkerPlace;
+            if (!pend)
+                throw new Error('现在不用选计划标记地点');
+            if (!canDecideSharedSurvivorMatter(state, socketId))
+                throw new Error('只有主玩家可以选择计划标记地点');
+            const rooms = [...new Set(action.roomIds)];
+            if (rooms.length !== 1)
+                throw new Error('计划标记只有一个，请选一个地点');
+            const roomId = rooms[0]!;
+            if (!pend.candidates.includes(roomId))
+                throw new Error('只能放在杀手与幸存者同在的地点');
+            if (!addPlanMarker(state, roomId))
+                throw new Error('计划标记已经放定，不能再放');
+            state.pendingPlanMarkerPlace = null;
+            log(state, `【变体3】暗中伏击：计划标记放在「${roomName(state, roomId)}」。放定之后不再另放。`, 'survivor');
+            if (state.pendingPlanResume) {
+                state.pendingPlanResume = false;
+                enterNoiseReport(state);
+            }
             break;
         }
         /**
@@ -8333,6 +8544,8 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 if (!target || target.faction !== 'survivor' || !target.alive) {
                     throw new Error('无法选择该幸存者');
                 }
+                if ((state.mode === 'multi' || state.mode === '2v3') && !isSurvivorLead(state, socketId))
+                    throw new Error('只有主玩家可以选择谁拿发现牌');
                 beginDiscoveryDraw(state, target.id);
                 break;
             }
@@ -8364,6 +8577,16 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
                 }
             }
             startPickedSurvivorTurn(state, target.id);
+            break;
+        }
+        case 'respondDiscoveryPick': {
+            if (state.phase !== 'discovery')
+                throw new Error('当前不是发现阶段');
+            if (state.mode !== 'solo' && p.faction !== 'survivor' &&
+                !(state.mode === 'vs2' && isSurvivorOperator(state, socketId))) {
+                throw new Error('只有幸存者可以确认发现牌人选');
+            }
+            respondDiscoveryProposal(state, socketId, action.accept !== false);
             break;
         }
         case 'resetPathDraft': {
@@ -11409,7 +11632,7 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
         case 'chooseDiscovery': {
             if (state.pendingDiscoveryPick)
                 throw new Error('请先选择翻牌的幸存者');
-            if (state.mode === 'multi') {
+            if (state.mode === 'multi' || state.mode === '2v3') {
                 if (p.faction !== 'survivor')
                     throw new Error('只有幸存者可选择发现牌');
                 if (state.discoveryActorId && playerId !== state.discoveryActorId) {
@@ -11771,8 +11994,13 @@ export function handleAction(state: GameState, socketId: string, action: ClientA
              * 现在"轮到谁"看的是 `targetId`（由名单点出来），
              * 不再看 `fleeQueue[0]` —— 队列只表示"还有谁没撤离"。
              */
-            if (enc.targetId !== playerId)
+            if (state.mode === 'multi' || state.mode === '2v3') {
+                if (!enc.fleeQueue.includes(playerId))
+                    throw new Error('你不需要撤离');
+            }
+            else if (enc.targetId !== playerId) {
                 throw new Error('还没轮到你逃离（请先在名单里选中自己）');
+            }
             const hasInstinct =
                 state.variant1 && hasTrait(state, playerId, 'trait_s09');
             const fleePath = action.path;
@@ -13280,14 +13508,12 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             if (range > 0)
                 legalMoves = legalMoveRooms(state, activeId, range);
         }
-        else if (state.phase === 'encounter' &&
-            state.encounter?.step === 'flee' &&
-            activeId === state.encounter.targetId) {
-            /**
-             * 撤离高亮只给相邻 1 格。生存本能的第 2 步由客户端在路径末端再亮，
-             * 不能一下点到 2 格外。
-             */
-            legalMoves = legalMoveRooms(state, activeId, 1, 1);
+        else if (state.phase === 'encounter' && state.encounter?.step === 'flee') {
+            const queue = state.encounter.fleeQueue;
+            const self = (state.mode === 'multi' || state.mode === '2v3') && queue.includes(you.id);
+            const mover = self ? you.id : (activeId === state.encounter.targetId ? activeId : null);
+            if (mover)
+                legalMoves = legalMoveRooms(state, mover, 1, 1);
         }
     }
     /**
@@ -13515,6 +13741,22 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
          * 客户端在物品栏上方标"先手"，并让先手选择面板列出候选。
          */
         splitFirstId: state.split ? state.splitFirstId : null,
+        youAreSurvivorLead: isSurvivorLead(state, controllerId),
+        survivorLeadName: (() => {
+            const id = state.survivorLeadId;
+            if (!id) return null;
+            const pl = Object.values(state.players).find((p) => p.controllerId === id && p.faction === 'survivor');
+            return pl?.controllerName || pl?.name || null;
+        })(),
+        pendingPlanMarkerPlace: viewerFaction === 'killer' || !state.pendingPlanMarkerPlace
+            ? null
+            : {
+                candidates: state.pendingPlanMarkerPlace.candidates.map((id) => ({
+                    id,
+                    name: roomName(state, id),
+                })),
+                youDecide: canDecideSharedSurvivorMatter(state, controllerId),
+            },
         splitOrderBase: state.split ? [...state.splitOrderBase] : [],
         soloKillerCharacterId: state.soloKillerCharacterId,
         soloSurvivorCharacterIds: [...state.soloSurvivorCharacterIds],
@@ -13544,9 +13786,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
         canPickCrossbowHolder: isQueenKiller(state)
             && !state.crossbowAssigned
             && (state.phase === 'crossbowSetup' || state.phase === 'survivorMain')
-            && Object.values(state.players).some(
-                (pl) => pl.faction === 'survivor' && pl.alive && controlsPiece(state, controllerId, pl),
-            ),
+            && canDecideSharedSurvivorMatter(state, controllerId),
         /**
          * 【解散房间】：观众不参与，其他人任何阶段都能点。
          * 已经在等确认时，客户端改用 `disband` 里的名单来画确认面板。
@@ -14140,6 +14380,7 @@ export function buildSnapshot(state: GameState, controllerId: string): PublicSna
             : namedCardsNewestFirst(state, state.survivorDiscard)),
         pendingSurvivorPick: killerFogPhase ? false : state.pendingSurvivorPick,
         pendingDiscoveryPick: killerFogPhase ? false : state.pendingDiscoveryPick,
+        pendingDiscoveryProposal: discoveryProposalView(state, controllerId, killerFogPhase),
         discoveryActorId: killerFogPhase ? null : state.discoveryActorId,
         pileCounts: {
             search: state.searchDeck.length,

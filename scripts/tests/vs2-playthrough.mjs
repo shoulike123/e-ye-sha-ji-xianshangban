@@ -105,6 +105,7 @@ function candidates(st, snap, piece) {
 
   // ③ 发现阶段
   if (st.phase === 'discovery') {
+    if (st.pendingDiscoveryProposal) push({ type: 'respondDiscoveryPick', accept: true });
     if (st.pendingDiscoveryPick) for (const p of survivors) push({ type: 'pickSurvivorTurn', playerId: p.id });
     for (const c of st.discoveryOptions ?? []) push({ type: 'chooseDiscovery', cardId: c?.id ?? c });
     push({ type: 'acknowledgeDiscovery' });

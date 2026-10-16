@@ -1,5 +1,5 @@
 {
-  "_comment": "【变体3】计划卡（16 张）。判定只看两类条件：四类地点图标（gear=修理地点 / hammer=锤子地点 / book=书本地点 / spiral=螺旋地点），或整句位置条件（place）。能力里 oncePerGame 只认卡面文字写明的「每場遊戲僅限一次」；hasBox = 卡面能力文字右侧有没有那个标记框（有框的用完标记就消失）。",
+  "_comment": "【变体3】计划卡（16 张）。",
   "plans": [
     {
       "id": "plan_careful_repair",
@@ -30,7 +30,7 @@
       ],
       "abilities": [
         {
-          "text": "（在主要出口）特殊行動：棄掉一個工具箱來獲得線索牌庫底部的鑰匙。",
+          "text": "（在主要出口）特殊行動：弃掉一個工具箱來獲得線索牌庫底部的鑰匙。",
           "impl": "spendToolboxForKey",
           "kind": "special",
           "place": "mainExit",

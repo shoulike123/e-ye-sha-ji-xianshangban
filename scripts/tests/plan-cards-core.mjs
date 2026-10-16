@@ -5,7 +5,7 @@
  *  - 开局给幸存者方**随机 2 张**；**杀手看不到**。
  *  - 判定时机：**发现阶段结束后、大回合结束前**，**只查人物位置**。
  *  - 每个大回合**最多推进一个进度**。
- *  - 本回合**换过计划** → 进发现阶段检查时原计划进度清零。
+ *  - 本回合**改变过计划** → 发现阶段检查时所有进度清零，再检查当前计划的第一条。
  *  - 完成整张计划 → **另一张隐藏**、能力生效。
  *
  * 跑法：node scripts/tests/plan-cards-core.mjs
@@ -126,6 +126,72 @@ console.log('=== ② 确认计划 / 改变计划 ===');
   st.phase = 'survivorMain';
 }
 
+/* ═══════════ ②b 1对2 先做先得；1对3 主玩家一个人定 ═══════════ */
+console.log('=== ②b 1对2 都能改；1对3 只由主玩家定 ===');
+{
+  const boot = (mode, ids) => {
+    const st = createLobby('P', ids[0], 'P0', content, 'mansion');
+    st.mode = mode;
+    st.variant3 = true;
+    const map = {};
+    for (const pid of ids) {
+      map[pid] = pid === ids[0] ? st.players[ids[0]] : createPlayer(pid, pid, pid);
+      map[pid].ready = true;
+    }
+    st.players = map;
+    st.hostId = ids[0];
+    st.players[ids[0]].faction = 'killer';
+    st.players[ids[0]].characterId = 'killer7';
+    return st;
+  };
+  const vs2 = boot('vs2', ['k', 's1', 's2']);
+  vs2.players.s1.faction = 'survivor';
+  vs2.players.s2.faction = 'survivor';
+  vs2.soloSurvivorCharacterIds = survCharIds.slice(0, 3);
+  startGame(vs2, content, 'k');
+  vs2.pendingEvolutionAck = null;
+  vs2.phase = 'survivorMain';
+  const [a, b] = vs2.planHand;
+  const eA = tryIt(vs2, { type: 'pickPlan', planId: a }, 's1');
+  ok(!eA, '1对2 其中一人可以确认', String(eA ?? ''));
+  ok(vs2.planCurrentId === a && !vs2.pendingPlanSwitch, '点了就生效，不用另一人确认', String(vs2.planCurrentId));
+  const eB = tryIt(vs2, { type: 'pickPlan', planId: b }, 's2');
+  ok(!eB, '另一人也可以改', String(eB ?? ''));
+  ok(vs2.planCurrentId === b && !vs2.pendingPlanSwitch, '改了也立刻生效');
+
+  const multi = boot('multi', ['k', 's1', 's2', 's3']);
+  ['s1', 's2', 's3'].forEach((id, i) => {
+    multi.players[id].faction = 'survivor';
+    multi.players[id].characterId = survCharIds[i];
+    multi.players[id].ready = false;
+  });
+  handleAction(multi, 's2', { type: 'setReady', ready: true }, content);
+  handleAction(multi, 's1', { type: 'setReady', ready: true }, content);
+  handleAction(multi, 's3', { type: 'setReady', ready: true }, content);
+  multi.players.k.ready = true;
+  startGame(multi, content, 'k');
+  multi.pendingEvolutionAck = null;
+  multi.phase = 'survivorMain';
+  const [c] = multi.planHand;
+  const denied = tryIt(multi, { type: 'pickPlan', planId: c }, 's1');
+  ok(Boolean(denied) && denied.includes('只有主玩家'), '其他人不能确认计划', String(denied));
+  ok(!tryIt(multi, { type: 'pickPlan', planId: c }, 's2'), '主玩家确认后立即生效');
+  ok(multi.planCurrentId === c && !multi.pendingPlanSwitch, '没有再等其他人同意', String(multi.planCurrentId));
+  ok(buildSnapshot(multi, 's2').plans?.canPick === true, '主玩家看得到确认按钮');
+  ok(buildSnapshot(multi, 's1').plans?.canPick === false, '其他人看不到确认按钮');
+
+  const plan = content.plans.find((p) => p.id === 'plan_intel_share');
+  const index = plan.abilities.findIndex((ab) => ab.impl === 'onCompleteDrawOneForOne');
+  multi.planById[plan.id] = plan;
+  const ids = Object.values(multi.players).filter((p) => p.faction === 'survivor' && p.alive).map((p) => p.id);
+  multi.pendingPlanTarget = { planId: plan.id, index, chooserId: ids[0], candidates: ids };
+  const deniedDraw = tryIt(multi, { type: 'pickPlanTarget', playerId: ids[0] }, 's1');
+  ok(Boolean(deniedDraw) && deniedDraw.includes('只有主玩家'), '其他人不能选情報分享抽牌的人', String(deniedDraw));
+  ok(!tryIt(multi, { type: 'pickPlanTarget', playerId: ids[1] }, 's2'), '主玩家选了就抽');
+  ok(!multi.pendingPlanTarget, '选完不再等');
+  ok(multi.logs.some((l) => l.text.includes('情報分享') && l.vis === 'survivor'), '抽牌战报只给幸存者');
+}
+
 /* ═══════════ ③ 位置判定 → 推进（每个大回合最多一个） ═══════════ */
 console.log('=== ③ 只按人物位置推进，且每回合最多一个 ===');
 {
@@ -179,16 +245,24 @@ console.log('=== ④ 本回合换过计划：检查时清零、从第一条重�
   checkPlanProgress(st);
   ok(st.planStep === 1, '前提：已有 1 条进度', String(st.planStep));
 
-  /** 换到另一张（燃烧瓶：锤子 → 锤子） */
+  /** 换到另一张（燃烧瓶：锤子 → 锤子）。即使本回合已经推进过，也先清零再查第一条 */
   st.planChangedThisRound = true;
   st.planCurrentId = 'plan_molotov';
-  st.planAdvancedThisRound = false;
+  st.planAdvancedThisRound = true;
   const hammerRoom = putSurvivorsAtTag(st, 'special-hammer');
   checkPlanProgress(st);
   console.log(`   换计划后把三人放到锤子地点「${hammerRoom}」`);
   ok(st.planChangedThisRound === false, '清零只做一次');
   ok(st.planStep === 1,
-    '**从新计划的第一条重新看**（锤子地点达成 → 推进到 1）', `planStep=${st.planStep}`);
+    '**清零后检查当前计划的第一条**（锤子地点达成 → 推进到 1）', `planStep=${st.planStep}`);
+
+  /** 再换回去，第一条没达成 → 进度停在 0 */
+  st.planChangedThisRound = true;
+  st.planCurrentId = 'plan_careful_repair';
+  st.planAdvancedThisRound = true;
+  putSurvivorsAtTag(st, 'special-hammer');
+  checkPlanProgress(st);
+  ok(st.planStep === 0, '第一条没达成时，清零后的进度保持为 0', String(st.planStep));
 }
 
 /* ═══════════ ⑤ 接线：`enterNoiseReport` 里真的会检查 ═══════════ */
